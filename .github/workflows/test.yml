@@ -52,6 +52,7 @@ jobs:
             -project teemoon.xcodeproj \
             -scheme teemoon \
             -destination "$DEST" \
+            -skipMacroValidation \
             -only-testing:teemoonTests \
             -skip-testing:teemoonTests/E2EELiveSmokeTests \
             -skip-testing:teemoonTests/ProductLiveEndpointTests \
@@ -100,6 +101,7 @@ jobs:
             -project teemoon.xcodeproj \
             -scheme teemoon \
             -destination "$DEST" \
+            -skipMacroValidation \
             -only-testing:teemoonUITests/ProductE2ETests \
             -only-testing:teemoonUITests/LocalProviderUITests \
             CODE_SIGNING_ALLOWED=NO
