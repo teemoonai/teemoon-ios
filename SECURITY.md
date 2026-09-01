@@ -22,7 +22,8 @@ promises we can actually keep, not the fastest ones we could claim.
 ## scope
 
 The interesting attack surface here is the attestation and verification chain, not the
-UI chrome:
+UI chrome (the full account of what the app verifies, and what it does not prove, is in
+[`ATTESTATION.md`](ATTESTATION.md)):
 
 - TDX quote parsing and structural validation (`TDXQuoteVerifier`)
 - DCAP cryptographic verification (`DCAPVerifier`, `dcap-qvl`)
