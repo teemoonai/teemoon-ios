@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "2640"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES"
+      buildArchitectures = "Automatic">
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "860E9CCD2CB055B000C5BB52"
+               BuildableName = "teemoon.app"
+               BlueprintName = "teemoon"
+               ReferencedContainer = "container:teemoon.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      shouldAutocreateTestPlan = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4B1FFD172F7C5B7400681DD1"
+               BuildableName = "teemoonTests.xctest"
+               BlueprintName = "teemoonTests"
+               ReferencedContainer = "container:teemoon.xcodeproj">
+            </BuildableReference>
+            <SkippedTests>
+               <Test
+                  Identifier = "GLM5BraveSearchTests">
+               </Test>
+               <Test
+                  Identifier = "GLM5BraveSearchTests/glm5_callsBraveSearchAndCites()">
+               </Test>
+               <Test
+                  Identifier = "LLMEvaluatorTests">
+               </Test>
+               <Test
+                  Identifier = "LLMEvaluatorTests/alreadyRunning_returnsEmpty()">
+               </Test>
+               <Test
+                  Identifier = "NearAIBenchmarkTests">
+               </Test>
+               <Test
+                  Identifier = "NearAIBenchmarkTests/directVsGateway()">
+               </Test>
+               <Test
+                  Identifier = "ProcessThinkingContentTests">
+               </Test>
+               <Test
+                  Identifier = "ProcessThinkingContentTests/completeBlock_returnsThinkingAndAnswer()">
+               </Test>
+               <Test
+                  Identifier = "ProcessThinkingContentTests/emptyAfterThink_returnsNilAnswer()">
+               </Test>
+               <Test
+                  Identifier = "ProcessThinkingContentTests/multilineThinkBlock_parsedCorrectly()">
+               </Test>
+               <Test
+                  Identifier = "ProcessThinkingContentTests/noThinkTag_returnsContentAsAnswer()">
+               </Test>
+               <Test
+                  Identifier = "ProcessThinkingContentTests/openBlock_noCloseTag_returnsThinkingOnly()">
+               </Test>
+               <Test
+                  Identifier = "ProcessThinkingContentTests/whitespaceIsTrimmed()">
+               </Test>
+            </SkippedTests>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4B019B642FA7A6AE00579381"
+               BuildableName = "teemoonUITests.xctest"
+               BlueprintName = "teemoonUITests"
+               ReferencedContainer = "container:teemoon.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = ""
+      selectedLauncherIdentifier = "Xcode.IDEFoundation.Launcher.PosixSpawn"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES"
+      queueDebuggingEnableBacktraceRecording = "Yes">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "860E9CCD2CB055B000C5BB52"
+            BuildableName = "teemoon.app"
+            BlueprintName = "teemoon"
+            ReferencedContainer = "container:teemoon.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "OS_ACTIVITY_MODE"
+            value = "disable"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "BENCHMARK_OUTPUT_DIR"
+            value = "$(SRCROOT)/benchmark-results"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "860E9CCD2CB055B000C5BB52"
+            BuildableName = "teemoon.app"
+            BlueprintName = "teemoon"
+            ReferencedContainer = "container:teemoon.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>

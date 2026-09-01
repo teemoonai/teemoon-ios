@@ -1,0 +1,96 @@
+# Build + teemoonTests. A public README is a claim.
+#
+# Verified locally on iPhone 17 Pro / iOS 26.5. macos-26 is the hosted image
+# that ships Xcode 26 and an iOS 26 simulator; macos-15 often does not.
+# The job still picks the newest available iPhone destination so it does not
+# pin a name the runner does not have.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  teemoon-tests:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode and simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | head -80
+
+      - name: Build and run teemoonTests
+        run: |
+          DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
+            | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
+                split($2, a, ","); print a[1]; exit
+              }')
+          if [ -z "$DEST" ]; then
+            DEST="iPhone 16"
+          fi
+          echo "destination: $DEST"
+          xcodebuild test \
+            -project teemoon.xcodeproj \
+            -scheme teemoon \
+            -destination "platform=iOS Simulator,name=$DEST" \
+            -only-testing:teemoonTests \
+            -skip-testing:teemoonTests/E2EELiveSmokeTests \
+            -skip-testing:teemoonTests/ProductLiveEndpointTests \
+            -skip-testing:teemoonTests/ProviderSmokeTests \
+            -skip-testing:teemoonTests/GroundingLiveTests \
+            -skip-testing:teemoonTests/GLM5BraveSearchTests \
+            -skip-testing:teemoonTests/NearAIWhisperProbeTests \
+            -skip-testing:teemoonTests/LiteRTLiveTests \
+            CODE_SIGNING_ALLOWED=NO
+
+  # The self-verify script, RUN rather than read. Its Swift tests assert on the
+  # generated TEXT and nothing executed it, so when near.ai's gateway began
+  # requiring auth the script failed every run — and read the absent evidence as
+  # CHANGED evidence ("treat with suspicion") — while 58 string assertions
+  # stayed green. Offline, no keys, ~1s.
+  self-verify-script:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Behaviour of the generated self-verify script
+        working-directory: tools
+        run: |
+          python3 -m unittest test_self_verify_script -v
+          python3 -m unittest test_analyze_stream_trace -v
+
+  # Product E2E only — not the whole teemoonUITests target (cameras, paid
+  # sends, hang probes). Offline: embedded fake SSE, no API keys.
+  teemoon-ui-e2e:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode and simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | head -80
+
+      - name: Product E2E
+        run: |
+          DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
+            | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
+                split($2, a, ","); print a[1]; exit
+              }')
+          if [ -z "$DEST" ]; then
+            DEST="iPhone 16"
+          fi
+          echo "destination: $DEST"
+          xcodebuild test \
+            -project teemoon.xcodeproj \
+            -scheme teemoon \
+            -destination "platform=iOS Simulator,name=$DEST" \
+            -only-testing:teemoonUITests/ProductE2ETests \
+            -only-testing:teemoonUITests/LocalProviderUITests \
+            CODE_SIGNING_ALLOWED=NO

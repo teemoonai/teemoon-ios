@@ -1,0 +1,306 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "deepseek-ai/DeepSeek-V4-Flash",
+      "object": "model",
+      "created": 1780561470,
+      "owned_by": "nearai",
+      "name": "DeepSeek V4 Flash",
+      "hugging_face_id": "deepseek-ai/DeepSeek-V4-Flash",
+      "quantization": "fp8",
+      "pricing": {
+        "input": 0.17,
+        "output": 0.35000000000000003,
+        "prompt": "0.00000017",
+        "completion": "0.00000035",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.000000035"
+      },
+      "context_length": 1048576,
+      "max_output_length": 8192,
+      "architecture": {
+        "inputModalities": [
+          "text"
+        ],
+        "outputModalities": [
+          "text"
+        ]
+      },
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "repetition_penalty",
+        "max_tokens",
+        "stop",
+        "seed",
+        "logit_bias"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode",
+        "structured_outputs"
+      ],
+      "is_ready": true,
+      "description": "DeepSeek V4 Flash \u2014 large mixture-of-experts language model from DeepSeek, FP8-quantized. Served on H200 with TP=4 and EAGLE speculative decoding in a TDX-confidential inference CVM.",
+      "top_provider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 8192,
+        "is_moderated": false
+      },
+      "datacenters": [
+        {
+          "country_code": "US"
+        }
+      ],
+      "openrouter": {
+        "slug": "deepseek/deepseek-v4-flash"
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v3.2",
+      "object": "model",
+      "created": 1781515743,
+      "owned_by": "attested 3p",
+      "name": "deepseek-v3.2",
+      "pricing": {
+        "input": 1.1,
+        "output": 1.1,
+        "prompt": "0.0000011",
+        "completion": "0.0000011",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.00000055"
+      },
+      "context_length": 128000,
+      "architecture": {
+        "inputModalities": [
+          "text"
+        ],
+        "outputModalities": [
+          "text"
+        ]
+      },
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "seed",
+        "max_tokens"
+      ],
+      "supported_features": [
+        "tools",
+        "json_mode"
+      ],
+      "is_ready": false,
+      "description": "Attested model served via Chutes TEE (verified end-to-end by NEAR AI).",
+      "top_provider": {
+        "context_length": 128000,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "google/gemini-3.5-flash",
+      "object": "model",
+      "created": 1779214705,
+      "owned_by": "google",
+      "name": "Gemini 3.5 Flash",
+      "pricing": {
+        "input": 1.5,
+        "output": 9.0,
+        "prompt": "0.0000015",
+        "completion": "0.000009",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.00000015"
+      },
+      "context_length": 1000000,
+      "max_output_length": 8192,
+      "architecture": {
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "outputModalities": [
+          "text"
+        ]
+      },
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop"
+      ],
+      "supported_features": [
+        "tools",
+        "structured_outputs",
+        "json_mode"
+      ],
+      "is_ready": false,
+      "description": "Google's high-efficiency multimodal model with 1M token context. Strong agentic and coding performance, rivaling larger flagship models on many tasks.",
+      "top_provider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 8192,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "Qwen/Qwen3.6-27B-FP8",
+      "object": "model",
+      "created": 1780589812,
+      "owned_by": "nearai",
+      "name": "Qwen 3.6 27B FP8",
+      "hugging_face_id": "Qwen/Qwen3.6-27B-FP8",
+      "quantization": "fp8",
+      "pricing": {
+        "input": 0.325,
+        "output": 3.25,
+        "prompt": "0.000000325",
+        "completion": "0.00000325",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.00000016"
+      },
+      "context_length": 262144,
+      "max_output_length": 8192,
+      "architecture": {
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "outputModalities": [
+          "text"
+        ]
+      },
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "repetition_penalty",
+        "stop",
+        "seed",
+        "max_tokens",
+        "logit_bias"
+      ],
+      "supported_features": [
+        "tools",
+        "structured_outputs",
+        "reasoning",
+        "json_mode",
+        "logprobs"
+      ],
+      "is_ready": true,
+      "description": "Qwen 3.6 27B is a dense FP8 language model with strong reasoning, coding, and tool-use. 256K context window.",
+      "top_provider": {
+        "context_length": 262144,
+        "max_completion_tokens": 8192,
+        "is_moderated": false
+      },
+      "datacenters": [
+        {
+          "country_code": "US"
+        }
+      ],
+      "openrouter": {
+        "slug": "qwen/qwen3.6-27b"
+      }
+    },
+    {
+      "id": "z-ai/glm-5.2",
+      "object": "model",
+      "created": 1781700379,
+      "owned_by": "nearai",
+      "name": "GLM 5.2",
+      "hugging_face_id": "zai-org/GLM-5.2-FP8",
+      "quantization": "fp8",
+      "pricing": {
+        "input": 1.4000000000000001,
+        "output": 4.4,
+        "prompt": "0.0000014",
+        "completion": "0.0000044",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0.0000003"
+      },
+      "context_length": 1048576,
+      "max_output_length": 131072,
+      "architecture": {
+        "inputModalities": [
+          "text"
+        ],
+        "outputModalities": [
+          "text"
+        ]
+      },
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "repetition_penalty",
+        "max_tokens",
+        "stop",
+        "seed",
+        "logit_bias"
+      ],
+      "supported_features": [
+        "tools",
+        "structured_outputs",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "GLM-5.2 is an open-source foundation model featuring improved MTP and IndexShare over GLM-5.1. 753B MoE architecture, FP8 precision, optimized for complex systems engineering and long-horizon agent workflows.",
+      "top_provider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 131072,
+        "is_moderated": false
+      }
+    }
+  ]
+}

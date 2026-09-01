@@ -1,0 +1,58 @@
+{
+  "data": [
+    {
+      "id": "gemma-4-e4b-it-qat@q2_k_xl",
+      "object": "model",
+      "type": "vlm",
+      "publisher": "unsloth",
+      "arch": "gemma4",
+      "compatibility_type": "gguf",
+      "quantization": "Q2_K_XL",
+      "state": "not-loaded",
+      "max_context_length": 131072,
+      "capabilities": [
+        "tool_use"
+      ]
+    },
+    {
+      "id": "gemma-4-e4b-it-qat@q4_k_xl",
+      "object": "model",
+      "type": "vlm",
+      "publisher": "unsloth",
+      "arch": "gemma4",
+      "compatibility_type": "gguf",
+      "quantization": "Q4_K_XL",
+      "state": "not-loaded",
+      "max_context_length": 131072,
+      "capabilities": [
+        "tool_use"
+      ]
+    },
+    {
+      "id": "qwen2.5-7b-instruct",
+      "object": "model",
+      "type": "llm",
+      "publisher": "bartowski",
+      "arch": "qwen2",
+      "compatibility_type": "gguf",
+      "quantization": "Q4_K_M",
+      "state": "not-loaded",
+      "max_context_length": 32768,
+      "capabilities": [
+        "tool_use"
+      ]
+    },
+    {
+      "id": "text-embedding-nomic-embed-text-v1.5",
+      "object": "model",
+      "type": "embeddings",
+      "publisher": "nomic-ai",
+      "arch": "nomic-bert",
+      "compatibility_type": "gguf",
+      "quantization": "Q4_K_M",
+      "state": "not-loaded",
+      "max_context_length": 2048
+    }
+  ],
+  "object": "list"
+}

@@ -1,0 +1,10 @@
+{
+  "model": "zai-org/GLM-5.2",
+  "hasTools": true,
+  "class": "well-formed",
+  "note": "GLM canonical tool call: name on the tag line, mandatory newline after name, <arg_key>/<arg_value> pairs, bare value. teemoon's existing arg_key/arg_value handler already recovers this — this fixture proves the validator PASSES correct parsing (so a red on the malformed fixture is a real signal, not a false alarm).",
+  "expectToolCalls": [
+    { "name": "web_search" }
+  ],
+  "contentMustNotContain": ["<tool_call>", "<arg_key>", "<arg_value>"]
+}

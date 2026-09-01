@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDisplayName</key>
+	<string>$(APP_DISPLAY_NAME:default=teemoon)</string>
+	<key>INAlternativeAppNames</key>
+	<array>
+		<dict><key>INAlternativeAppName</key><string>teemoon</string></dict>
+		<dict><key>INAlternativeAppName</key><string>tee moon</string></dict>
+		<dict><key>INAlternativeAppName</key><string>tea moon</string></dict>
+	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>comgooglemaps</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>teemoon connects to AI models running on your own machines — a Mac running Ollama, or a test server — over your local network.</string>
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
+</dict>
+</plist>

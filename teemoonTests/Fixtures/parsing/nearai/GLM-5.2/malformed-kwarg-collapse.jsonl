@@ -1,0 +1,4 @@
+{"id":"chatcmpl-glm52-malformed","choices":[{"index":0,"delta":{"content":"Good, I have the current rate environment. "}}]}
+{"id":"chatcmpl-glm52-malformed","choices":[{"index":0,"delta":{"content":"Let me get one more piece on the specific funding mechanisms."}}]}
+{"id":"chatcmpl-glm52-malformed","choices":[{"index":0,"delta":{"content":"<tool_call>web_search_query_simple=\"block3 strategy X Money 6 percent yield math economics funding\"</arg_value></tool_call>"}}]}
+{"id":"chatcmpl-glm52-malformed","choices":[{"index":0,"delta":{"content":"<tool_call>web_search_query_simple=\"Warren letter X Money 6% APY yield source Cross River 2026\"</arg_value></tool_call>"},"finish_reason":"stop"}]}

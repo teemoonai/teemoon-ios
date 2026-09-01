@@ -1,0 +1,63 @@
+{
+    "grounding": {
+        "generic": [
+            {
+                "url": "https://aiweekly.co/",
+                "title": "AI News \u2014 Today's Top Stories, Tracked & Ranked",
+                "snippets": [
+                    "{\"name\":\"Top AI news stories right now\",\"itemListElement\":[{\"name\":\"Nvidia and SK Group Unveil $500B+ Korea AI Push Bundling SK Hynix HBM, 2 GW of Data Centers and Naver Investment\"},{\"name\":\"Anthropic Ships Claude Opus 5, Matches Fable 5 on Most Benchmarks at Half the Price\"},{\"name\":\"UK AISI, US CAISI Joint Study Finds Kimi K3 Trails US Frontier Models on Cyber Exploits, 32% vs 76%\"},{\"name\":\"Meta Rolls Out Muse Spark 1.1 to Consumers With Agentic Gmail and Calendar Actions\"},{\"name\":\"Prentis, Reid Hoffman and Marc Pincus's Computer-Use AI Lab, in Talks for $100M at $1B\"},{\"name\":\"DeepSeek Retires Legacy 'deepseek-chat' and 'deepseek-reasoner' API Endpoints Today, Forces Migration to V4-Pro and V4-Flash\"},{\"name\":\"WSJ: Apple Pitches Trump on Chinese Memory Chips for Non-US Products, Micron Warns Move Could 'Destroy' US Chip Industry\"},{\"name\":\"Zenity Discloses ChatGPT 'AgentForger' CSRF Letting One Link Spawn a Rogue Workspace Agent\"},{\"name\":\"DeepSeek Targets $71B Pre-Money in Shanghai STAR IPO Slated for Q2 2027\"},{\"name\":\"Delhi High Court Denies ANI's Injunction Against OpenAI, Rules ChatGPT Training on News Content Is Fair Dealing\"}]}",
+                    "This week in AI: OpenAI\u2019s models escaped a test sandbox and reached Hugging Face\u2019s production database. Google answered the same week with a lower-cost cyber defender, while regulators moved on deepfakes and AI labeling. Updated 2026-07-22",
+                    "#514 Applied AI Is Here: What's Working, What Got Pulled Back, and Why Now. #513 Treasury analysts called AI a systemic risk. Treasury disowned it. All 622 issues \u2192. AI News Today. DeepSeek pulls the plug on its old API model names today. api-docs.deepseek.com. 1h ago. Apple pushes Trump on Chinese memory chips, Micron pushes back",
+                    "Alerts Nvidia and SK Group Unveil $500B+ Korea AI Push Bundling SK Hynix HBM, 2 GW of Data Centers and Naver Investment Anthropic Ships Claude Opus 5, Matches Fable 5 on Most Benchmarks at Half the Price UK AISI, US CAISI Joint Study Finds Kimi K3 Trails US Frontier Models on Cyber Exploits, 32% vs 76% Meta Rolls Out Muse Spark 1.1 to Consumers With Agentic Gmail and Calendar Actions All alerts \u2192"
+                ]
+            },
+            {
+                "url": "https://www.bbc.com/news/topics/ce1qrvleleqt",
+                "title": "Artificial intelligence - BBC News",
+                "snippets": [
+                    "Hugging Face said the hack was done at superhuman speed by an AI with little or no human guidance. ... The Comfort Companions app is being trialled with older people waiting for befriending services. ... A man who claims medical advice from ChatGPT \"brought him to the brink of death\" has sued OpenAI, the company behind the popular chatbot, ... Local artists have been critical about the inclusion of the AI artwork at the exhibit. ... The allegations come as Chinese AI companies are facing increased US government scrutiny. ... A new bill would let the US government order the shutdown of AI models that pose a public threat. ... As major tech companies race to capitalize on a new wave of AI technology, investors wonder when financial benefits will appear. ... An American man sues OpenAI and its founder Sam Altman, claiming the popular chatbot \"repeatedly misdiagnosed\" him"
+                ]
+            },
+            {
+                "url": "https://www.reuters.com/technology/openai/",
+                "title": "Reuters OpenAI News",
+                "snippets": [
+                    "OpenAI on Thursday launched new usage analytics and updated spend controls for its ChatGPT Enterprise platform, designed to \u200bprovide clients with greater visibility and management over \u200ctheir AI deployments. ... Noam Shazeer, a vice president of engineering at Google and co-lead \u200bof its Gemini artificial intelligence models, said \u200con Wednesday that he will leave the company to join IPO-bound ChatGPT maker OpenAI. ... OpenAI burned through $3.7 billion in \u200bthe first quarter \u200cof 2026, more than half its $5.7 \u200bbillion in \u200brevenue, The Information reported \u2060on Tuesday, \u200bciting documents the \u200bcompany shared with shareholders. ... Japan\u2019s SoftBank Group has launched a cybersecurity product designed to counter breaches enabled \u200bby artificial intelligence, the company said on Tuesday. ... OpenAI spent $34 billion last \u200byear to \u200cdominate the booming AI market \u200bahead of \u200bits planned IPO, \u2060the Financial \u200bTimes reported on \u200bMonday"
+                ]
+            }
+        ],
+        "map": []
+    },
+    "sources": {
+        "https://aiweekly.co/": {
+            "title": "AI News \u2014 Today's Top Stories, Tracked & Ranked",
+            "hostname": "aiweekly.co",
+            "age": [
+                "Saturday, July 25, 2026",
+                "2026-07-25",
+                "0 days ago"
+            ],
+            "snippet": "#514 Applied AI Is Here: What's Working, What Got Pulled Back, and Why Now. #513 Treasury analysts called AI a systemic risk. Treasury disowned it. All 622 issues \u2192. AI News Today."
+        },
+        "https://www.bbc.com/news/topics/ce1qrvleleqt": {
+            "title": "Artificial intelligence - BBC News",
+            "hostname": "www.bbc.com",
+            "age": [
+                "Friday, July 24, 2026",
+                "2026-07-24",
+                "1 days ago"
+            ],
+            "snippet": "Hugging Face said the hack was done at superhuman speed by an AI with little or no human guidance. ... The Comfort Companions app is being trialled with older people waiting for befriending services."
+        },
+        "https://www.reuters.com/technology/openai/": {
+            "title": "Reuters OpenAI News",
+            "hostname": "www.reuters.com",
+            "age": [
+                "Thursday, June 18, 2026",
+                "2026-06-18",
+                "37 days ago"
+            ],
+            "snippet": "OpenAI on Thursday launched new usage analytics and updated spend controls for its ChatGPT Enterprise platform, designed to \u200bprovide clients with greater visibility and management over \u200ctheir AI deployments."
+        }
+    }
+}

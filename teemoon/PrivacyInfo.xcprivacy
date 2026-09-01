@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  teemoon collects nothing. There is no analytics SDK, no crash reporter,
+	  no attribution framework, and no first-party server: chats live in the
+	  local SwiftData store, credentials live in the Keychain, and the only
+	  outbound traffic is the request the user's own chosen provider gets.
+	  So NSPrivacyCollectedDataTypes is empty by fact, not by omission.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!--
+		  UserDefaults — app-private only. `AppSettings` (teemoon/Settings/
+		  AppSettings.swift) reads and writes `UserDefaults.standard` for the
+		  user's own preferences (system prompt, tint, font, model defaults).
+		  No suite name, no app group: nothing is shared outside the app.
+		-->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!--
+		  System boot time — elapsed-time measurement inside the app only.
+		  `ProcessInfo.systemUptime` is read by the main-thread hang reporter
+		  (teemoon/Support/MainThreadHangReporter.swift) to time watchdog
+		  ping/pong, and by the streaming traces (teemoon/Views/Chat/
+		  ScrollTrace.swift) to timestamp frames on one monotonic clock. The
+		  value is never stored, never sent, and never used as an identifier.
+		-->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,14 @@
+{
+  "model": "zai-org/GLM-5.2",
+  "hasTools": true,
+  "availableTools": [
+    { "name": "web_search", "params": ["query", "freshness", "contextThresholdMode", "count"], "required": ["query"] }
+  ],
+  "class": "recoverable-malformed",
+  "note": "GLM 5.2 kwarg-collapse: function name + arg key fused into `web_search_query_simple` with Python kwarg syntax and no <arg_key>/<arg_value> tags (only a dangling </arg_value>). Server glm47 parser can't normalize it (no newline after name, no valid arg pair), so it leaks into content. Transcribed from a real GLM 5.2 session (IMG_8442). Recovery target: resolve `web_search_query_simple` -> web_search(query_simple=...) via longest-match against registered tools.",
+  "expectToolCalls": [
+    { "name": "web_search" },
+    { "name": "web_search" }
+  ],
+  "contentMustNotContain": ["<tool_call>", "</arg_value>", "web_search_query_simple"]
+}

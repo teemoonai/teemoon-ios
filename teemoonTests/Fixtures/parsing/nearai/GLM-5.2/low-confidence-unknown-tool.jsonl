@@ -1,0 +1,2 @@
+{"id":"chatcmpl-glm52-lowconf","choices":[{"index":0,"delta":{"content":"Sure, let me handle that. "}}]}
+{"id":"chatcmpl-glm52-lowconf","choices":[{"index":0,"delta":{"content":"<tool_call>frobnicate_thing=\"destroy the moon\"</arg_value></tool_call>"},"finish_reason":"stop"}]}

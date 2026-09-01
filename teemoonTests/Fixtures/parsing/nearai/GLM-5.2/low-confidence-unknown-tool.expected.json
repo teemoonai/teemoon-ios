@@ -1,0 +1,11 @@
+{
+  "model": "zai-org/GLM-5.2",
+  "hasTools": true,
+  "availableTools": [
+    { "name": "web_search", "params": ["query", "freshness", "contextThresholdMode", "count"], "required": ["query"] }
+  ],
+  "class": "low-confidence",
+  "note": "Kwarg-collapse malformation for an UNREGISTERED tool (frobnicate_*). No registered tool prefix-matches, so recovery returns nil — do NOT guess or execute (the 'B' decision: skip). The containment net must still scrub the markup so nothing leaks. Validates the skip+contain half of the recovery ladder; the log emission lives in GenerationEngine and is not asserted here.",
+  "expectToolCalls": [],
+  "contentMustNotContain": ["<tool_call>", "</arg_value>", "frobnicate", "destroy the moon"]
+}

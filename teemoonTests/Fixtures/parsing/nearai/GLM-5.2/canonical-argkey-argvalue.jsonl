@@ -1,0 +1,2 @@
+{"id":"chatcmpl-glm52-canonical","choices":[{"index":0,"delta":{"content":"Let me look that up. "}}]}
+{"id":"chatcmpl-glm52-canonical","choices":[{"index":0,"delta":{"content":"<tool_call>web_search\n<arg_key>query</arg_key>\n<arg_value>federal funds rate 2026</arg_value>\n</tool_call>"},"finish_reason":"stop"}]}

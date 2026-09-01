@@ -1,0 +1,54 @@
+{
+    "grounding": {
+        "generic": [
+            {
+                "url": "https://www.weatherusa.net/forecasts/zip:10001",
+                "title": "Weather Forecast and Conditions for New York, NY (10001)",
+                "snippets": [
+                    "{\"title\":\"Weather Forecast and Conditions for New York, NY (10001)\",\"table\":[{\"DEWPOINT\":\"40\u00b0\"},{\"HUMIDITY\":\"93%\"},{\"FEELS LIKE\":\"42\u00b0\"},{\"WIND\":\"Calm\"},{\"PRESSURE\":\"30.19\\\"\"}],\"caption\":\"Details\",\"headers\":[\"Current Weather forNew York, New York (10001)\"]}",
+                    "Tracking Disturbance 93S, Tropical Cyclone Twenty-Fo, Tropical Cyclone Twenty-Fi \u00bb Current Weather for New York, New York (10001)",
+                    "Local hourly and 7-day forecast, current conditions, weather alerts, radar, and SkyCams for New York, New York (10001)"
+                ]
+            },
+            {
+                "url": "https://weather.com/en-SL/weather/hourbyhour/l/New+York+New+York+10001+United+States?canonicalCityId=d8861807a85bba89b32b84a0f8aa12ec",
+                "title": "Hourly Weather Forecast for New York, New York 10001, United ...",
+                "snippets": [
+                    "Cloud Cover60%. Rain Amount0 mm. 06:00. Mostly Cloudy. 19\u00b0. 3%. W 8 km/h. Mostly Cloudy. Feels Like19\u00b0. WindW 8 km/h. Humidity70%. UV Index0 of 11",
+                    "19\u00b0. 11%. SSE 8 km/h. Cloudy. Feels Like19\u00b0. WindSSE 8 km/h. Humidity95%. UV Index0 of 11",
+                    "20\u00b0. 6%. SSE 8 km/h. Partly Cloudy. Feels Like21\u00b0. WindSSE 8 km/h. Humidity79%. UV Index0 of 11. Cloud Cover44%. Rain Amount0 mm",
+                    "Hourly Weather-. As of 13:25 EDT. Wednesday, 17 June. 14:00. Cloudy. 27\u00b0. 11%. SSW 10 km/h. Cloudy"
+                ]
+            },
+            {
+                "url": "https://www.accuweather.com/en/us/new-york-ny/10001/weather-forecast/2191859",
+                "title": "New York, NY Weather Forecast",
+                "snippets": [
+                    "85\u00b0 63\u00b0. Strong morning thunderstorms. Partly cloudy. 61%. Wed. 7/29. 82\u00b0 64\u00b0. Less humid with sunshine. A crystal-clear sky",
+                    "Hourly Weather. 4 PM 85\u00b0. 0% 5 PM 83\u00b0. 0% 6 PM 81\u00b0. 0% 7 PM 78\u00b0. 0% 8 PM 75\u00b0. 0% 9 PM 72\u00b0. 0% 10 PM 69\u00b0. 0% 11 PM 66\u00b0. 0% 12 AM 65\u00b0. 0% 1 AM 63\u00b0. 0% 2 AM 64\u00b0. 5% 3 AM 64\u00b0. 5%. 10-Day Weather Forecast"
+                ]
+            }
+        ],
+        "map": []
+    },
+    "sources": {
+        "https://www.weatherusa.net/forecasts/zip:10001": {
+            "title": "Weather Forecast and Conditions for New York, NY (10001)",
+            "hostname": "www.weatherusa.net",
+            "age": [],
+            "snippet": "Tracking Disturbance 93S, Tropical Cyclone Twenty-Fo, Tropical Cyclone Twenty-Fi \u00bb Current Weather for New York, New York (10001)"
+        },
+        "https://weather.com/en-SL/weather/hourbyhour/l/New+York+New+York+10001+United+States?canonicalCityId=d8861807a85bba89b32b84a0f8aa12ec": {
+            "title": "Hourly Weather Forecast for New York, New York 10001, United ...",
+            "hostname": "weather.com",
+            "age": [],
+            "snippet": "Cloud Cover60%. Rain Amount0 mm. 06:00. Mostly Cloudy. 19\u00b0. 3%. W 8 km/h. Mostly Cloudy. Feels Like19\u00b0. WindW 8 km/h. Humidity70%. UV Index0 of 11"
+        },
+        "https://www.accuweather.com/en/us/new-york-ny/10001/weather-forecast/2191859": {
+            "title": "New York, NY Weather Forecast",
+            "hostname": "www.accuweather.com",
+            "age": [],
+            "snippet": "85\u00b0 63\u00b0. Strong morning thunderstorms. Partly cloudy. 61%. Wed. 7/29. 82\u00b0 64\u00b0. Less humid with sunshine. A crystal-clear sky"
+        }
+    }
+}

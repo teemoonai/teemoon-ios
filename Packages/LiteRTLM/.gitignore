@@ -1,0 +1,4 @@
+# The publishable zip, produced by scripts/repackage-litertlm-mac.sh alongside
+# the xcframework. The xcframework itself IS committed (via Git LFS); the zip is
+# only useful if the artifact ever moves to a hosted binaryTarget(url:).
+artifacts/*.zip
