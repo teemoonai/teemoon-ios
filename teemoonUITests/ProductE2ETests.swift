@@ -227,11 +227,28 @@ final class ProductE2ETests: XCTestCase {
             .containing(NSPredicate(format: "label CONTAINS %@", target))
             .firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), "seeded thread missing")
+        // Every delete path routes through the confirmation alert — the swipe
+        // action and a full swipe both stage threadPendingDeletion
+        // (ChatsListView). Labels are lowercase; "Delete" matches nothing.
+        // No step here may skip silently: this test once looked for the
+        // pre-confirmation system "Delete" button, tapped nothing, and blamed
+        // the list.
         row.swipeLeft()
-        let delete = app.buttons["Delete"].firstMatch
-        if delete.waitForExistence(timeout: 3) { delete.tap() }
+        let alert = app.alerts["delete this chat?"].firstMatch
+        let swipeDelete = app.buttons["delete"].firstMatch
+        if !alert.waitForExistence(timeout: 2) { // a full swipe goes straight to the alert
+            if !swipeDelete.waitForExistence(timeout: 3) {
+                row.swipeLeft() // slow runners can drop the first swipe
+                XCTAssertTrue(swipeDelete.waitForExistence(timeout: 5),
+                              "swipe never revealed the delete action")
+            }
+            swipeDelete.tap()
+            XCTAssertTrue(alert.waitForExistence(timeout: 5),
+                          "delete confirmation alert missing")
+        }
+        alert.buttons["delete"].firstMatch.tap()
         // iPhone delete is delayed 1s inside ChatsListView.
-        XCTAssertTrue(row.waitForNonExistence(timeout: 6),
+        XCTAssertTrue(row.waitForNonExistence(timeout: 10),
                       "deleted thread is still in the list")
     }
 
