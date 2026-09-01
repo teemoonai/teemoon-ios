@@ -48,6 +48,10 @@ jobs:
             DEST="platform=iOS Simulator,name=iPhone 17"
           fi
           echo "destination: $DEST"
+          # Do not add CODE_SIGNING_ALLOWED=NO: an unsigned simulator build
+          # loses its keychain entitlement and every keychain test fails with
+          # errSecMissingEntitlement (-34018). Simulator ad-hoc signing needs
+          # no certificate.
           xcodebuild test \
             -project teemoon.xcodeproj \
             -scheme teemoon \
@@ -60,8 +64,7 @@ jobs:
             -skip-testing:teemoonTests/GroundingLiveTests \
             -skip-testing:teemoonTests/GLM5BraveSearchTests \
             -skip-testing:teemoonTests/NearAIWhisperProbeTests \
-            -skip-testing:teemoonTests/LiteRTLiveTests \
-            CODE_SIGNING_ALLOWED=NO
+            -skip-testing:teemoonTests/LiteRTLiveTests
 
   # Product E2E only — not the whole teemoonUITests target (cameras, paid
   # sends, hang probes). Offline: embedded fake SSE, no API keys.
@@ -97,11 +100,11 @@ jobs:
             DEST="platform=iOS Simulator,name=iPhone 17"
           fi
           echo "destination: $DEST"
+          # No CODE_SIGNING_ALLOWED=NO here either — see teemoon-tests.
           xcodebuild test \
             -project teemoon.xcodeproj \
             -scheme teemoon \
             -destination "$DEST" \
             -skipMacroValidation \
             -only-testing:teemoonUITests/ProductE2ETests \
-            -only-testing:teemoonUITests/LocalProviderUITests \
-            CODE_SIGNING_ALLOWED=NO
+            -only-testing:teemoonUITests/LocalProviderUITests
