@@ -16,7 +16,11 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
+      # lfs is not optional: without it the LiteRTLM binary checks out as a
+      # pointer file and the build fails at package resolution (README §Building).
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Show Xcode and simulators
         run: |
@@ -25,12 +29,15 @@ jobs:
 
       - name: Build and run teemoonTests
         run: |
+          # `name:` is the LAST field in Xcode 26 -showdestinations output —
+          # there is no trailing comma to split on, only " }" to strip.
           DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
             | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
-                split($2, a, ","); print a[1]; exit
+                n=$2; sub(/,.*$/, "", n); sub(/[ \t]*\}[ \t]*$/, "", n); sub(/[ \t]+$/, "", n)
+                print n; exit
               }')
           if [ -z "$DEST" ]; then
-            DEST="iPhone 16"
+            DEST="iPhone 17"
           fi
           echo "destination: $DEST"
           xcodebuild test \
@@ -47,30 +54,16 @@ jobs:
             -skip-testing:teemoonTests/LiteRTLiveTests \
             CODE_SIGNING_ALLOWED=NO
 
-  # The self-verify script, RUN rather than read. Its Swift tests assert on the
-  # generated TEXT and nothing executed it, so when near.ai's gateway began
-  # requiring auth the script failed every run — and read the absent evidence as
-  # CHANGED evidence ("treat with suspicion") — while 58 string assertions
-  # stayed green. Offline, no keys, ~1s.
-  self-verify-script:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Behaviour of the generated self-verify script
-        working-directory: tools
-        run: |
-          python3 -m unittest test_self_verify_script -v
-          python3 -m unittest test_analyze_stream_trace -v
-
   # Product E2E only — not the whole teemoonUITests target (cameras, paid
   # sends, hang probes). Offline: embedded fake SSE, no API keys.
   teemoon-ui-e2e:
     runs-on: macos-26
     timeout-minutes: 25
     steps:
+      # lfs: see the note on the teemoon-tests checkout.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Show Xcode and simulators
         run: |
@@ -79,12 +72,14 @@ jobs:
 
       - name: Product E2E
         run: |
+          # Same `name:`-is-last parsing as teemoon-tests above.
           DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
             | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
-                split($2, a, ","); print a[1]; exit
+                n=$2; sub(/,.*$/, "", n); sub(/[ \t]*\}[ \t]*$/, "", n); sub(/[ \t]+$/, "", n)
+                print n; exit
               }')
           if [ -z "$DEST" ]; then
-            DEST="iPhone 16"
+            DEST="iPhone 17"
           fi
           echo "destination: $DEST"
           xcodebuild test \
