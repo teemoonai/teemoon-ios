@@ -29,8 +29,9 @@ UI chrome (the full account of what the app verifies, and what it does not prove
 - DCAP cryptographic verification (`DCAPVerifier`, `dcap-qvl`)
 - Sigstore/Rekor provenance checks on the enclave image
 - NVIDIA Remote Attestation Service (NRAS) handling of GPU evidence
-- E2EE: the X25519/XChaCha20-Poly1305 session, and binding the session key to
-  the enclave's signing address
+- E2EE: the X25519/XChaCha20-Poly1305 session, the binding of the encryption
+  key to the model quote's `report_data`, and the separate binding of the
+  response-signing address to the gateway/GPU quote
 
 Also in scope, and treated with the same severity as a code vulnerability: **the UI
 claiming more than the code actually verifies.** A trust tier or a checkmark that
