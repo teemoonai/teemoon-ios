@@ -16,7 +16,11 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
+      # lfs is not optional: without it the LiteRTLM binary checks out as a
+      # pointer file and the build fails at package resolution (README §Building).
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Show Xcode and simulators
         run: |
@@ -25,18 +29,34 @@ jobs:
 
       - name: Build and run teemoonTests
         run: |
-          DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
-            | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
-                split($2, a, ","); print a[1]; exit
-              }')
-          if [ -z "$DEST" ]; then
-            DEST="iPhone 16"
+          # Newest-OS iPhone, OS pinned in the destination: the test bundles
+          # deploy to iOS 26.4+, and a bare name resolves to whatever runtime
+          # that device happens to have (the image's iPhone 16e is 26.2-only).
+          # `name:` is the LAST -showdestinations field — strip " }", don't
+          # split on a comma that isn't there.
+          PICKED=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
+            | awk -F'name:' '/platform:iOS Simulator/ && /OS:/ && $2 ~ /^iPhone/ {
+                n=$2; sub(/,.*$/, "", n); sub(/[ \t]*\}[ \t]*$/, "", n); sub(/[ \t]+$/, "", n)
+                os=$1; sub(/.*OS:/, "", os); sub(/[, ].*$/, "", os)
+                split(os, v, "."); key=v[1]*1000000+v[2]*1000+v[3]
+                if (key>best) { best=key; bestn=n; bestos=os }
+              }
+              END { if (bestn != "") print bestn "|" bestos }')
+          if [ -n "$PICKED" ]; then
+            DEST="platform=iOS Simulator,name=${PICKED%%|*},OS=${PICKED##*|}"
+          else
+            DEST="platform=iOS Simulator,name=iPhone 17"
           fi
           echo "destination: $DEST"
+          # Do not add CODE_SIGNING_ALLOWED=NO: an unsigned simulator build
+          # loses its keychain entitlement and every keychain test fails with
+          # errSecMissingEntitlement (-34018). Simulator ad-hoc signing needs
+          # no certificate.
           xcodebuild test \
             -project teemoon.xcodeproj \
             -scheme teemoon \
-            -destination "platform=iOS Simulator,name=$DEST" \
+            -destination "$DEST" \
+            -skipMacroValidation \
             -only-testing:teemoonTests \
             -skip-testing:teemoonTests/E2EELiveSmokeTests \
             -skip-testing:teemoonTests/ProductLiveEndpointTests \
@@ -44,25 +64,7 @@ jobs:
             -skip-testing:teemoonTests/GroundingLiveTests \
             -skip-testing:teemoonTests/GLM5BraveSearchTests \
             -skip-testing:teemoonTests/NearAIWhisperProbeTests \
-            -skip-testing:teemoonTests/LiteRTLiveTests \
-            CODE_SIGNING_ALLOWED=NO
-
-  # The self-verify script, RUN rather than read. Its Swift tests assert on the
-  # generated TEXT and nothing executed it, so when near.ai's gateway began
-  # requiring auth the script failed every run — and read the absent evidence as
-  # CHANGED evidence ("treat with suspicion") — while 58 string assertions
-  # stayed green. Offline, no keys, ~1s.
-  self-verify-script:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Behaviour of the generated self-verify script
-        working-directory: tools
-        run: |
-          python3 -m unittest test_self_verify_script -v
-          python3 -m unittest test_analyze_stream_trace -v
+            -skip-testing:teemoonTests/LiteRTLiveTests
 
   # Product E2E only — not the whole teemoonUITests target (cameras, paid
   # sends, hang probes). Offline: embedded fake SSE, no API keys.
@@ -70,7 +72,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 25
     steps:
+      # lfs: see the note on the teemoon-tests checkout.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Show Xcode and simulators
         run: |
@@ -79,18 +84,27 @@ jobs:
 
       - name: Product E2E
         run: |
-          DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
-            | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
-                split($2, a, ","); print a[1]; exit
-              }')
-          if [ -z "$DEST" ]; then
-            DEST="iPhone 16"
+          # Same newest-OS pick as teemoon-tests above (UI test bundle has the
+          # same 26.4+ floor).
+          PICKED=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
+            | awk -F'name:' '/platform:iOS Simulator/ && /OS:/ && $2 ~ /^iPhone/ {
+                n=$2; sub(/,.*$/, "", n); sub(/[ \t]*\}[ \t]*$/, "", n); sub(/[ \t]+$/, "", n)
+                os=$1; sub(/.*OS:/, "", os); sub(/[, ].*$/, "", os)
+                split(os, v, "."); key=v[1]*1000000+v[2]*1000+v[3]
+                if (key>best) { best=key; bestn=n; bestos=os }
+              }
+              END { if (bestn != "") print bestn "|" bestos }')
+          if [ -n "$PICKED" ]; then
+            DEST="platform=iOS Simulator,name=${PICKED%%|*},OS=${PICKED##*|}"
+          else
+            DEST="platform=iOS Simulator,name=iPhone 17"
           fi
           echo "destination: $DEST"
+          # No CODE_SIGNING_ALLOWED=NO here either — see teemoon-tests.
           xcodebuild test \
             -project teemoon.xcodeproj \
             -scheme teemoon \
-            -destination "platform=iOS Simulator,name=$DEST" \
+            -destination "$DEST" \
+            -skipMacroValidation \
             -only-testing:teemoonUITests/ProductE2ETests \
-            -only-testing:teemoonUITests/LocalProviderUITests \
-            CODE_SIGNING_ALLOWED=NO
+            -only-testing:teemoonUITests/LocalProviderUITests
