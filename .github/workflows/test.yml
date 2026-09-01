@@ -29,21 +29,29 @@ jobs:
 
       - name: Build and run teemoonTests
         run: |
-          # `name:` is the LAST field in Xcode 26 -showdestinations output —
-          # there is no trailing comma to split on, only " }" to strip.
-          DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
-            | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
+          # Newest-OS iPhone, OS pinned in the destination: the test bundles
+          # deploy to iOS 26.4+, and a bare name resolves to whatever runtime
+          # that device happens to have (the image's iPhone 16e is 26.2-only).
+          # `name:` is the LAST -showdestinations field — strip " }", don't
+          # split on a comma that isn't there.
+          PICKED=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
+            | awk -F'name:' '/platform:iOS Simulator/ && /OS:/ && $2 ~ /^iPhone/ {
                 n=$2; sub(/,.*$/, "", n); sub(/[ \t]*\}[ \t]*$/, "", n); sub(/[ \t]+$/, "", n)
-                print n; exit
-              }')
-          if [ -z "$DEST" ]; then
-            DEST="iPhone 17"
+                os=$1; sub(/.*OS:/, "", os); sub(/[, ].*$/, "", os)
+                split(os, v, "."); key=v[1]*1000000+v[2]*1000+v[3]
+                if (key>best) { best=key; bestn=n; bestos=os }
+              }
+              END { if (bestn != "") print bestn "|" bestos }')
+          if [ -n "$PICKED" ]; then
+            DEST="platform=iOS Simulator,name=${PICKED%%|*},OS=${PICKED##*|}"
+          else
+            DEST="platform=iOS Simulator,name=iPhone 17"
           fi
           echo "destination: $DEST"
           xcodebuild test \
             -project teemoon.xcodeproj \
             -scheme teemoon \
-            -destination "platform=iOS Simulator,name=$DEST" \
+            -destination "$DEST" \
             -only-testing:teemoonTests \
             -skip-testing:teemoonTests/E2EELiveSmokeTests \
             -skip-testing:teemoonTests/ProductLiveEndpointTests \
@@ -72,20 +80,26 @@ jobs:
 
       - name: Product E2E
         run: |
-          # Same `name:`-is-last parsing as teemoon-tests above.
-          DEST=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
-            | awk -F'name:' '/platform:iOS Simulator/ && /iPhone/ {
+          # Same newest-OS pick as teemoon-tests above (UI test bundle has the
+          # same 26.4+ floor).
+          PICKED=$(xcodebuild -project teemoon.xcodeproj -scheme teemoon -showdestinations 2>/dev/null \
+            | awk -F'name:' '/platform:iOS Simulator/ && /OS:/ && $2 ~ /^iPhone/ {
                 n=$2; sub(/,.*$/, "", n); sub(/[ \t]*\}[ \t]*$/, "", n); sub(/[ \t]+$/, "", n)
-                print n; exit
-              }')
-          if [ -z "$DEST" ]; then
-            DEST="iPhone 17"
+                os=$1; sub(/.*OS:/, "", os); sub(/[, ].*$/, "", os)
+                split(os, v, "."); key=v[1]*1000000+v[2]*1000+v[3]
+                if (key>best) { best=key; bestn=n; bestos=os }
+              }
+              END { if (bestn != "") print bestn "|" bestos }')
+          if [ -n "$PICKED" ]; then
+            DEST="platform=iOS Simulator,name=${PICKED%%|*},OS=${PICKED##*|}"
+          else
+            DEST="platform=iOS Simulator,name=iPhone 17"
           fi
           echo "destination: $DEST"
           xcodebuild test \
             -project teemoon.xcodeproj \
             -scheme teemoon \
-            -destination "platform=iOS Simulator,name=$DEST" \
+            -destination "$DEST" \
             -only-testing:teemoonUITests/ProductE2ETests \
             -only-testing:teemoonUITests/LocalProviderUITests \
             CODE_SIGNING_ALLOWED=NO
