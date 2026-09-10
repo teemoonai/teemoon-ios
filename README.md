@@ -8,22 +8,10 @@ no account, no subscription, no teemoon server.
 [teemoon.ai](https://teemoon.ai) · [App Store](https://apps.apple.com/app/id6762371161) ·
 beta builds on [TestFlight](https://testflight.apple.com/join/WHZ9VPms) · iPhone, iOS 18.6+
 
-<table>
-  <tr>
-    <td align="center">
-      <img src="assets/chat.png" width="300"
-           alt="A teemoon chat labeled end-to-end encrypted, with live markdown rendering, a model chip reading glm-5.2 · near.ai, and the web search tool switched on.">
-    </td>
-    <td align="center">
-      <img src="assets/proof-expert-glm52.png" width="300"
-           alt="The proof view in expert mode for GLM-5.2: the running code traces to public source across seven near.ai images, every reply comes back signed, and the model enclave's own quote pins its compose file — with a Fable miniaudit verdict for the guest OS.">
-    </td>
-  </tr>
-  <tr>
-    <td align="center"><em>a chat, end-to-end encrypted, searching the web</em></td>
-    <td align="center"><em>who can read this? — the expert proof for glm-5.2</em></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="assets/chat.png" width="300"
+       alt="A teemoon chat labeled end-to-end encrypted, with live markdown rendering, a model chip reading glm-5.2 · near.ai, and the web search tool switched on.">
+</p>
 
 teemoon is a private AI chat app. there is no teemoon server. your phone talks
 directly to the model you pick. run a model on the phone, connect a computer you
