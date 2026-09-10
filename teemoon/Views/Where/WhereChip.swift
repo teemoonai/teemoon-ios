@@ -22,6 +22,9 @@ struct WhereChip: View {
     /// it answer" belongs; a percentage is part of that answer, not a separate
     /// announcement.
     var progress: Double?
+    /// Replaces "downloading N%" when the transfer is parked — "waiting for
+    /// wi-fi" — so the chip and the Where row tell the same story.
+    var progressLabel: String? = nil
     /// Selected, local, and the weights aren't on disk with nothing running — an
     /// interrupted download. Said on the chip because otherwise the state is
     /// invisible until send fails: the model is chosen, named, and unable to
@@ -77,7 +80,7 @@ struct WhereChip: View {
                         // "downloading" plus a number, not a bar: a 2pt bar
                         // inside a 44pt capsule is decoration, and the percentage
                         // is the part that tells you whether to wait.
-                        Text("downloading \(Int(progress * 100))%")
+                        Text(progressLabel ?? "downloading \(Int(progress * 100))%")
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()

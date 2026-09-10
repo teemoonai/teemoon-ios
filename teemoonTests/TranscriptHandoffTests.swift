@@ -48,13 +48,21 @@ final class TranscriptHandoffTests: XCTestCase {
     /// it made "hold the distance from the end" look correct and "hold the
     /// offset" look broken, which is the reverse of what the device showed.
     private var replyRowHeight: CGFloat { streamingHeight - 583 }
+    /// A one-line prompt bubble: shorter than the layout's 120pt estimate,
+    /// which is the case the `.latest` refresh gate treats as "cannot move".
+    private let promptRowHeight: CGFloat = 75
 
     private func transcript(items: [TranscriptItem],
                             generating: Bool,
                             interrupted: Bool,
                             streaming: Bool,
-                            tallItem: TranscriptItem? = nil) -> TranscriptView {
-        TranscriptView(
+                            tallItem: TranscriptItem? = nil,
+                            shortItem: TranscriptItem? = nil,
+                            streamingHeight: CGFloat? = nil,
+                            replyHeight: CGFloat? = nil) -> TranscriptView {
+        let streamingHeight = streamingHeight ?? self.streamingHeight
+        let replyRowHeight = replyHeight ?? self.replyRowHeight
+        return TranscriptView(
             transcript: items,
             tail: [],
             threadID: Self.thread,
@@ -67,8 +75,10 @@ final class TranscriptHandoffTests: XCTestCase {
                 : nil,
             scrollToEndToken: 0,
             onInterruptionChanged: { _ in },
-            rowBuilder: { [rowHeight, replyRowHeight] item in
-                AnyView(Color.clear.frame(height: item == tallItem ? replyRowHeight : rowHeight))
+            rowBuilder: { [rowHeight, replyRowHeight, promptRowHeight] item in
+                let height = item == tallItem ? replyRowHeight
+                    : item == shortItem ? promptRowHeight : rowHeight
+                return AnyView(Color.clear.frame(height: height))
             })
     }
 
@@ -229,6 +239,89 @@ final class TranscriptHandoffTests: XCTestCase {
         XCTAssertEqual(attributes.size.height, replyRowHeight, accuracy: 2,
             "the reply's cell is \(Int(attributes.size.height - replyRowHeight))pt taller than "
             + "the reply — that is empty space under the last message")
+    }
+
+    /// THE PROMPT KEEPS ITS HEIGHT THROUGH THE HAND-OFF. Device 2026-09-08,
+    /// turn-end dump after a reply landed:
+    ///
+    ///     row 0 y=0.0 h=120.0 realised=n floor=96.3   (the prompt)
+    ///     row 1 y=120.0 …                              (the reply, 24pt lower than it streamed)
+    ///
+    /// The prompt had been alone in `.latest`; the hand-off moved it into
+    /// history, and the layout laid it out at the estimate again. A short
+    /// reply keeps the prompt on screen, so this is the reader's own view.
+    /// (A long reply scrolls it off, where the estimate is what off-screen
+    /// rows are carried at by design — `testTheRepliesCellDoesNotKeepTheStreamingViewsHeight`.)
+    func testAPromptOnScreenKeepsItsHeightThroughTheHandoff() {
+        let existing = rows(3)
+        let (window, controller, collection) =
+            host(transcript(items: existing, generating: true, interrupted: false, streaming: true,
+                            streamingHeight: 300))
+        settle(window)
+
+        let reply = TranscriptItem.message(UUID())
+        controller.rootView = transcript(items: existing + [reply], generating: false,
+                                         interrupted: false, streaming: false,
+                                         tallItem: reply, replyHeight: 250)
+        settle(window, passes: 12)
+
+        let prompt = IndexPath(item: existing.count - 1, section: TranscriptSection.transcript.rawValue)
+        guard let promptHeight = collection.layoutAttributesForItem(at: prompt)?.size.height,
+              let last = transcriptLastMessageIndexPath(in: collection),
+              let replyHeightNow = collection.layoutAttributesForItem(at: last)?.size.height else {
+            return XCTFail("no layout attributes after the hand-off")
+        }
+        XCTAssertEqual(promptHeight, rowHeight, accuracy: 2,
+            "the prompt left `.latest` at \(Int(promptHeight))pt, not its measured \(Int(rowHeight))pt")
+        XCTAssertEqual(replyHeightNow, 250, accuracy: 2, "the short reply did not self-size")
+    }
+
+    /// THE SEND AFTER A TALL REPLY. Device 2026-09-08, turn-start column dump:
+    ///
+    ///     row 11 y=3588.0 h=120.0   realised=y floor=-1.0  content=1138.7   (the reply)
+    ///     row 12 y=3708.0 h=1170.7  realised=y floor=75.3  content=43.3     (the prompt)
+    ///
+    /// The reply had been alone in `.latest` at its measured height. The send
+    /// moved it into history and put the prompt in `.latest`, and the two rows
+    /// came out with each other's heights: the prompt in a cell the size of the
+    /// reply (a blank band under the bubble, the thinking chip a screen away)
+    /// and the reply at the 120pt estimate (its text cut off above the bubble).
+    func testASendAfterATallReplyDoesNotSwapTheTwoRowsHeights() {
+        // The reply arrives the way it does in production: by hand-off from
+        // the streaming view, then relaxed once its cell is on screen.
+        let existing = rows(20)
+        let (window, controller, collection) =
+            host(transcript(items: existing, generating: true, interrupted: false, streaming: true))
+        settle(window)
+        let reply = TranscriptItem.message(UUID())
+        controller.rootView = transcript(items: existing + [reply], generating: false,
+                                         interrupted: false, streaming: false, tallItem: reply)
+        settle(window, passes: 12)
+        guard let latest = transcriptLastMessageIndexPath(in: collection),
+              let before = collection.layoutAttributesForItem(at: latest) else {
+            return XCTFail("the reply has no layout attributes")
+        }
+        XCTAssertEqual(before.size.height, replyRowHeight, accuracy: 2, "precondition: the reply self-sized")
+
+        // The send: a one-line prompt joins, the reply moves into history.
+        let prompt = TranscriptItem.message(UUID())
+        controller.rootView = transcript(items: existing + [reply, prompt], generating: true,
+                                         interrupted: false, streaming: true,
+                                         tallItem: reply, shortItem: prompt)
+        settle(window, passes: 12)
+
+        guard let promptPath = transcriptLastMessageIndexPath(in: collection),
+              let promptFrame = collection.layoutAttributesForItem(at: promptPath)?.frame else {
+            return XCTFail("the prompt has no layout attributes")
+        }
+        let replyPath = IndexPath(item: existing.count, section: TranscriptSection.transcript.rawValue)
+        guard let replyFrame = collection.layoutAttributesForItem(at: replyPath)?.frame else {
+            return XCTFail("the reply has no layout attributes after the send")
+        }
+        XCTAssertEqual(promptFrame.height, promptRowHeight, accuracy: 2,
+            "the prompt's cell is \(Int(promptFrame.height - promptRowHeight))pt taller than the prompt")
+        XCTAssertEqual(replyFrame.height, replyRowHeight, accuracy: 2,
+            "the reply's cell is \(Int(replyRowHeight - replyFrame.height))pt shorter than the reply")
     }
 
     /// THE OTHER HALF OF "DON'T MOVE THEM": THERE HAS TO BE SOMETHING THERE.

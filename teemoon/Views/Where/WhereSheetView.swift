@@ -50,12 +50,15 @@ struct WhereSheetView: View {
         case deleteFromServer(Equipped)
         /// The machine refused a delete, so the row reappearing has a reason.
         case deleteFailed(String)
+        /// A phone download tapped on mobile data; the user picks its network.
+        case cellularDownload(CellularDownloadRequest)
 
         var id: String {
             switch self {
             case .deleteWeights(let m):    return "weights#\(m.id)"
             case .deleteFromServer(let r): return "server#\(r.id)"
             case .deleteFailed(let m):     return "failed#\(m)"
+            case .cellularDownload(let r): return "cellular#\(r.id)"
             }
         }
     }
@@ -161,6 +164,7 @@ struct WhereSheetView: View {
                             policy: getPolicy,
                             openToGet: openToGet,
                             downloader: downloader,
+                            path: pathObserver,
                             hasKey: hasKey,
                             sectionHeader: sectionHeader,
                             idsBeforeAdd: $idsBeforeAdd,
@@ -324,6 +328,20 @@ struct WhereSheetView: View {
                         message: Text("frees \(model.sizeLabel). it moves back to get, and you can download it again."),
                         primaryButton: .destructive(Text("delete")) { deleteWeights(model) },
                         secondaryButton: .cancel(Text("keep"))
+                    )
+                case .cellularDownload(let request):
+                    // Two buttons is all `Alert` has, so dismissing means the
+                    // safe choice: queued for wi-fi, visible in the row with its
+                    // own cancel, and not a byte on the plan.
+                    return Alert(
+                        title: Text(CellularDownloadGate.title(for: request.reason)),
+                        message: Text(CellularDownloadGate.message(for: request.reason, model: request.model)),
+                        primaryButton: .default(Text("download now")) {
+                            startAndSelect(request.model, network: .any)
+                        },
+                        secondaryButton: .cancel(Text("wait for wi-fi")) {
+                            startAndSelect(request.model, network: .wifiOnly)
+                        }
                     )
                 }
             }

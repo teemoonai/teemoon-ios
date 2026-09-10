@@ -19,6 +19,8 @@ struct WhereGetSection<Header: View>: View {
     /// Downloads are started and cancelled from the `get` list, so their
     /// progress has to be observed here.
     let downloader: LocalModelDownloader
+    /// A wi-fi-only download on mobile data is not moving; the row says so.
+    let path: NetworkPathObserver
     /// `WhereSheetView.hasKey` — the policy's answer, preview-overridable.
     let hasKey: (Provider) -> Bool
     /// The sheet's own header treatment, so `get` matches `ready now`.
@@ -325,6 +327,9 @@ struct WhereGetSection<Header: View>: View {
     private func downloadRow(_ model: LocalModel) -> some View {
         let fraction = downloader.progress(model.id)
         let failure = downloader.failure(model.id)
+        let waiting = downloader.network(model.id).flatMap {
+            CellularDownloadGate.waitingLabel(network: $0, parked: downloader.isParked(model.id))
+        }
         // A model you have not downloaded yet is exactly when its details matter
         // MOST — size, what it is for, whether it calls tools — because the tap
         // costs gigabytes. `.onDevice` builds the entry from the catalogue
@@ -352,8 +357,8 @@ struct WhereGetSection<Header: View>: View {
             // number worth the space is how much is left.
             trailingText: fraction == nil
                 ? model.sizeLabel.lowercased()
-                : "downloading \(Int(fraction! * 100))%",
-            trailingMonospaced: fraction != nil,
+                : waiting ?? "downloading \(Int(fraction! * 100))%",
+            trailingMonospaced: fraction != nil && waiting == nil,
             trailingGlyph: fraction == nil ? "arrow.down.circle" : nil,
             caption: model.blurb,
             progress: fraction,
@@ -364,13 +369,16 @@ struct WhereGetSection<Header: View>: View {
                               ? "may not fit in memory on this device" : nil)
         )
         .onTapGesture {
-            guard downloader.progress(model.id) == nil else { return }
+            // A running download ignores taps — except one parked for wi-fi,
+            // where the tap re-asks and "download now" moves it onto mobile data.
+            guard downloader.progress(model.id) == nil || waiting != nil else { return }
             startAndSelect(model)
         }
         .accessibilityLabel(
             fraction == nil
             ? "download \(model.displayName), \(model.sizeLabel)"
-            : "\(model.displayName), downloading \(Int((fraction ?? 0) * 100)) percent"
+            : waiting.map { "\(model.displayName), \($0)" }
+                ?? "\(model.displayName), downloading \(Int((fraction ?? 0) * 100)) percent"
         )
         .contextMenu {
             Button {

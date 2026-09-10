@@ -75,7 +75,10 @@ enum AttestationService {
     }
     #endif
 
-    /// Fetches and parses the attestation report.
+    /// Fetches the attestation report as three independent claims — the
+    /// gateway's own quote, the model node's quote + Ed25519 key, the GPU
+    /// node's evidence. Any leg may be missing; its fields are then nil/empty.
+    /// Throws only when no leg produced anything.
     /// - Parameters:
     ///   - baseURL: The provider's OpenAI-compatible base URL (e.g. `https://cloud-api.near.ai/v1`).
     ///   - apiKey:  Bearer token used to authenticate the request.
@@ -86,7 +89,6 @@ enum AttestationService {
         baseURL: URL, apiKey: String, model: String = "", providerID: UUID,
         gpuNodeURL: URL? = nil, http: any HTTPClient = URLSessionHTTP()
     ) async throws -> AttestationRecord {
-        // Kick off GPU node + model attestation (Ed25519 key + TDX quote) fetches concurrently.
         let gpuTask: Task<GPUNodeData?, Never>? = gpuNodeURL.map { url in
             Task { await fetchGPUData(nodeURL: url, apiKey: apiKey, expectedModel: model, http: http) }
         }
@@ -94,96 +96,43 @@ enum AttestationService {
             await fetchModelAttestation(baseURL: baseURL, model: model, apiKey: apiKey, http: http)
         }
 
-        // Retry gateway fetch up to 3 times with exponential backoff (1s, 2s).
-        var gatewayData: Data?
-        var lastError: Error?
-        var gatewayNonce: String?
-        for attempt in 0..<3 {
-            if attempt > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 * (1 << (attempt - 1))))
-            }
-            guard let (request, nonce) = makeAttestationRequest(baseURL: baseURL, apiKey: apiKey) else {
-                throw NSError(domain: "AttestationService", code: -1,
-                              userInfo: [NSLocalizedDescriptionKey: "Failed to build attestation request URL"])
-            }
-            do {
-                let (data, _) = try await http.data(for: request)
-                gatewayData = data
-                gatewayNonce = nonce
-                break
-            } catch {
-                logger.warning("Gateway fetch attempt \(attempt+1) failed: \(error.localizedDescription)")
-                lastError = error
-            }
-        }
-        guard let data = gatewayData else {
-            // Gateway failed (possibly due to task cancellation). Still await the model
-            // attestation so the Ed25519 key isn't orphaned — E2EE needs it even without
-            // full gateway data.
-            let modelAtt = await modelAttTask?.value
-            if let modelAtt {
-                logger.info("Gateway failed but model attestation succeeded — returning partial record with Ed25519 key")
-                return AttestationRecord(
-                    composeHash: "", mrtd: "", osImageHash: "",
-                    modelOSImageHash: modelAtt.osImageHash,
-                    intelQuote: "",
-                    modelIntelQuote: modelAtt.intelQuote,
-                    modelNonce: modelAtt.nonce,
-                    nvidiaPayload: modelAtt.nvidiaPayload,
-                    composeManifest: nil, gpuArch: modelAtt.gpuArch,
-                    gpuNodeComposeHash: nil, modelFileHash: nil,
-                    signingAddress: nil, gpuSigningAddress: nil,
-                    modelEd25519PubKey: modelAtt.ed25519PubKey,
-                    quoteVerification: nil, gpuQuoteVerification: nil,
-                    modelQuoteVerification: modelAtt.quoteVerification,
-                    fetchedAt: Date(), providerID: providerID, model: model
-                )
-            }
-            throw lastError ?? NSError(domain: "AttestationService", code: -2,
-                                        userInfo: [NSLocalizedDescriptionKey: "Gateway attestation fetch failed"])
-        }
-        let report = try JSONDecoder().decode(Report.self, from: data)
-        let gw = report.gatewayAttestation
+        let gateway = await fetchGatewayAttestation(baseURL: baseURL, apiKey: apiKey, http: http)
         let gpu = await gpuTask?.value
-        // Bound the wait on model attestation. The gateway record is the
-        // primary trust anchor and verifies in <1s; the model-attestation
-        // endpoint (E2EE key, model quote, GPU evidence) can be slow (TEE
-        // cold-start) or down independently of the gateway. Blocking the whole
-        // record on its full retry budget (~160s) is what makes the sheet time
-        // out to "Can't Reach Verifier" with everything unverified — even
-        // though the gateway quote is genuine. If the key doesn't arrive in
-        // time, return the gateway record now (E2EE/model rows degrade
-        // honestly) and let refreshAttestationIfStale refetch it later.
+        // Do not block the record on the model leg's full retry budget: what
+        // the other legs proved is usable now; refreshAttestationIfStale refetches.
         var modelAtt: ModelAttestationData?
         if let modelAttTask {
             modelAtt = await Self.awaitValue(of: modelAttTask, timeout: 15_000_000_000)
             if modelAtt == nil { modelAttTask.cancel() }
         }
-        logger.notice("fetch() results: gateway=ok, modelAtt=\(modelAtt != nil ? "key present" : "unavailable", privacy: .public), gpu=\(gpu != nil)")
+        logger.notice("fetch() results: gateway=\(gateway != nil ? "ok" : "unavailable", privacy: .public), modelAtt=\(modelAtt != nil ? "key present" : "unavailable", privacy: .public), gpu=\(gpu != nil)")
 
-        // Verify the gateway TDX quote on-device (signature + cert chain back to Intel Root CA).
-        let quoteVerification = try? TDXQuoteVerifier.verify(quoteHex: gw.intelQuote ?? "")
+        guard gateway != nil || modelAtt != nil || gpu != nil else {
+            throw NSError(domain: "AttestationService", code: -2,
+                          userInfo: [NSLocalizedDescriptionKey: "Attestation fetch failed: no evidence from the gateway, the model node, or the GPU node"])
+        }
 
-        // Prefer GPU arch from model attestation (always available from gateway),
-        // fall back to direct GPU node fetch.
+        // Every gateway field below reads through `gw`; a missing gateway must
+        // leave them nil/empty — never verify or report a quote it did not serve.
+        let gw = gateway?.report.gatewayAttestation
+        let quoteVerification = gw?.intelQuote.flatMap { try? TDXQuoteVerifier.verify(quoteHex: $0) }
         let gpuArch = modelAtt?.gpuArch ?? gpu?.arch
 
         return AttestationRecord(
-            composeHash:          gw.info?.composeHash  ?? "",
-            mrtd:                 gw.info?.tcbInfo?.mrtd ?? "",
-            osImageHash:          gw.info?.osImageHash   ?? "",
-            // Model node's guest-OS hash — from the model attestation (the
-            // gateway's own report never carries it: the app's gateway request
-            // sends no `model=` param, so the envelope has no model_attestations).
+            composeHash:          gw?.info?.composeHash  ?? "",
+            mrtd:                 gw?.info?.tcbInfo?.mrtd ?? "",
+            osImageHash:          gw?.info?.osImageHash   ?? "",
+            // The gateway's own report never carries the model node's hash
+            // (no `model=` param is sent); only the model leg can supply it.
             modelOSImageHash:     modelAtt?.osImageHash,
-            intelQuote:           gw.intelQuote          ?? "",
+            intelQuote:           gw?.intelQuote          ?? "",
             modelIntelQuote:      modelAtt?.intelQuote,
             gpuIntelQuote:        gpu?.intelQuote,
-            gatewayNonce:         gatewayNonce,
+            gatewayNonce:         gateway?.nonce,
             modelNonce:           modelAtt?.nonce,
             gpuNonce:             gpu?.nonce,
             nvidiaPayload:        modelAtt?.nvidiaPayload,
-            composeManifest:      gw.info?.tcbInfo?.appCompose,
+            composeManifest:      gw?.info?.tcbInfo?.appCompose,
             gpuArch:              gpuArch,
             gpuNodeComposeHash:   gpu?.composeHash,
             gpuNodeComposeManifest: gpu?.composeManifest,
@@ -193,7 +142,7 @@ enum AttestationService {
             modelComposeTag:      gpu?.modelComposeTag,
             modelDeployedAt:      gpu?.modelDeployedAt,
             modelPreviouslyDeployedAt: gpu?.modelPreviouslyDeployedAt,
-            signingAddress:       gw.signingAddress,
+            signingAddress:       gw?.signingAddress,
             gpuSigningAddress:    gpu?.signingAddress,
             modelEd25519PubKey:   modelAtt?.ed25519PubKey,
             quoteVerification:    quoteVerification,
@@ -203,5 +152,48 @@ enum AttestationService {
             providerID:           providerID,
             model:                model
         )
+    }
+
+    /// The gateway's own attestation and the nonce it must echo, or nil when
+    /// the gateway gave nothing usable. Up to 3 attempts (1s, 2s backoff) for
+    /// a thrown transport error or a 5xx; a 4xx or an undecodable body is
+    /// final on the first answer — retrying a 401 cannot succeed. Never throw
+    /// from here: a gateway failure must not discard the other legs.
+    static func fetchGatewayAttestation(
+        baseURL: URL, apiKey: String, http: any HTTPClient
+    ) async -> (report: Report, nonce: String)? {
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 * (1 << (attempt - 1))))
+            }
+            guard let (request, nonce) = makeAttestationRequest(baseURL: baseURL, apiKey: apiKey) else {
+                return nil
+            }
+            let data: Data
+            let status: Int
+            do {
+                let (body, response) = try await http.data(for: request)
+                data = body
+                status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            } catch {
+                logger.warning("Gateway fetch attempt \(attempt+1) failed: \(error.localizedDescription)")
+                continue
+            }
+            if status >= 500 {
+                logger.warning("Gateway fetch attempt \(attempt+1) HTTP \(status): server error — \(data.previewForLog(), privacy: .private)")
+                continue
+            }
+            if status >= 400 {
+                logger.warning("Gateway fetch HTTP \(status): no gateway attestation — \(data.previewForLog(), privacy: .private)")
+                return nil
+            }
+            guard let report = try? JSONDecoder().decode(Report.self, from: data) else {
+                logger.warning("Gateway fetch HTTP \(status): decode failed — \(data.previewForLog(), privacy: .private)")
+                return nil
+            }
+            return (report, nonce)
+        }
+        logger.error("Gateway attestation unavailable after 3 attempt(s)")
+        return nil
     }
 }

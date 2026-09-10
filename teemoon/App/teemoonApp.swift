@@ -14,13 +14,29 @@ struct TeemoonApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(BackgroundDownloadDelegate.self) var downloadDelegate
+    #endif
     @State private var appSettings: AppSettings
     @State private var providerStore: ProviderStore
     @State private var confidentialSession: ConfidentialSession
     @State private var llm: ChatGeneration
     @State private var downloadCenter = OllamaDownloadCenter()
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Diagnostics only: `TEEMOON_NATIVE_LOG=1` in the launch environment
+    /// redirects stderr — where LiteRT's native runtime logs — to
+    /// Documents/native.log, so a device run can be read back afterwards.
+    private static func captureNativeLogIfAsked() {
+        guard ProcessInfo.processInfo.environment["TEEMOON_NATIVE_LOG"] == "1" else { return }
+        let url = URL.documentsDirectory.appending(component: "native.log")
+        _ = freopen(url.path, "a", stderr)
+        setvbuf(stderr, nil, _IONBF, 0)
+        fputs("=== launch \(Date()) ===\n", stderr)
+    }
 
     init() {
+        Self.captureNativeLogIfAsked()
         #if DEBUG
         // Armed by -scrollTrace, like the traces. When the main thread stops
         // answering, this writes its actual stacks to Documents/hangstacks.log
@@ -75,6 +91,24 @@ struct TeemoonApp: App {
             guard let store else { return }
             guard !store.providers.contains(where: { $0.localModelID == model.id }) else { return }
             store.addProvider(.local(model))
+        }
+        #if DEBUG
+        // A UI test that needs a blank slate — no weights, no landed file, no
+        // resume data from an earlier run against a different server. Gated on
+        // --uitesting so no real launch can wipe a user's models.
+        if ProcessInfo.processInfo.arguments.contains("--uitesting"),
+           ProcessInfo.processInfo.environment["UITEST_RESET_LOCAL_MODELS"] == "1" {
+            for model in LocalModelCatalog.all { try? LocalModelStorage.delete(model) }
+        }
+        #endif
+        // Downloads outlive the process. Pick up whatever the daemon is still
+        // moving, or has landed, before any screen can start a new one — and on
+        // every launch, including the background relaunch that delivers a file.
+        Task { await LocalModelDownloader.shared.reconnect() }
+        // Wi-fi-only downloads are parked by the app, not only by the daemon,
+        // the moment the path turns expensive — see `pathChanged`.
+        NetworkPathObserver.shared.addChangeHandler { mobileData, constrained in
+            LocalModelDownloader.shared.pathChanged(isMobileData: mobileData, isConstrained: constrained)
         }
         _appSettings = State(initialValue: settings)
         _providerStore = State(initialValue: store)
@@ -285,6 +319,11 @@ struct TeemoonApp: App {
                 #endif
                 #endif
             #endif
+        }
+        // A model download whose link expired while the app was away is only
+        // started over once a scene is on screen — see `scenePhaseChanged`.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            LocalModelDownloader.shared.scenePhaseChanged(isActive: phase == .active)
         }
         #if os(visionOS)
         .windowResizability(.contentSize)
@@ -627,6 +666,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow {
             closedWindowsStack.append(window)
+        }
+    }
+}
+#endif
+
+#if os(iOS)
+/// The one UIKit delegate callback SwiftUI has no equivalent for: iOS relaunched
+/// the app in the background because a model download finished. The handler
+/// must be called once the events are handled, or the system stops relaunching
+/// us for this session.
+final class BackgroundDownloadDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard LocalModelDownloadSession.identifiers.values.contains(identifier) else {
+            completionHandler()
+            return
+        }
+        LocalModelDownloader.shared.handleBackgroundRelaunch {
+            DispatchQueue.main.async(execute: completionHandler)
         }
     }
 }

@@ -34,7 +34,16 @@ enum UITestHostSecrets {
         }
     }
 
+    /// `UITEST_NO_HOST_KEYS=1`: behave like a machine with no key files —
+    /// the GitHub runner — so the offline seeds can be driven locally in
+    /// the state CI actually sees (2026-09-10: two Product E2E tests passed
+    /// here on a staged key and failed there on the no-key gate).
+    static var hostKeysDisabled: Bool {
+        ProcessInfo.processInfo.environment["UITEST_NO_HOST_KEYS"] == "1"
+    }
+
     static func keyFromHostFile(preset: String) -> String? {
+        if hostKeysDisabled { return nil }
         let names = keyFileNames(forPreset: preset)
         // 1. Files the UI-test runner copied into this app container.
         //    The sandboxed app often cannot read /Users/… even when
@@ -92,6 +101,7 @@ enum UITestHostSecrets {
     }
 
     static func braveGroundingKeyFromHostFile() -> String? {
+        if hostKeysDisabled { return nil }
         let names = braveGroundingFileNames
         if let key = readKey(hostHome: stagedKeysDirectory, names: names) { return key }
         if let key = readKey(hostHome: teemoonHostHome, names: names) { return key }

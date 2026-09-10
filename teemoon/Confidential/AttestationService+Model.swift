@@ -74,6 +74,11 @@ extension AttestationService {
     /// direct host. `expectedModel` is verified against the response's
     /// `model_name` when present — a mismatch (wrong or stale direct host)
     /// is rejected so E2EE never binds to the wrong model.
+    ///
+    /// Retry taxonomy, shared with `fetchGatewayAttestation`: a thrown
+    /// transport error or a 5xx is retried; a 4xx is final — a 401 cannot
+    /// succeed on retry. A 2xx without a key yet (TEE cold start) stays
+    /// transient.
     static func fetchModelAttestation(
         from endpoint: URL, includeModelParam: Bool, expectedModel: String,
         apiKey: String, maxAttempts: Int, label: String, http: any HTTPClient
@@ -111,6 +116,10 @@ extension AttestationService {
             if status >= 500 {
                 logger.warning("[\(label, privacy: .public)] model attestation attempt \(attempt+1) HTTP \(status): server error — \(data.previewForLog(), privacy: .private)")
                 continue
+            }
+            if status >= 400 {
+                logger.warning("[\(label, privacy: .public)] model attestation HTTP \(status): no attestation from this source — \(data.previewForLog(), privacy: .private)")
+                return nil
             }
             guard let report = try? JSONDecoder().decode(Ed25519Report.self, from: data) else {
                 logger.warning("[\(label, privacy: .public)] model attestation attempt \(attempt+1) HTTP \(status): decode failed — \(data.previewForLog(), privacy: .private)")

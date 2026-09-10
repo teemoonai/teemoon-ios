@@ -678,16 +678,21 @@ final class TranscriptViewController: UIViewController {
                             }
                         } else if self.handoffItemToRelax == nil,
                                   abs(self.latestEstimate - height) > 40 {
+                            let before = self.latestEstimate
                             self.latestEstimate = max(height, 1)
                             // ONLY WHEN THE SECTION'S DIMENSION CAN ACTUALLY
                             // MOVE. Below the 120pt threshold `makeLayout`
                             // returns `.estimated(120)` either way, so a
                             // refresh would re-apply the snapshot for no
-                            // change — and mid-turn `.latest` is the user's
+                            // change — mid-turn `.latest` is the user's
                             // question row, which is exactly that case. A
                             // steady-state apply during a turn is what
-                            // `apply`'s own guard exists to prevent.
-                            if max(self.latestEstimate, height) > 120 {
+                            // `apply`'s own guard exists to prevent. The
+                            // dimension moves when EITHER side is above
+                            // the threshold: a row measuring 75pt under a
+                            // section still answering `.absolute(1170)`
+                            // needs the re-ask (device 2026-09-08).
+                            if max(before, height) > 120 {
                                 self.refreshLatestSection()
                             }
                         }
@@ -819,6 +824,7 @@ final class TranscriptViewController: UIViewController {
                 tail: tail)
         } ?? false)
 
+        let previousLatest = lastApplied?.transcript.last
         lastApplied = (transcript, tail)
 
         var snapshot = NSDiffableDataSourceSnapshot<TranscriptSection, TranscriptItem>()
@@ -879,6 +885,38 @@ final class TranscriptViewController: UIViewController {
                 + "lastKnown=\(Int(lastKnownStreamingHeight)) live=\(Int(streamingHeight)) "
                 + "latestEst=\(Int(latestEstimate))")
             #endif
+        }
+
+        // THE ROW LEAVING `.latest` IS MEASURED AGAIN AT ITS NEW INDEX PATH.
+        // A moved item is a delete and an insert; the layout has no resolved
+        // size for the new path and answers `.estimated(120)`, and a cell that
+        // is already on screen is NOT re-measured for it. Device 2026-09-08,
+        // twice: at a send the reply sat at 120pt over 1,139pt of content, and
+        // at a hand-off the prompt grew from its measured 96pt to 120pt under
+        // the reply, which moved by that much as it landed. Reconfiguring the
+        // row re-runs the registration with its cached height as the floor
+        // and self-sizes it where it now is.
+        //
+        // At a SEND the section's dimension is also still the outgoing reply's
+        // measured height, so the incoming prompt would be laid out in a cell
+        // the size of the reply (1,170pt over 43pt): hand it the estimate
+        // first, and keep the reply's height as its floor. At a hand-off the
+        // seed above owns `latestEstimate`; leave it.
+        if !threadChanged, let previous = previousLatest, let last = transcript.last,
+           previous != last, snapshot.itemIdentifiers(inSection: .transcript).contains(previous) {
+            if !needsHandoffReconfigure {
+                if handoffItemToRelax == previous {
+                    // Never shown, so never relaxed: its floor is still the
+                    // streaming seed, not a measurement. Drop it rather than
+                    // freeze the reply at a height it may not have.
+                    TranscriptRowHeightCache.forget(previous)
+                } else if latestEstimate > 120 {
+                    TranscriptRowHeightCache.store(latestEstimate, for: previous)
+                }
+                latestEstimate = TranscriptRowHeightCache.height(for: last) ?? 120
+                handoffItemToRelax = nil
+            }
+            snapshot.reconfigureItems([previous])
         }
 
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -1152,6 +1190,17 @@ final class TranscriptViewController: UIViewController {
         streamingHost = host
         collectionView.supplementalAccessibilityViews = [host.view]
         collectionView.setNeedsLayout()
+        #if DEBUG
+        // The turn-end dump cannot see a gap that only exists while the model
+        // is thinking (device 2026-09-08: blank between the prompt and the
+        // chip). Twice: after the follow glide, and once the reserve settled.
+        for delay in [1.5, 4.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.streamingHost != nil else { return }
+                self.dumpColumn("turn-start+\(delay)s")
+            }
+        }
+        #endif
     }
 
     private func layoutStreamingView() {
@@ -1550,6 +1599,10 @@ final class TranscriptViewController: UIViewController {
                                 index, frame.minY, frame.height, realised ? "y" : "n",
                                 floor, content, identity))
             previousMaxY = max(previousMaxY ?? 0, frame.maxY)
+        }
+        if let stream = streamingHost?.view.frame {
+            lines.append(String(format: "[column]   stream y=%.1f h=%.1f gapAbove=%.1f",
+                                stream.minY, stream.height, stream.minY - (previousMaxY ?? 0)))
         }
         let end = previousMaxY ?? 0
         lines.append(String(format: "[column]   contentH=%.1f afterLastRow=%.1f inset=%.1f "

@@ -66,6 +66,16 @@ extension ProviderStore {
         provider.requiresAPIKey ? Self.migratedCredential(for: provider) : ""
     }
 
+    /// Whether a send to this provider will carry a key. Uses the SAME lookup
+    /// as the send path (`credential(for:)`), so the gate and the wire cannot
+    /// disagree: a keyed provider with nothing stored goes out with no auth
+    /// header, and the server's reply is a validation error naming a header
+    /// the user never heard of (Brave: HTTP 422 "Field required").
+    func hasCredential(for provider: Provider) -> Bool {
+        guard provider.requiresAPIKey else { return true }
+        return !credential(for: provider).trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     /// The key already saved for whichever configured provider points at this
     /// endpoint, or nil when none does.
     ///

@@ -232,6 +232,19 @@ final class LocalEngineResidency {
     }
 }
 
+/// Mirrors a diagnostic line onto stderr — the stream LiteRT's native runtime
+/// logs to — when `TEEMOON_NATIVE_LOG=1` (see `teemoonApp`). The unified log
+/// is not readable from a device without root, and `idevicesyslog` drops the
+/// app's own os_log; this is the one place both timelines line up.
+enum DiagLog {
+    static let enabled = ProcessInfo.processInfo.environment["TEEMOON_NATIVE_LOG"] == "1"
+    private static let clock = ISO8601DateFormatter()
+    static func note(_ line: String) {
+        guard enabled else { return }
+        fputs("teemoon \(clock.string(from: Date())) \(line)\n", stderr)
+    }
+}
+
 // MARK: - Memory pressure
 
 /// Releases loaded weights when the system asks for memory back.
@@ -255,7 +268,8 @@ enum LocalMemoryPressure {
         for name in [UIApplication.didReceiveMemoryWarningNotification,
                      UIApplication.didEnterBackgroundNotification] {
             center.addObserver(forName: name, object: nil, queue: .main) { note in
-                logger.info("[local] \(note.name.rawValue, privacy: .public) — releasing on-device models")
+                logger.error("[local] \(note.name.rawValue, privacy: .public) — releasing on-device models")
+                DiagLog.note("[local] \(note.name.rawValue) — evicting engines")
                 Task { await LiteRTTransport.evictEngines() }
             }
         }

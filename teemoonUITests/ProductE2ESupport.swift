@@ -102,13 +102,18 @@ enum ProductE2E {
         environment: [String: String] = [:]
     ) -> XCUIApplication {
         var env = environment
+        // `TEST_RUNNER_UITEST_NO_HOST_KEYS=1` on xcodebuild: the app sees no
+        // host key files, as on the GitHub runner. Forwarded, and no keys
+        // are staged into the container either.
+        let noHostKeys = ProcessInfo.processInfo.environment["UITEST_NO_HOST_KEYS"] == "1"
+        if noHostKeys { env["UITEST_NO_HOST_KEYS"] = "1" }
         // Path only — never the key. `SIMULATOR_*` can be stripped from
         // launchEnvironment; `TEEMOON_HOST_HOME` is ours.
-        if let home = runnerHostHome() {
+        if !noHostKeys, let home = runnerHostHome() {
             if env["SIMULATOR_HOST_HOME"] == nil { env["SIMULATOR_HOST_HOME"] = home }
             if env["TEEMOON_HOST_HOME"] == nil { env["TEEMOON_HOST_HOME"] = home }
         }
-        if let staged = stageHostKeys() {
+        if !noHostKeys, let staged = stageHostKeys() {
             env["TEEMOON_STAGED_KEYS"] = staged.path
         }
         let app = XCUIApplication()

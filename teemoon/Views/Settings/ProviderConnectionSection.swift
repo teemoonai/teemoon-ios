@@ -11,6 +11,7 @@ import SwiftUI
 struct ProviderConnectionSection: View {
     @Bindable var form: AddEditProviderModel
     var endpointFocused: FocusState<Bool>.Binding
+    @FocusState private var keyFocused: Bool
 
     var body: some View {
         Section {
@@ -60,7 +61,8 @@ struct ProviderConnectionSection: View {
                 HStack {
                     Group {
                         if form.showAPIKey {
-                            TextField(form.apiKeyPlaceholder, text: $form.apiKey, axis: .vertical).lineLimit(1...4)
+                            TextField(text: $form.apiKey, prompt: keyPrompt, axis: .vertical) { Text("api key") }
+                                .lineLimit(1...4)
                                 .textContentType(.none)
                         } else {
                             // A SecureField is treated as a login password by iOS
@@ -68,7 +70,7 @@ struct ProviderConnectionSection: View {
                             // triggers Passwords autofill/save. `.oneTimeCode` reclassifies
                             // it as an OTP field → no password autofill. teemoon stores the
                             // key in its own keychain, so this is purely cosmetic.
-                            SecureField(form.apiKeyPlaceholder, text: $form.apiKey)
+                            SecureField(text: $form.apiKey, prompt: keyPrompt) { Text("api key") }
                                 .textContentType(.oneTimeCode)
                         }
                     }
@@ -76,6 +78,11 @@ struct ProviderConnectionSection: View {
                     #if !os(macOS)
                     .autocapitalization(.none)
                     #endif
+                    if form.keyFieldError != nil {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("provider.keyFieldErrorMark")
+                    }
                     if !form.apiKey.isEmpty {
                         Button { form.copyKey() } label: {
                             Image(systemName: form.apiKeyCopied ? "checkmark" : "square.on.square")
@@ -92,6 +99,13 @@ struct ProviderConnectionSection: View {
                     .buttonStyle(.borderless)
                     #endif
                 }
+                .focused($keyFocused)
+                // The refusal lands ON this row — red prompt, mark, one shake,
+                // focus — and its sentence in the section footer. Nothing is
+                // inserted into the list, so the form does not jump.
+                .modifier(ShakeEffect(animatableData: CGFloat(form.keyFocusRequest)))
+                .animation(.linear(duration: 0.4), value: form.keyFocusRequest)
+                .onChange(of: form.keyFocusRequest) { _, _ in keyFocused = true }
 
                 // WHERE TO GET THE VALUE, next to the field asking for it.
                 //
@@ -128,6 +142,12 @@ struct ProviderConnectionSection: View {
         }
     }
 
+    /// Placeholder in the field's own colour until a save is refused, then red.
+    private var keyPrompt: Text {
+        let prompt = Text(form.apiKeyPlaceholder)
+        return form.keyFieldError == nil ? prompt : prompt.foregroundColor(.red)
+    }
+
     @ViewBuilder
     private var connectionFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -153,7 +173,12 @@ struct ProviderConnectionSection: View {
             // CAN come back from an encrypted device backup. That is a defensible
             // default — restoring a phone keeps your keys — and it is not the same
             // sentence, so it doesn't get said.
-            if form.showKeyField {
+            if let error = form.keyFieldError {
+                Text(error)
+                    .textCase(.lowercase)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("provider.keyFieldError")
+            } else if form.showKeyField {
                 Text("the key is stored in the ios keychain, not in teemoon's own files\(form.keyDestinationClause).")
             }
             if form.awaitingFirstModel {
@@ -200,5 +225,15 @@ struct SchemeChipView: View {
             .background(Color(.systemFill), in: RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// One horizontal shake per increment of `animatableData` — the row-level
+/// "no" Apple's password fields give, for a save refused on this field.
+private struct ShakeEffect: GeometryEffect {
+    var animatableData: CGFloat
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(
+            translationX: 8 * sin(animatableData * .pi * 3), y: 0))
     }
 }

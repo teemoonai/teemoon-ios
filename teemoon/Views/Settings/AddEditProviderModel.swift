@@ -134,8 +134,16 @@ final class AddEditProviderModel {
     var scheme: EndpointScheme = .https
     var endpointHost = ""
     var model = ""
-    var apiKey = ""
+    var apiKey = "" {
+        // Typing is the fix, so the inline error goes the moment it starts.
+        didSet { if !apiKey.trimmingCharacters(in: .whitespaces).isEmpty { keyFieldError = nil } }
+    }
     var showAPIKey = false
+    /// Inline validation under the key field, set by a save attempt on a new
+    /// cloud setup with the key blank. Cleared by typing.
+    var keyFieldError: String?
+    /// Bumped with `keyFieldError` so the view moves focus into the key field.
+    var keyFocusRequest = 0
     var apiKeyCopied = false
 
     // Preset + hidden fields round-tripped through save/edit.
@@ -291,6 +299,17 @@ final class AddEditProviderModel {
         !model.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// A setup that claims `requiresAPIKey` cannot be saved without one — new
+    /// OR edited. A cloud preset fills name, endpoint and model, so save went
+    /// through with the key field blank and the first message went out with no
+    /// auth header; clearing the field on an existing setup recreated the same
+    /// state from Settings. Save stays ENABLED — a disabled button explains
+    /// nothing — and `save()` refuses with an inline error on the field.
+    /// Revoking a key is "delete this setup", on the same screen.
+    var missingRequiredKey: Bool {
+        requiresAPIKey && apiKey.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     /// `isValid` requires a model, and in `.serverAndKey` nothing on screen shows one —
     /// so a disabled `save` needs a reason here that the model section used to give by
     /// existing. A preset carries a default and a successful probe resolves one, so
@@ -345,7 +364,7 @@ final class AddEditProviderModel {
     }
 
     var apiKeyPlaceholder: String {
-        authRequirement == .needed ? "api key — required" : "api key"
+        authRequirement == .needed || missingRequiredKey ? "api key — required" : "api key"
     }
 
     /// Whether the SAVED provider should claim it needs a key.
@@ -695,6 +714,11 @@ final class AddEditProviderModel {
     /// screen up — the keychain refused the key and `keySaveError` says why.
     func save() -> Bool {
         guard let providerStore else { return false }
+        if missingRequiredKey {
+            keyFieldError = "enter your \(consoleDisplayName) api key to save this setup."
+            keyFocusRequest += 1
+            return false
+        }
         let id = editingProviderID ?? UUID()
         let extraParams = Dictionary(uniqueKeysWithValues: extraParamsList.filter { !$0.key.isEmpty })
         let trimmedModel = model.trimmingCharacters(in: .whitespaces)
@@ -729,7 +753,8 @@ final class AddEditProviderModel {
         }
         // Unconditional: an EMPTIED field must delete the stored key, not leave
         // the old one in place. Guarding on non-empty made the clear path
-        // unreachable, so a removed key kept being sent.
+        // unreachable, so a removed key kept being sent. Reached only for a
+        // self-hosted setup now — a keyed one refused above.
         do {
             try providerStore.setCredential(apiKey, forProviderID: savedID)
         } catch {

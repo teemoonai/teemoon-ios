@@ -285,6 +285,15 @@ extension WhereSheetView {
         let arriving = arrivingFraction(for: row.provider) ?? pullFraction(for: row)
         let missing = missingWeights(for: row.provider)
         let pullFailed = failedPull(for: row)
+        // A wi-fi-only download with the phone on mobile data: the bar is not
+        // moving, and the row must say why. Tapping re-asks, so "download now"
+        // is one tap away instead of hidden behind cancel-and-start-over.
+        let waiting = row.provider.localModelID.flatMap { id in
+            downloader.network(id).flatMap {
+                CellularDownloadGate.waitingLabel(network: $0, parked: downloader.isParked(id))
+            }
+        }
+        let parked = waiting != nil ? missingOrArriving(row.provider) : nil
         return Button {
             // An interrupted download resumes instead of selecting: the row is
             // already selected, and tapping something that can't answer should
@@ -293,6 +302,8 @@ extension WhereSheetView {
             // hasn't got.
             if let missing {
                 startAndSelect(missing)
+            } else if let parked {
+                startAndSelect(parked)
             } else if pullFailed, let base = row.provider.openAIBaseURL {
                 pullCenter?.start(ref: row.modelID, baseURL: base)
                 Haptics.play()
@@ -316,9 +327,14 @@ extension WhereSheetView {
                 //
                 // A percentage is now the ONLY thing this slot carries. Warmth
                 // used to share it with the tick, which is why the tick moved.
-                trailingText: arriving.map { "downloading \(Int($0 * 100))%" },
-                trailingMonospaced: arriving != nil,
-                caption: missing != nil ? "not downloaded — \(PointerVerb.act) to resume"
+                trailingText: arriving.map { waiting ?? "downloading \(Int($0 * 100))%" },
+                trailingMonospaced: arriving != nil && waiting == nil,
+                // A download that FAILED says why, in the downloader's own words —
+                // "not downloaded" alone reads as an interruption, and a checksum
+                // rejection is not one.
+                caption: missing != nil
+                    ? (missing.flatMap { downloader.failure($0.id) }
+                       ?? "not downloaded — \(PointerVerb.act) to resume")
                     : pullFailed ? "download failed — \(PointerVerb.act) to retry"
                     : readyCaption(for: provider),
                 captionTint: (missing != nil || pullFailed) ? .orange : captionColor(for: provider),
@@ -340,11 +356,16 @@ extension WhereSheetView {
                 // isn't one, and "cold" is answering a question nobody is asking
                 // until the bytes land. "download failed — tap to retry · cold" reads
                 // as two problems where there is one.
-                warmth: (arriving == nil && !pullFailed) ? warmthLabel(row) : nil
+                // Nor for weights that aren't here: "failed its integrity check ·
+                // cold" grades the temperature of a file that doesn't exist.
+                warmth: (arriving == nil && !pullFailed && missing == nil) ? warmthLabel(row) : nil
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(rowAccessibility(provider, selected: selected))
+        .accessibilityLabel(rowAccessibility(
+            provider, selected: selected,
+            state: arriving.map { waiting ?? "downloading \(Int($0 * 100))%" }
+        ))
         // Stable handle for capture rigs. Tapping by matched TEXT proved
         // fragile — a label query resolved to an occluded twin and the tap
         // opened "connect a computer" instead of resuming a download. Ids are
@@ -421,6 +442,15 @@ extension WhereSheetView {
         return model
     }
 
+    /// The catalog model behind a local provider whose weights are not here yet,
+    /// whether or not a download is running.
+    func missingOrArriving(_ provider: Provider) -> LocalModel? {
+        guard let localID = provider.localModelID,
+              let model = LocalModelCatalog.model(id: localID),
+              !isInstalled(model) else { return nil }
+        return model
+    }
+
     func readyCaption(for provider: Provider) -> String? {
         getPolicy.readyCaption(for: provider)
     }
@@ -474,11 +504,15 @@ extension WhereSheetView {
         getPolicy.warnsUnencryptedNear(provider) ? .orange : .secondary
     }
 
-    func rowAccessibility(_ provider: Provider, selected: Bool) -> String {
+    /// `state` is the trailing text while weights arrive — "downloading 24%",
+    /// "waiting for wi-fi" — so VoiceOver (and the capture rigs) hear what the
+    /// bar shows.
+    func rowAccessibility(_ provider: Provider, selected: Bool, state: String? = nil) -> String {
         var parts = [
             WhereProviderPresentation.modelLabel(for: provider),
             WhereProviderPresentation.placeCaption(for: provider),
         ]
+        if let state { parts.append(state) }
         if selected { parts.append("selected") }
         return parts.joined(separator: ", ")
     }

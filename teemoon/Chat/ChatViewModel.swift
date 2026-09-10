@@ -42,6 +42,7 @@ final class ChatViewModel {
     enum SendPrep: Equatable {
         case blockedEmptyPrompt
         case blockedNoProvider
+        case blockedNoKey
         case blockedDownloading
         case confirmE2EE
         case blockedE2EE
@@ -50,12 +51,14 @@ final class ChatViewModel {
 
     func prepareSend(
         hasProvider: Bool,
+        hasKey: Bool,
         isDownloading: Bool,
         trust: TrustSendPolicy,
         requirePrompt: Bool = true
     ) -> SendPrep {
         if requirePrompt, isPromptEmpty { return .blockedEmptyPrompt }
         if !hasProvider { return .blockedNoProvider }
+        if !hasKey { return .blockedNoKey }
         if isDownloading { return .blockedDownloading }
         switch trust {
         case .allow: return .ready
@@ -92,6 +95,28 @@ final class ChatViewModel {
         provider.capabilities.contains(.attestation) && teeContext?.e2eePeer == nil
     }
 
+    /// Whether this turn must be refused because the provider needs an API
+    /// key and none is stored. Consulted BEFORE `prepareTurn`, so a missing
+    /// key is reported as a missing key — not as the E2EE failure an
+    /// unauthenticated attestation fetch would produce. Keyless providers
+    /// (self-hosted, on-device) are unaffected. Pure; see SendPrepTests.
+    static func mustRefuseMissingKey(provider: Provider, credential: String) -> Bool {
+        provider.requiresAPIKey && !provider.isLocal
+            && credential.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// The card for a refused keyless send. Names the key and where it goes;
+    /// no HTTP status, because nothing went over the wire.
+    static func missingKeyError(for provider: Provider) -> LLMError {
+        LLMError(
+            source: .provider(name: provider.name),
+            userMessage: "\(provider.name) needs an API key and none is saved, so nothing was sent. Paste one in settings → places & keys → cloud keys, then retry.",
+            httpStatus: nil, url: provider.openAIBaseURL, requestHeaders: nil,
+            requestBodyJSON: nil, messageHistory: nil, responseBody: nil,
+            underlyingError: nil
+        )
+    }
+
     func generate(
         currentThread: inout Thread?,
         modelContext: ModelContext,
@@ -118,6 +143,22 @@ final class ChatViewModel {
             await generateResponse(in: thread, settings: settings, providers: providers, session: session, llm: llm, modelContext: modelContext)
             generatingThreadID = nil
         }
+    }
+
+    /// The user message to re-ask when the app returns to the foreground, or
+    /// nil. Non-nil only when `thread` is the one whose last turn the on-device
+    /// transport abandoned because the app left the foreground (iOS revokes
+    /// GPU access), AND that turn left the user message unanswered. A turn the
+    /// user stopped is not resumed — they asked for it to stop.
+    ///
+    /// CONSUMES the flag: the caller re-asks exactly once. Without the resume
+    /// the thread carries an orphaned request, and the next question is
+    /// answered as if it were that request — "hello" got the potato essay.
+    func interruptedUserMessage(in thread: Thread?, llm: ChatGeneration) -> Message? {
+        guard let thread, llm.interruptedThreadID == thread.id, !llm.running else { return nil }
+        llm.interruptedThreadID = nil
+        guard let last = thread.sortedMessages.last, last.role == .user else { return nil }
+        return last
     }
 
     func retry(
@@ -178,6 +219,21 @@ final class ChatViewModel {
         let groundingKey = provider.capabilities.contains(.builtInGrounding)
             ? nil : settings.groundingAPIKey
 
+        // FAIL CLOSED, and keep this ahead of `prepareTurn`: attestation with
+        // no key 401s and would surface below as an E2EE failure that no
+        // lock-icon re-verify can fix. Same presentation as a generation error.
+        let apiKey = providers.credential(for: provider)
+        if Self.mustRefuseMissingKey(provider: provider, credential: apiKey) {
+            logger.warning("[send] \(provider.name, privacy: .public) requires an API key and none is stored — refusing to send")
+            llm.output = ""
+            llm.lastError = Self.missingKeyError(for: provider)
+            llm.lastErrorThreadID = thread.id
+            session.beginRequest(expectingE2EE: false)
+            session.finishTurn(debugInfo: nil, error: llm.lastError)
+            llm.scrollToBottomToken += 1
+            return
+        }
+
         let teeContext = await session.prepareTurn()
         if Self.mustRefuseUnsealedSend(provider: provider, teeContext: teeContext) {
             // FAIL CLOSED. This used to log a warning and
@@ -206,7 +262,7 @@ final class ChatViewModel {
             thread: thread,
             systemPrompt: settings.systemPrompt,
             groundingAPIKey: groundingKey,
-            apiKey: providers.credential(for: provider),
+            apiKey: apiKey,
             teeContext: teeContext
         )
         // `generate` has already set `running = false`. Do not yield before

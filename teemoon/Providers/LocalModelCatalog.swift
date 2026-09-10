@@ -185,6 +185,95 @@ enum LocalModelStorage {
         FileManager.default.fileExists(atPath: file(for: model).path)
     }
 
+    /// Where a finished download waits for its checksum. Same directory as the
+    /// bundle, so a relaunch can find it; a different name, so nothing can load
+    /// it before it is verified.
+    static func unverifiedFile(for repoID: String) -> URL {
+        directory(for: repoID).appending(component: "download.unverified")
+    }
+
+    /// Resume data the system handed back for an interrupted download, kept
+    /// next to the bundle so `delete(_:)` clears it with everything else.
+    static func resumeDataFile(for repoID: String) -> URL {
+        directory(for: repoID).appending(component: "download.resume")
+    }
+
+    static func resumeData(for repoID: String) -> Data? {
+        try? Data(contentsOf: resumeDataFile(for: repoID))
+    }
+
+    static func saveResumeData(_ data: Data, for repoID: String) {
+        let url = resumeDataFile(for: repoID)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            logger.error("[local] could not save resume data for \(repoID, privacy: .public): \(error)")
+        }
+    }
+
+    static func clearResumeData(for repoID: String) {
+        try? FileManager.default.removeItem(at: resumeDataFile(for: repoID))
+    }
+
+    /// The last failure, on disk: a background relaunch that meets one is
+    /// suspended seconds later, and the next foreground launch has to be able
+    /// to say why the row went back to "download".
+    static func failureFile(for repoID: String) -> URL {
+        directory(for: repoID).appending(component: "download.failed")
+    }
+
+    static func failure(for repoID: String) -> String? {
+        guard let text = try? String(contentsOf: failureFile(for: repoID), encoding: .utf8),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
+    static func saveFailure(_ message: String, for repoID: String) {
+        let url = failureFile(for: repoID)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try message.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            logger.error("[local] could not save failure for \(repoID, privacy: .public): \(error)")
+        }
+    }
+
+    static func clearFailure(for repoID: String) {
+        try? FileManager.default.removeItem(at: failureFile(for: repoID))
+    }
+
+    /// A download to start over the next time the app is on screen, with the
+    /// network policy it had. Written when its link expired under a process
+    /// about to be suspended; consumed by the restart, or by the user's own
+    /// start.
+    static func restartIntentFile(for repoID: String) -> URL {
+        directory(for: repoID).appending(component: "download.restart")
+    }
+
+    static func restartIntent(for repoID: String) -> DownloadNetwork? {
+        guard let text = try? String(contentsOf: restartIntentFile(for: repoID), encoding: .utf8)
+        else { return nil }
+        return DownloadNetwork(rawValue: text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    static func saveRestartIntent(_ network: DownloadNetwork, for repoID: String) {
+        let url = restartIntentFile(for: repoID)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try network.rawValue.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            logger.error("[local] could not save restart intent for \(repoID, privacy: .public): \(error)")
+        }
+    }
+
+    static func clearRestartIntent(for repoID: String) {
+        try? FileManager.default.removeItem(at: restartIntentFile(for: repoID))
+    }
+
     static func delete(_ model: LocalModel) throws {
         try FileManager.default.removeItem(at: directory(for: model.id))
     }
@@ -272,7 +361,37 @@ enum LocalModelStorage {
 
 // MARK: - Downloader
 
-/// Downloads model bundles, one at a time, with progress.
+/// What went wrong with a download, in one row-caption-sized line. These are
+/// shown as-is under the model's name, so they stay short and say what to do.
+enum LocalModelDownloadError: LocalizedError, Equatable {
+    /// The bytes arrived but do not match the pinned digest; the file was discarded.
+    case integrityCheckFailed
+    case http(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .integrityCheckFailed: return "download failed its integrity check — try again"
+        case .http(401), .http(403): return "download link expired — tap to start again"
+        case .http(let status): return "download failed (HTTP \(status)) — try again"
+        }
+    }
+}
+
+/// Which networks a download may use. Picked per download, at the tap.
+enum DownloadNetwork: String, Sendable, CaseIterable {
+    /// Pauses off Wi-Fi and continues when it is back — what a download started
+    /// on Wi-Fi does unless the user said otherwise.
+    case wifiOnly
+    /// Mobile data too. Only ever the result of an explicit choice.
+    case any
+}
+
+/// Downloads model bundles, with progress, through a background session.
+///
+/// The transfer belongs to the system: it survives the app being suspended or
+/// killed, and `reconnect()` picks it up again — mid-flight, with progress, or
+/// already landed and waiting for its checksum. Cancelling or failing leaves
+/// resume data behind, so the next start continues where it stopped.
 ///
 /// Serial by design: two concurrent multi-gigabyte downloads on a phone compete
 /// for bandwidth and disk and finish later than if they had queued.
@@ -285,28 +404,53 @@ final class LocalModelDownloader {
         let id: String          // repo id
         var fraction: Double    // 0...1
         var model: LocalModel
+        var network: DownloadNetwork = .any
+        /// A wi-fi-only download the app has stopped because the phone is on
+        /// mobile data. No task exists while parked; `pathChanged` restarts it
+        /// from resume data when wi-fi is back.
+        var parked = false
+        /// Started over by the app after its link expired. A second expiry on
+        /// such a job is reported, not retried — only the user's own start
+        /// earns another.
+        var restarted = false
     }
+
+    /// Whether a scene is on screen, from `scenePhaseChanged`. A transfer the
+    /// app starts while it is about to be suspended is deferred by the daemon
+    /// indefinitely, so a restart waits for this.
+    private var sceneIsActive = false
+
+    /// The last path the app was told about; a wi-fi-only start on a
+    /// restricted path parks immediately instead of trusting the daemon.
+    private var pathIsRestricted = false
 
     /// Active + queued downloads, keyed by repo id.
     private(set) var jobs: [String: Job] = [:]
     /// Last failure per repo id, cleared when a retry starts.
     private(set) var failures: [String: String] = [:]
 
+    /// One run per repo id. The token tells a finishing run whether it is still
+    /// the current one — a cancel-and-restart replaces it before it has finished.
+    private var runs: [String: UUID] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
 
-    /// A downloader with jobs already in flight and no tasks behind them, for
-    /// previews.
-    ///
-    /// Mid-download is a state the real singleton can only reach by actually
-    /// pulling gigabytes, so without this the progress row — bar, percentage,
-    /// cancel — could not be looked at before shipping.
-    static func previewing(_ jobs: [(LocalModel, Double)]) -> LocalModelDownloader {
-        let downloader = LocalModelDownloader()
-        for (model, fraction) in jobs {
-            downloader.jobs[model.id] = Job(id: model.id, fraction: fraction, model: model)
-        }
-        return downloader
-    }
+    private let sessions: [DownloadNetwork: LocalModelDownloadSession]
+    /// What a relaunch may attach to and where its bytes come from. The app
+    /// uses the shipped catalog and HuggingFace; tests use their own entries
+    /// and a local server.
+    private let catalog: [LocalModel]
+    private let hub: URL
+
+    /// iOS relaunched the app in the background to deliver a finished download.
+    /// Held until every landed file has been verified, so the process is not
+    /// suspended with a bundle half-hashed.
+    @ObservationIgnored
+    private var relaunchCompletion: (@Sendable () -> Void)?
+    private var relaunchEventsDelivered = false
+    /// `reconnect()` has run once. A relaunch that delivers a FAILURE leaves no
+    /// landing file to hold the completion, so without this the process is
+    /// suspended before the failure is even read (audit 2026-09-08, finding 8).
+    private var hasReconnected = false
 
     /// Called on the main actor when a download has landed AND verified.
     ///
@@ -317,88 +461,359 @@ final class LocalModelDownloader {
     @ObservationIgnored
     var onInstalled: ((LocalModel) -> Void)?
 
-    func isDownloading(_ repoID: String) -> Bool { jobs[repoID] != nil }
-
-    func progress(_ repoID: String) -> Double? { jobs[repoID]?.fraction }
-
-    func failure(_ repoID: String) -> String? { failures[repoID] }
-
-    func start(_ model: LocalModel) {
-        guard tasks[model.id] == nil else { return }
-        failures[model.id] = nil
-        jobs[model.id] = Job(id: model.id, fraction: 0, model: model)
-
-        // Bound to the singleton rather than re-capturing `self`: this closure is
-        // called from the download delegate's queue, and a nested `[weak self]`
-        // inside an already weakly-captured Task is a "captured var in
-        // concurrently-executing code" race (a hard error under Swift 6).
-        let repoID = model.id
-        let onProgress: @Sendable (Double) -> Void = { fraction in
-            Task { @MainActor in
-                LocalModelDownloader.shared.jobs[repoID]?.fraction = fraction
-            }
+    /// The app uses the two background sessions. Tests pass their own, backed by
+    /// an ephemeral configuration and a URLProtocol stub.
+    init(sessions: [DownloadNetwork: LocalModelDownloadSession],
+         catalog: [LocalModel] = LocalModelCatalog.all,
+         hub: URL = URL(string: "https://huggingface.co")!) {
+        self.sessions = sessions
+        self.catalog = catalog
+        self.hub = hub
+        for model in catalog {
+            if let saved = LocalModelStorage.failure(for: model.id) { failures[model.id] = saved }
         }
-
-        tasks[model.id] = Task { [weak self] in
-            do {
-                try await Self.downloadBundle(model, onProgress: onProgress)
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    // Trust the file, not the callback: a "finished" download
-                    // that left nothing behind is a failure, and reporting it as
-                    // success just moves the error to the first chat instead.
-                    if !LocalModelStorage.isInstalled(model) {
-                        self.failures[model.id] = "The download finished but the model file is missing. Try again."
-                    } else {
-                        // Only after the file is confirmed on disk — the
-                        // checksum has already been verified before the move, so
-                        // reaching here means it is genuinely runnable.
-                        self.onInstalled?(model)
+        for session in sessions.values {
+            session.onProgress = { [weak self] repoID, fraction in
+                Task { @MainActor in
+                    guard let self, let job = self.jobs[repoID] else { return }
+                    if Int(job.fraction * 100) != Int(fraction * 100) {
+                        DiagLog.note("[local] \(repoID) \(Int(fraction * 100))% via \(job.network.rawValue)")
                     }
-                    self.finish(model.id)
+                    self.jobs[repoID]?.fraction = fraction
                 }
-            } catch is CancellationError {
-                await MainActor.run { [weak self] in self?.finish(model.id) }
-            } catch {
-                logger.error("[local] download failed for \(model.id, privacy: .public): \(error)")
-                await MainActor.run { [weak self] in
-                    self?.failures[model.id] = Self.message(for: error)
-                    self?.finish(model.id)
+            }
+            session.onResumeData = { repoID, data in
+                LocalModelStorage.saveResumeData(data, for: repoID)
+            }
+            session.onFinishedEvents = { [weak self] in
+                Task { @MainActor in
+                    self?.relaunchEventsDelivered = true
+                    self?.completeRelaunchIfDone()
                 }
             }
         }
     }
 
-    private static func downloadBundle(
-        _ model: LocalModel, onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws {
-        let destination = LocalModelStorage.file(for: model)
-        try FileManager.default.createDirectory(
-            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        let url = URL(string:
-            "https://huggingface.co/\(model.id)/resolve/\(model.revision)/\(model.fileName)")!
+    private convenience init() {
+        var hub = URL(string: "https://huggingface.co")!
+        #if DEBUG
+        // A UI test can stand in for the Hub — a local server that hands back
+        // the wrong bytes is the only way to watch the failure rows on a
+        // simulator without waiting on a 2.4 GB transfer.
+        if let override = ProcessInfo.processInfo.environment["UITEST_HUB_BASE_URL"],
+           let url = URL(string: override) {
+            hub = url
+        }
+        #endif
+        self.init(sessions: [.wifiOnly: .wifiOnly, .any: .any], hub: hub)
+    }
 
-        let temp = try await ProgressReportingDownload.run(url: url, onProgress: onProgress)
-        defer { try? FileManager.default.removeItem(at: temp) }
+    /// A downloader with jobs already in flight and no tasks behind them, for
+    /// previews.
+    ///
+    /// Mid-download is a state the real singleton can only reach by actually
+    /// pulling gigabytes, so without this the progress row — bar, percentage,
+    /// cancel — could not be looked at before shipping.
+    static func previewing(_ jobs: [(LocalModel, Double)],
+                           network: DownloadNetwork = .any) -> LocalModelDownloader {
+        let downloader = LocalModelDownloader(sessions: [:])
+        for (model, fraction) in jobs {
+            downloader.jobs[model.id] = Job(id: model.id, fraction: fraction, model: model, network: network)
+        }
+        return downloader
+    }
 
-        // Verify BEFORE the file is moved into place. Once it is at the
-        // destination it is indistinguishable from a good download, and the next
-        // launch will happily memory-map it.
-        let actual = try sha256OfFile(at: temp)
+    func isDownloading(_ repoID: String) -> Bool { jobs[repoID] != nil }
+
+    func progress(_ repoID: String) -> Double? { jobs[repoID]?.fraction }
+
+    func network(_ repoID: String) -> DownloadNetwork? { jobs[repoID]?.network }
+
+    func failure(_ repoID: String) -> String? { failures[repoID] }
+
+    /// Starts, resumes, or re-homes a download.
+    ///
+    /// Resume data from an earlier cancel or failure is used when present. A
+    /// download already running under a different network choice is cancelled
+    /// (keeping its resume data) and continued under the new one.
+    func start(_ model: LocalModel, network: DownloadNetwork = .any) {
+        if let job = jobs[model.id], job.network == network, !job.parked { return }
+        record(failure: nil, for: model.id)
+        LocalModelStorage.clearRestartIntent(for: model.id)
+        jobs[model.id] = Job(id: model.id, fraction: jobs[model.id]?.fraction ?? 0,
+                             model: model, network: network)
+        if network == .wifiOnly && pathIsRestricted {
+            park(model.id)
+            return
+        }
+        launch(model, network: network)
+    }
+
+    /// The app's own wi-fi-only enforcement, fed from `NetworkPathObserver`.
+    ///
+    /// The daemon is told three ways not to use cellular, and still carried an
+    /// in-flight transfer onto mobile data when wi-fi was switched off. So
+    /// while the app is alive it does not rely on that: a wi-fi-only transfer is
+    /// cancelled (keeping its resume data) the moment the path is expensive or
+    /// constrained, and started again from that data when it is not.
+    func pathChanged(isMobileData: Bool, isConstrained: Bool) {
+        pathIsRestricted = isMobileData || isConstrained
+        logger.info("[local] path mobileData=\(isMobileData) constrained=\(isConstrained) jobs=\(self.jobs.count)")
+        DiagLog.note("[local] pathChanged mobileData=\(isMobileData) constrained=\(isConstrained) jobs=\(jobs.values.map { "\($0.id.split(separator: "/").last ?? "?"):\($0.network.rawValue):\(Int($0.fraction * 100))%:\($0.parked ? "parked" : "running")" })")
+        if pathIsRestricted {
+            // Not straight away. On the phone the default route flips to
+            // cellular for a few seconds during a wi-fi hiccup with the wi-fi
+            // icon never leaving the status bar; parking on every blip cancels
+            // and relaunches the transfer for nothing. The daemon's own
+            // `allowsCellularAccess = false` covers the wait.
+            guard pendingPark == nil else { return }
+            pendingPark = Task { [weak self] in
+                try? await Task.sleep(for: self?.parkDelay ?? .zero)
+                guard !Task.isCancelled, let self, self.pathIsRestricted else { return }
+                self.pendingPark = nil
+                self.parkWifiOnlyJobs()
+            }
+        } else {
+            pendingPark?.cancel()
+            pendingPark = nil
+            for job in jobs.values where job.network == .wifiOnly && job.parked {
+                logger.info("[local] wi-fi back, resuming \(job.id, privacy: .public)")
+                DiagLog.note("[local] wi-fi back, resuming \(job.id)")
+                jobs[job.id]?.parked = false
+                launch(job.model, network: .wifiOnly)
+            }
+        }
+    }
+
+    /// How long the path must stay on mobile data before a wi-fi-only transfer
+    /// is parked. Tests shorten it.
+    var parkDelay: Duration = .seconds(4)
+    private var pendingPark: Task<Void, Never>?
+
+    private func parkWifiOnlyJobs() {
+        for job in jobs.values where job.network == .wifiOnly && !job.parked {
+            logger.info("[local] parking \(job.id, privacy: .public) at \(Int(job.fraction * 100))%")
+            DiagLog.note("[local] parking \(job.id) at \(Int(job.fraction * 100))%")
+            park(job.id)
+        }
+    }
+
+    func isParked(_ repoID: String) -> Bool { jobs[repoID]?.parked ?? false }
+
+    /// Stops the transfer but keeps the job, so the row still shows where it got
+    /// to and says it is waiting.
+    private func park(_ repoID: String) {
+        tasks[repoID]?.cancel()
+        tasks[repoID] = nil
+        runs[repoID] = nil          // the dying run sees a foreign token and leaves the job alone
+        jobs[repoID]?.parked = true
+    }
+
+    /// Creates the transfer for an existing job, after any previous run for the
+    /// model has finished writing its resume data.
+    private func launch(_ model: LocalModel, network: DownloadNetwork) {
+        guard let session = sessions[network] else { return }
+        let previous = tasks[model.id]
+        previous?.cancel()
+        let token = UUID()
+        let url = url(for: model)
+        runs[model.id] = token
+        tasks[model.id] = Task { [weak self] in
+            // The old run writes its resume data as it dies; only then is there
+            // something to continue from.
+            await previous?.value
+            let resume = LocalModelStorage.resumeData(for: model.id)
+            let task = session.makeTask(url: url, resumeData: resume, repoID: model.id, network: network)
+            DiagLog.note("[local] launch \(model.id) network=\(network.rawValue) resume=\(resume != nil)")
+            task.resume()
+            await self?.run(model, task: task, session: session, resuming: resume != nil, token: token)
+        }
+    }
+
+    /// Re-attaches to whatever outlived the last process: transfers the daemon
+    /// is still running, and finished files that were never verified. Call once
+    /// at launch, before any UI can start a download.
+    func reconnect() async {
+        var inFlight = Set<String>()
+        var adopted = Set<Int>()
+        for (network, session) in sessions {
+            for task in await session.inFlightTasks() {
+                guard let repoID = task.taskDescription,
+                      let model = catalog.first(where: { $0.id == repoID }),
+                      tasks[repoID] == nil else {
+                    // Nothing to attach it to — a retired model, or a duplicate.
+                    task.cancel()
+                    continue
+                }
+                inFlight.insert(repoID)
+                adopted.insert(task.taskIdentifier)
+                jobs[repoID] = Job(id: repoID, fraction: 0, model: model, network: network)
+                let token = UUID()
+                runs[repoID] = token
+                tasks[repoID] = Task { [weak self] in
+                    await self?.run(model, task: task, session: session, resuming: false, token: token)
+                }
+            }
+        }
+        // Finished before the list above was read, so no longer on it. The
+        // daemon can deliver a whole transfer in the first milliseconds of a
+        // background relaunch; a result left unread here vanishes with the
+        // process, and the phone showed exactly that.
+        var seen = Set<ObjectIdentifier>()
+        for (network, session) in sessions where seen.insert(ObjectIdentifier(session)).inserted {
+            for (repoID, result, wifiOnly) in session.takeUnclaimedResults(adopted: adopted) {
+                guard let model = catalog.first(where: { $0.id == repoID }), tasks[repoID] == nil else { continue }
+                let network = wifiOnly.map { $0 ? DownloadNetwork.wifiOnly : .any } ?? network
+                inFlight.insert(repoID)
+                switch result {
+                case .success(let landed):
+                    jobs[repoID] = Job(id: repoID, fraction: 1, model: model, network: network)
+                    let token = UUID()
+                    runs[repoID] = token
+                    tasks[repoID] = Task { [weak self] in
+                        await self?.install(model, from: landed, token: token)
+                    }
+                case .failure(let error):
+                    logger.error("[local] \(repoID, privacy: .public) finished unattached: \(error)")
+                    jobs[repoID] = Job(id: repoID, fraction: 0, model: model, network: network)
+                    if !scheduleRestartIfLinkExpired(model, after: error) {
+                        record(failure: Self.message(for: error), for: repoID)
+                        finish(repoID)
+                    }
+                }
+            }
+        }
+        for model in catalog where !inFlight.contains(model.id) && tasks[model.id] == nil {
+            let landed = LocalModelStorage.unverifiedFile(for: model.id)
+            guard FileManager.default.fileExists(atPath: landed.path) else { continue }
+            jobs[model.id] = Job(id: model.id, fraction: 1, model: model)
+            let token = UUID()
+            runs[model.id] = token
+            tasks[model.id] = Task { [weak self] in
+                await self?.install(model, from: landed, token: token)
+            }
+        }
+        // Adopted on mobile data: park now, so the row says why the daemon is
+        // holding it rather than showing a frozen percentage.
+        if pathIsRestricted { parkWifiOnlyJobs() }
+        if sceneIsActive { restartExpiredLinks() }
+        hasReconnected = true
+        completeRelaunchIfDone()
+    }
+
+    /// Fed from the scene phase. Going active is when a download whose link
+    /// expired is started over: the process stays alive to drive it.
+    func scenePhaseChanged(isActive: Bool) {
+        sceneIsActive = isActive
+        if isActive { restartExpiredLinks() }
+    }
+
+    /// iOS relaunched the app to deliver a download and will suspend it once
+    /// this handler is called; hold it until every landed file is verified.
+    func handleBackgroundRelaunch(completion: @escaping @Sendable () -> Void) {
+        // The events may already have been delivered — the sessions are created
+        // in the app's init, before UIKit hands over this handler.
+        relaunchCompletion = completion
+        completeRelaunchIfDone()
+    }
+
+    private func completeRelaunchIfDone() {
+        guard relaunchEventsDelivered, hasReconnected, let completion = relaunchCompletion else { return }
+        let stillVerifying = catalog.contains {
+            FileManager.default.fileExists(atPath: LocalModelStorage.unverifiedFile(for: $0.id).path)
+        }
+        guard !stillVerifying else { return }
+        relaunchCompletion = nil
+        completion()
+    }
+
+    private func run(_ model: LocalModel, task: URLSessionDownloadTask,
+                     session: LocalModelDownloadSession, resuming: Bool, token: UUID) async {
+        do {
+            let landed: URL
+            do {
+                landed = try await session.completion(of: task)
+            } catch where resuming && !Task.isCancelled && !Self.isCancellation(error) {
+                // Stale resume data — the CDN's signed URL expired, or the daemon
+                // dropped the partial file. Once, from the start; a second
+                // failure is a real one.
+                logger.error("[local] resume of \(model.id, privacy: .public) failed, restarting: \(error)")
+                LocalModelStorage.clearResumeData(for: model.id)
+                jobs[model.id]?.fraction = 0
+                let fresh = session.makeTask(url: url(for: model), resumeData: nil, repoID: model.id,
+                                             network: jobs[model.id]?.network ?? .any)
+                fresh.resume()
+                landed = try await session.completion(of: fresh)
+            }
+            LocalModelStorage.clearResumeData(for: model.id)
+            await install(model, from: landed, token: token)
+        } catch {
+            guard runs[model.id] == token else { return }   // replaced by a restart
+            if !(Task.isCancelled || Self.isCancellation(error)) {
+                logger.error("[local] download failed for \(model.id, privacy: .public): \(error)")
+                if scheduleRestartIfLinkExpired(model, after: error) { return }
+                record(failure: Self.message(for: error), for: model.id)
+            }
+            finish(model.id)
+        }
+    }
+
+    /// Verifies a landed file and moves it into place.
+    ///
+    /// Bracketed as background work: on a relaunch-to-deliver the system gives
+    /// seconds, not minutes, and hashing gigabytes is the step that must not be
+    /// suspended halfway. If it is anyway, the `.unverified` file is still
+    /// there for the next `reconnect()`.
+    private func install(_ model: LocalModel, from landed: URL, token: UUID) async {
+        let bg = BackgroundWork.begin("model verify") {}
+        defer { BackgroundWork.end(bg) }
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try Self.verifyAndPlace(model, from: landed)
+            }.value
+            guard runs[model.id] == token else { return }
+            // Trust the file, not the callback: a "finished" download that left
+            // nothing behind is a failure, and reporting it as success just moves
+            // the error to the first chat instead.
+            if !LocalModelStorage.isInstalled(model) {
+                record(failure: "The download finished but the model file is missing. Try again.", for: model.id)
+            } else {
+                record(failure: nil, for: model.id)
+                LocalModelStorage.clearRestartIntent(for: model.id)
+                // Only after the file is confirmed on disk — the checksum has
+                // already been verified before the move, so reaching here means
+                // it is genuinely runnable.
+                onInstalled?(model)
+            }
+        } catch {
+            guard runs[model.id] == token else { return }
+            record(failure: Self.message(for: error), for: model.id)
+        }
+        finish(model.id)
+    }
+
+    /// Verify BEFORE the file is moved into place. Once it is at the destination
+    /// it is indistinguishable from a good download, and the next launch will
+    /// happily memory-map it.
+    nonisolated static func verifyAndPlace(_ model: LocalModel, from landed: URL) throws {
+        defer { try? FileManager.default.removeItem(at: landed) }
+        let actual = try sha256OfFile(at: landed)
         guard actual.caseInsensitiveCompare(model.sha256) == .orderedSame else {
             logger.error("""
                 [local] checksum mismatch for \(model.id, privacy: .public): \
                 expected \(model.sha256, privacy: .public), got \(actual, privacy: .public)
                 """)
-            throw LocalInferenceError.loadFailed(
-                "The downloaded model failed its integrity check and was discarded."
-            )
+            throw LocalModelDownloadError.integrityCheckFailed
         }
-
+        let destination = LocalModelStorage.file(for: model)
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: destination)
-        try FileManager.default.moveItem(at: temp, to: destination)
-        onProgress(1.0)
+        try FileManager.default.moveItem(at: landed, to: destination)
+    }
+
+    nonisolated func url(for model: LocalModel) -> URL {
+        hub.appending(path: "\(model.id)/resolve/\(model.revision)/\(model.fileName)")
     }
 
     /// SHA-256 of a file, read in chunks.
@@ -443,6 +858,7 @@ final class LocalModelDownloader {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Stops the transfer. Its resume data is kept, so the next `start` continues.
     func cancel(_ repoID: String) {
         tasks[repoID]?.cancel()
         finish(repoID)
@@ -452,15 +868,68 @@ final class LocalModelDownloader {
     /// model: an error from a download they no longer want is stale, and leaving
     /// it on the row makes the next state look broken.
     func clearFailure(_ repoID: String) {
-        failures[repoID] = nil
+        record(failure: nil, for: repoID)
+        LocalModelStorage.clearRestartIntent(for: repoID)
+    }
+
+    private func record(failure message: String?, for repoID: String) {
+        failures[repoID] = message
+        if let message {
+            LocalModelStorage.saveFailure(message, for: repoID)
+        } else {
+            LocalModelStorage.clearFailure(for: repoID)
+        }
+    }
+
+    /// A delivered download with status 401/403 is the CDN's signed link having
+    /// expired under a transfer the daemon paused — off wi-fi for longer than
+    /// the link's hour. The partial is gone; the row shows why, and the
+    /// download is started over the next time a scene is active. Do NOT start
+    /// the new task here: a background relaunch is suspended seconds later and
+    /// the daemon then defers the transfer for good.
+    private func scheduleRestartIfLinkExpired(_ model: LocalModel, after error: Error) -> Bool {
+        guard Self.isExpiredLink(error), let job = jobs[model.id], !job.restarted else { return false }
+        LocalModelStorage.clearResumeData(for: model.id)
+        LocalModelStorage.saveRestartIntent(job.network, for: model.id)
+        record(failure: Self.message(for: error), for: model.id)
+        DiagLog.note("[local] link expired for \(model.id), starting over on \(job.network.rawValue) when active")
+        finish(model.id)
+        if sceneIsActive { restartExpiredLinks() }
+        return true
+    }
+
+    private func restartExpiredLinks() {
+        for model in catalog where tasks[model.id] == nil {
+            guard let network = LocalModelStorage.restartIntent(for: model.id) else { continue }
+            DiagLog.note("[local] starting \(model.id) over on \(network.rawValue) after its link expired")
+            start(model, network: network)      // consumes the intent
+            jobs[model.id]?.restarted = true
+        }
+    }
+
+    nonisolated private static func isExpiredLink(_ error: Error) -> Bool {
+        guard let download = error as? LocalModelDownloadError, case .http(let status) = download
+        else { return false }
+        return status == 401 || status == 403
     }
 
     private func finish(_ repoID: String) {
         tasks[repoID] = nil
+        runs[repoID] = nil
         jobs[repoID] = nil
+        completeRelaunchIfDone()
+    }
+
+    nonisolated private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
     }
 
     private static func message(for error: Error) -> String {
+        if let download = error as? LocalModelDownloadError, let description = download.errorDescription {
+            return description
+        }
         if let local = error as? LocalInferenceError, let description = local.errorDescription {
             return description
         }
@@ -484,72 +953,3 @@ final class LocalModelDownloader {
     }
 }
 
-// MARK: - Download with progress
-
-/// A `URLSession` download that reports progress.
-///
-/// `URLSession.download(from:)` returns only when the whole file has arrived,
-/// which for a 2.5 GB bundle is minutes of a progress bar sitting at zero. That
-/// was tolerable when MLX's Hub client drove the visible downloads; now that
-/// this is the only path, it is the download experience.
-///
-/// A delegate rather than `bytes(for:)`: `AsyncBytes` iterates one byte at a
-/// time, which is the wrong shape for gigabytes.
-private final class ProgressReportingDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-
-    private let onProgress: @Sendable (Double) -> Void
-    private var continuation: CheckedContinuation<URL, Error>?
-
-    private init(onProgress: @escaping @Sendable (Double) -> Void) {
-        self.onProgress = onProgress
-    }
-
-    static func run(url: URL, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
-        let delegate = ProgressReportingDownload(onProgress: onProgress)
-        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        defer { session.finishTasksAndInvalidate() }
-
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                delegate.continuation = continuation
-                session.downloadTask(with: url).resume()
-            }
-        } onCancel: {
-            session.invalidateAndCancel()
-        }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {
-        // The delegate's temp file is deleted the moment this returns, so it has
-        // to be moved somewhere durable HERE, synchronously.
-        let destination = FileManager.default.temporaryDirectory
-            .appending(component: "litertlm-\(UUID().uuidString)")
-        do {
-            try FileManager.default.moveItem(at: location, to: destination)
-            if let http = downloadTask.response as? HTTPURLResponse, http.statusCode >= 400 {
-                try? FileManager.default.removeItem(at: destination)
-                continuation?.resume(throwing: LocalInferenceError.loadFailed(
-                    "download failed (HTTP \(http.statusCode))"))
-            } else {
-                continuation?.resume(returning: destination)
-            }
-        } catch {
-            continuation?.resume(throwing: error)
-        }
-        continuation = nil
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let error else { return }   // success already resumed above
-        continuation?.resume(throwing: error)
-        continuation = nil
-    }
-}

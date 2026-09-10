@@ -15,6 +15,8 @@ import SwiftUI
 /// Entry under Settings: on this phone · your machines · cloud keys.
 struct PlacesKeysHubView: View {
     @Environment(ProviderStore.self) private var providerStore
+    /// Preview seam — see `PlaceManageRow.hasKeyOverride`.
+    var hasKey: ((Provider) -> Bool)?
 
     private var phoneCount: Int {
         // Reserved for on-device providers.
@@ -25,8 +27,18 @@ struct PlacesKeysHubView: View {
         providerStore.providers.filter { WhereLocality.of($0) == .home }.count
     }
 
-    private var cloudCount: Int {
-        providerStore.providers.filter { WhereLocality.of($0) == .cloud }.count
+    private var cloudBadge: String {
+        let cloud = providerStore.providers.filter { WhereLocality.of($0) == .cloud }
+        let keyed = cloud.filter(isKeyed).count
+        return PlacesKeysBadge.cloud(keyed: keyed, unkeyed: cloud.count - keyed)
+    }
+
+    /// Both lookups, like the rows on the next screen, so hub and row agree.
+    private func isKeyed(_ provider: Provider) -> Bool {
+        if let hasKey { return hasKey(provider) }
+        if providerStore.hasCredential(for: provider) { return true }
+        return !(providerStore.credential(forEndpoint: provider.endpoint) ?? "")
+            .trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
@@ -66,7 +78,7 @@ struct PlacesKeysHubView: View {
                     placeRow(
                         title: "cloud keys",
                         systemImage: "key",
-                        badge: cloudCount == 0 ? "none" : "\(cloudCount)"
+                        badge: cloudBadge
                     )
                 }
             } footer: {
@@ -342,7 +354,6 @@ struct CloudKeysManageView: View {
     @Environment(ProviderStore.self) private var providerStore
     /// Preview seam — see `PlaceManageRow.hasKeyOverride`.
     var hasKey: ((Provider) -> Bool)?
-    @State private var showAdd = false
     @State private var editing: Provider?
     /// The setup a swipe has proposed deleting, pending confirmation.
     @State private var pendingDelete: Provider?
@@ -386,13 +397,16 @@ struct CloudKeysManageView: View {
                 Text("saved")
                     .textCase(.lowercase)
             } footer: {
-                Text("add, rotate, or revoke keys. current model per setup is chosen in chat → where.")
+                Text("add or rotate keys; to revoke one, delete its setup. current model per setup is chosen in chat → where.")
                     .textCase(.lowercase)
             }
 
             Section {
-                Button {
-                    showAdd = true
+                // Two steps, like Mail's "add account": pick the provider, then
+                // its key form. One screen doing both had to guess a provider
+                // before the user chose one.
+                NavigationLink {
+                    CloudKeyProviderPickerView()
                 } label: {
                     Label("add cloud key", systemImage: "plus")
                         .textCase(.lowercase)
@@ -404,9 +418,6 @@ struct CloudKeysManageView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .sheet(isPresented: $showAdd) {
-            AddEditProviderView(scope: .serverAndKey, mode: .add)
-        }
         .sheet(item: $editing) { provider in
             AddEditProviderView(scope: .serverAndKey, mode: .edit(provider))
         }
@@ -431,9 +442,10 @@ struct CloudKeysManageView: View {
 #if os(iOS)
 #Preview("places hub") {
     let store = ProviderStore(inMemory: true)
-    store.providers = [.local(LocalModelCatalog.all[0]), .nearAI, .grok]
+    store.providers = [.local(LocalModelCatalog.all[0]), .nearAI, .grok, .braveAnswers]
     return NavigationStack {
-        PlacesKeysHubView()
+        // near.ai keyed; grok and brave answers saved without one.
+        PlacesKeysHubView(hasKey: { $0.id == Provider.nearAI.id })
             .environment(store)
     }
 }

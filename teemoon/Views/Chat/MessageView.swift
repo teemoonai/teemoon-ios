@@ -67,7 +67,6 @@ struct MessageView: View {
         /// Whether each half needs Textual's block renderer. Same reason:
         /// `needsStructuredText` runs ten `contains` passes over the content,
         /// which is not something to repeat per body evaluation.
-        let answerNeedsStructuredText: Bool
         let thinkingNeedsStructuredText: Bool
     }
 
@@ -85,7 +84,6 @@ struct MessageView: View {
             thinking: t,
             answer: a,
             isThinking: !message.content.contains("</think>"),
-            answerNeedsStructuredText: a.map(Self.needsStructuredText) ?? false,
             thinkingNeedsStructuredText: t.map(Self.needsStructuredText) ?? false)
         Self._thinkCache.setObject(CacheEntry(parsed), forKey: key)
         return parsed
@@ -114,11 +112,12 @@ struct MessageView: View {
 
     // MARK: - Fast-path rendering
     //
-    // StructuredText parses markdown on every view creation. For messages that only
-    // use inline markdown (bold, italic, inline code, links), we parse once to an
-    // AttributedString, cache it, and render with a plain Text view (<1ms on cache hit).
-    // StructuredText is only used for messages that need block-level rendering
-    // (code fences, tables, lists, etc.), avoiding the parse cost on re-renders.
+    // The ANSWER is always Textual: it streamed through Textual, and a plain
+    // `Text` lays out the same paragraphs 25pt taller, so the reply reflows
+    // the moment it lands (`testAPlainReplyMeasuresTheSameStreamingAndPersisted`).
+    // The parse is cached per distinct string (`StructuredText.cached`), so
+    // the cost this path once avoided is gone. The plain path stays for the
+    // thinking block, which never streams through the same renderer.
 
     static let _attrCache: NSCache<NSString, CacheEntry<AttributedString>> = {
         let cache = NSCache<NSString, CacheEntry<AttributedString>>()
@@ -268,8 +267,7 @@ struct MessageView: View {
                     let sources = message.groundingSources
                     if let afterThink {
                         let hasSources = thinking == nil && !sources.isEmpty
-                        renderedAssistantText(afterThink, cacheKeySuffix: "c",
-                                              structured: parse.answerNeedsStructuredText)
+                        renderedAssistantText(afterThink, cacheKeySuffix: "c", structured: true)
                             .padding(.bottom, hasSources ? 12 : 0)
                     }
 

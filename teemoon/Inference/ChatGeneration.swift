@@ -24,6 +24,10 @@ final class ChatGeneration {
     var collapsed: Bool = false
     var lastError: LLMError? = nil
     var lastErrorThreadID: UUID? = nil
+    /// The thread whose last turn was cut off by the app leaving the
+    /// foreground — not by the user. Consumed by `ChatViewModel.
+    /// interruptedUserMessage` when the app returns, which re-asks it.
+    var interruptedThreadID: UUID? = nil
     var lastRequestDebugInfo: LastRequestDebugInfo? = nil
     var groundingSources: [GroundingSource] = []
     var searchQueries: [String] = []
@@ -130,7 +134,15 @@ final class ChatGeneration {
     func stop() {
         isThinking = false
         cancelled = true
+        // Cancel the consumer, do not only flag it: a flag is read when the
+        // next snapshot arrives, and during engine load, prefill or a stalled
+        // decode none does — the stop button greyed and never left.
+        streamConsumer?.cancel()
     }
+
+    /// The task consuming the current turn's stream; nil between turns.
+    @ObservationIgnored
+    private var streamConsumer: Task<Int, any Error>?
 
     /// Waiters for `waitUntilStopped`. Resumed when `generate` clears
     /// `running` — `stop()` only sets `cancelled`; the defer ends the turn.
@@ -191,6 +203,7 @@ final class ChatGeneration {
         lastError = nil
         lastErrorThreadID = nil
         lastRequestDebugInfo = nil
+        interruptedThreadID = nil
         startTime = Date()
         firstTokenTime = nil
         // The chip must not outlive the generation that justified it: a cancel
@@ -268,16 +281,18 @@ final class ChatGeneration {
 
         let session = LanguageModelSession(model: model, tools: tools)
         let stream = session.streamResponse(to: lastMessage.content)
-        var snapshotCount = 0
-        do {
+        // Consumed on a task `stop()` can cancel — see `stop()`. Cancelling it
+        // tears the stream down, which cancels the transport's turn.
+        let consumer = Task { @MainActor [weak self] in
+            var snapshotCount = 0
             for try await snapshot in stream {
-                if cancelled { break }
-                if firstTokenTime == nil {
-                    firstTokenTime = Date()
+                guard let self, !self.cancelled else { break }
+                if self.firstTokenTime == nil {
+                    self.firstTokenTime = Date()
                     // `provider` is the one this generation actually ran on,
                     // which is not necessarily the store's current provider by
                     // the time the stream ends — the user can switch mid-answer.
-                    onFirstToken?(provider)
+                    self.onFirstToken?(provider)
                 }
                 snapshotCount += 1
                 // ONLY write when the text actually changed. A same-value
@@ -290,10 +305,28 @@ final class ChatGeneration {
                 // (hang-reporter, 2026-08-07: 92 samples inside per-frame
                 // beginTransaction doing anchor/TextKit work with no visible
                 // text moving).
-                if output != snapshot.content { output = snapshot.content }
+                if self.output != snapshot.content { self.output = snapshot.content }
+            }
+            return snapshotCount
+        }
+        streamConsumer = consumer
+        defer { streamConsumer = nil }
+        var snapshotCount = 0
+        do {
+            snapshotCount = try await withTaskCancellationHandler {
+                try await consumer.value
+            } onCancel: {
+                consumer.cancel()
             }
         } catch is CancellationError {
-            // normal task cancellation
+            // A cancelled turn is an INTERRUPTION, not a failure. Two sources:
+            // the user tapped stop (`cancelled` is already true), or the turn
+            // was cancelled from BELOW — the on-device transport abandons a
+            // decode when the app leaves the foreground, because iOS revokes
+            // GPU access. Only the second is worth resuming: record the thread
+            // so the view can re-ask when the app returns.
+            if !cancelled { interruptedThreadID = thread.id }
+            cancelled = true
         } catch let llmError as LLMError {
             // The engine's single error channel: everything it can diagnose
             // arrives here as a fully-populated LLMError.

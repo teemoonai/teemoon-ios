@@ -22,6 +22,10 @@ import Foundation
 import ModelBackend
 import os
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 // The third `Tool` in this project — AnyLanguageModel's protocol, MLXLMCommon's
 // struct, and now LiteRTLM's. Imported here only, never re-exported, so a bare
 // `Tool` elsewhere stays unambiguous.
@@ -77,13 +81,35 @@ struct LiteRTTransport: GenerationTransport {
     /// grounding callbacks on its behalf.
     let events: StreamCallbacks?
 
+    /// Ceiling on one answer. A decoder looping on a single token otherwise
+    /// runs to the KV cache — minutes of GPU for a reply nobody can read.
+    let maxAnswerTokens: Int
+
+    /// Test seam for the background-abandon path. Production is nil — the turn
+    /// polls `UIApplication.applicationState`. A test can force the path (there
+    /// is no real app state to background) by returning true from here.
+    let backgroundedForTest: (@Sendable () -> Bool)?
+
+    /// A delay that still delays when the current task is cancelled.
+    static func uncancellableSleep(milliseconds: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(milliseconds)) {
+                continuation.resume()
+            }
+        }
+    }
+
     init(modelPath: URL, estimatedSizeMB: Int, contextTokens: Int = 8192,
-         tools: [any AnyLanguageModel.Tool] = [], events: StreamCallbacks? = nil) {
+         tools: [any AnyLanguageModel.Tool] = [], events: StreamCallbacks? = nil,
+         maxAnswerTokens: Int = LiteRTTransport.answerReserveTokens,
+         backgroundedForTest: (@Sendable () -> Bool)? = nil) {
         self.modelPath = modelPath
         self.estimatedSizeMB = estimatedSizeMB
         self.contextTokens = contextTokens
         self.tools = tools
         self.events = events
+        self.maxAnswerTokens = maxAnswerTokens
+        self.backgroundedForTest = backgroundedForTest
     }
 
     // MARK: - Engine cache
@@ -110,6 +136,14 @@ struct LiteRTTransport: GenerationTransport {
 
         /// Test seam: how many engines are resident.
         var residentCount: Int { engines.count }
+
+        /// Forgets an engine whose decode thread is DEAD (a drain that timed
+        /// out). The next turn builds a fresh one; the caller releases the dead
+        /// one off any thread a user is waiting on.
+        func discard(_ path: URL, contextTokens: Int) async {
+            engines[Key(path: path, contextTokens: contextTokens)] = nil
+            await publish()
+        }
 
         /// Pushes this cache's state to the observable the picker reads.
         ///
@@ -302,9 +336,45 @@ struct LiteRTTransport: GenerationTransport {
         try await LocalGenerationGate.shared.acquire()
         defer { Task { await LocalGenerationGate.shared.release() } }
 
+        // iOS revokes GPU access from a backgrounded app: Metal aborts the
+        // in-flight command buffer ("Insufficient Permission to submit GPU work
+        // from background") and LiteRT's decode thread never returns from it.
+        // The stream then never yields and never finishes, so awaiting it — and
+        // the gate above — would hang forever; that was the "thinking counts up
+        // forever, and every later message hangs too" report (2026-09-04, device
+        // log). POLL applicationState rather than trusting a notification: the
+        // observer raced the cold engine load and was attached only AFTER the
+        // background transition had already fired. A poll started here catches a
+        // background at any point in the turn, including during the load.
+        let backgrounded = LockedBox<Bool>(false)
+        let bgForTest = backgroundedForTest
+        let bgPoll = Task { @MainActor in
+            while !Task.isCancelled {
+                if let bgForTest {
+                    if bgForTest() {
+                        backgrounded.value = true
+                        DiagLog.note("[litert] backgroundedForTest — abandoning the turn")
+                        return
+                    }
+                } else {
+                    #if canImport(UIKit) && !os(watchOS)
+                    if UIApplication.shared.applicationState == .background {
+                        backgrounded.value = true
+                        DiagLog.note("[litert] applicationState == .background — abandoning the turn")
+                        return
+                    }
+                    #endif
+                }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+        }
+        defer { bgPoll.cancel() }
+
+        DiagLog.note("[litert] turn: acquiring engine")
         let engine = try await EngineCache.shared.engine(
             for: modelPath, contextTokens: contextTokens, sizeMB: estimatedSizeMB
         )
+        DiagLog.note("[litert] turn: engine ready, building conversation")
         // Tool wiring. LiteRT owns the tool loop for this transport — see
         // LiteRTToolBridge for why that exception exists and what teemoon keeps
         // in spite of it. Executed calls are captured here so the turn can still
@@ -383,7 +453,10 @@ struct LiteRTTransport: GenerationTransport {
         }
 
         let lastText = (messages.last?["content"] as? String) ?? ""
-        var answer = ""
+        // A task cancelled during the engine build must not START a native
+        // generation it will abandon at once; that orphan wedges the next turn
+        // exactly as a cancelled decode does.
+        try Task.checkCancellation()
         // Tool-call markup must never stream to the user — same machine as the
         // SSE path (ToolMarkupElider, driven by ToolCallFormat.markerPairs, so
         // a new format reaches both transports by construction). Always
@@ -391,41 +464,176 @@ struct LiteRTTransport: GenerationTransport {
         // tool syntax whether or not tools were offered this turn, and the
         // check this replaces was likewise unconditional.
         let elider = ToolMarkupElider()
-        for try await chunk in conversation.sendMessageStream(LiteRTLM.Message(lastText, role: .user)) {
-            let piece = chunk.contents.compactMap { content -> String? in
-                if case .text(let t) = content { return t }
-                return nil
-            }.joined()
-            guard !piece.isEmpty else { continue }
-            answer += piece
-            // Stream the ELIDED accumulation, not the raw one. This used to be
-            //
-            //   if !ToolCallFormat.containsAnyMarker(answer) { onPartialContent(answer) }
-            //
-            // which LATCHED: `answer` is cumulative, so the marker never left it
-            // and the first one froze partial updates for the rest of the turn —
-            // the reply then landed in one batch at the end. Same sticky-
-            // suppression defect the SSE path had (commit b364fad,
-            // StreamSuppressionTests), in cruder form. The engine yields per-
-            // chunk deltas (`piece`) even though this loop accumulates them, so
-            // the shared delta-fed machine ports directly: feed it the piece,
-            // show its cumulative `visibleContent` (monotonic — a snapshot once
-            // shown is never retracted). Thinking markup still streams raw, as
-            // before: the live view renders its own thinking block, and the
-            // elider touches only tool-call regions. `answer` stays RAW — the
-            // TurnOutput below parses thinking out of it, and the engine's
-            // sanitize pass owns the final text; elide only what is SHOWN.
-            if !elider.append(piece).isEmpty {
+        // The stream is consumed on a task the caller's cancellation does NOT
+        // reach, so it drains to LiteRT's final callback. A cancel goes to the
+        // NATIVE decode instead, and this function does not return — or release
+        // the gate — until that decode has stopped. Merely leaving the Swift loop
+        // leaves LiteRT decoding on its one worker thread, and the next turn
+        // queues behind it (LiteRTLiveTests.answersAfterATurnWasAbandonedMidDecode).
+        let cap = maxAnswerTokens
+        // LiteRT ends a cancelled stream with an ERROR
+        // (`invalidResponse("CANCELLED: Task cancelled")`). One we asked for is a
+        // normal end of stream, and the partial answer is the turn's output.
+        let stoppedByUs = LockedBox<Bool>(false)
+        let drained = LockedBox<Bool>(false)
+        /// Set when the native decode did not stop within the bound: its thread
+        /// is dead (typically GPU access revoked in the background), and so is
+        /// the engine it runs on.
+        let dead = LockedBox<Bool>(false)
+        let live = LockedBox<LiteRTLM.Conversation?>(conversation)
+        let watchdog = LockedBox<Task<Void, Never>?>(nil)
+        let consumerBox = LockedBox<Task<String, any Error>?>(nil)
+        // What the user has already been shown, so an ABANDONED turn (below) can
+        // return the partial answer without awaiting the stuck consumer.
+        let shown = LockedBox<String>("")
+        // Set the moment the turn is abandoned. The leaked decode may resume when
+        // the app returns to the foreground and the GPU is restored; without this
+        // its late `onPartialContent` writes land in a LATER turn's message — the
+        // "I sent hello and got the potato essay" report. After abandon, drop them.
+        let abandoned = LockedBox<Bool>(false)
+        // Flips when the consumer task finishes, so the wait below can poll for
+        // completion WITHOUT structurally awaiting it (a task group awaits its
+        // children, and a wedged decode never returns — which is what made the
+        // abandon take the full 10 s watchdog before).
+        let finished = LockedBox<Bool>(false)
+        /// Every way a turn ends early goes through here: a user stop, the
+        /// answer cap, the app leaving the foreground. Asks the NATIVE decode to
+        /// stop and bounds the drain, so the composer never waits on a decode
+        /// that cannot answer.
+        @Sendable func requestStop(_ reason: String) {
+            guard !stoppedByUs.value else { return }
+            stoppedByUs.value = true
+            logger.error("[litert] \(reason, privacy: .public) — asking the native decode to stop")
+            DiagLog.note("[litert] \(reason) — asking the native decode to stop")
+            try? live.value?.cancel()
+            DiagLog.note("[litert] cancel_process returned")
+            watchdog.value = Task {
+                try? await Task.sleep(for: .seconds(10))
+                if !drained.value {
+                    dead.value = true
+                    logger.error("[litert] drain TIMED OUT — the native decode did not stop within 10 s; its engine is dead")
+                    DiagLog.note("[litert] drain TIMED OUT — engine is dead")
+                    // Unblocks the caller with the partial answer.
+                    consumerBox.value?.cancel()
+                }
+            }
+        }
+        let consumer = Task { () throws -> String in
+            defer { finished.value = true }
+            var answer = ""
+            var capped = false
+            do {
+            for try await chunk in conversation.sendMessageStream(LiteRTLM.Message(lastText, role: .user)) {
+                let piece = chunk.contents.compactMap { content -> String? in
+                    if case .text(let t) = content { return t }
+                    return nil
+                }.joined()
+                guard !piece.isEmpty else { continue }
+                answer += piece
+                // Cancelled natively and DRAINED like any other cancel — never
+                // `break`, which would orphan the decode this guard exists to end.
+                if !capped, Self.estimatedTokens(answer) > cap {
+                    capped = true
+                    requestStop("answer passed \(cap) tokens")
+                }
+                // Stream the ELIDED accumulation, not the raw one. This used to be
+                //
+                //   if !ToolCallFormat.containsAnyMarker(answer) { onPartialContent(answer) }
+                //
+                // which LATCHED: `answer` is cumulative, so the marker never left it
+                // and the first one froze partial updates for the rest of the turn —
+                // the reply then landed in one batch at the end. Same sticky-
+                // suppression defect the SSE path had (commit b364fad,
+                // StreamSuppressionTests), in cruder form. The engine yields per-
+                // chunk deltas (`piece`) even though this loop accumulates them, so
+                // the shared delta-fed machine ports directly: feed it the piece,
+                // show its cumulative `visibleContent` (monotonic — a snapshot once
+                // shown is never retracted). Thinking markup still streams raw, as
+                // before: the live view renders its own thinking block, and the
+                // elider touches only tool-call regions. `answer` stays RAW — the
+                // TurnOutput below parses thinking out of it, and the engine's
+                // sanitize pass owns the final text; elide only what is SHOWN.
+                if !elider.append(piece).isEmpty {
+                    // Drop writes from a decode that outlived its turn.
+                    guard !abandoned.value else { continue }
+                    onPartialContent(elider.visibleContent)
+                    shown.value = elider.visibleContent
+                }
+            }
+            // End of stream: a suffix held back as a possible marker prefix is now
+            // known to be plain prose — show it. (An UNTERMINATED markup region
+            // stays suppressed instead; the engine's end-of-turn sanitize decides
+            // what of it survives into the final text.)
+            } catch {
+                guard stoppedByUs.value else { throw error }
+            }
+            if !elider.finish().isEmpty, !abandoned.value {
                 onPartialContent(elider.visibleContent)
             }
-            if Task.isCancelled { break }
+            return answer
         }
-        // End of stream: a suffix held back as a possible marker prefix is now
-        // known to be plain prose — show it. (An UNTERMINATED markup region
-        // stays suppressed instead; the engine's end-of-turn sanitize decides
-        // what of it survives into the final text.)
-        if !elider.finish().isEmpty {
-            onPartialContent(elider.visibleContent)
+        consumerBox.value = consumer
+        DiagLog.note("[litert] turn: streaming started")
+        // Wait for completion by POLLING, not by awaiting the consumer: once the
+        // app is backgrounded the decode is wedged in a GPU buffer that never
+        // completes, and awaiting it — structurally or otherwise — is the hang.
+        // Three exits, in priority order: the app went to the background (abandon
+        // at once), the watchdog gave up on a drain (abandon), the consumer
+        // finished (a clean end, a stop that drained, or a real error). A user
+        // stop must reach `finished` and drain, not abort the loop and orphan
+        // the decode it just cancelled — so the wait survives cancellation.
+        let outcome: Result<String, any Error> = await withTaskCancellationHandler {
+            defer { drained.value = true }
+            while true {
+                if backgrounded.value || dead.value {
+                    abandoned.value = true               // silence the leaked decode
+                    dead.value = true                    // its engine is poisoned; rebuild next turn
+                    requestStop(backgrounded.value
+                                ? "app is in the background — GPU work is barred"
+                                : "drain timed out")
+                    // Keep a partial answer if there is one; otherwise this is an
+                    // interruption, surfaced as a cancellation so the UI shows a
+                    // stopped turn, NOT an "empty response" error.
+                    return shown.value.isEmpty ? .failure(CancellationError()) : .success(shown.value)
+                }
+                if finished.value {
+                    do { return .success(try await consumer.value) }
+                    catch {
+                        return stoppedByUs.value ? .success(shown.value) : .failure(error)
+                    }
+                }
+                // `Task.sleep` throws at entry once the turn is cancelled, so
+                // after a stop this loop would spin until the drain lands;
+                // the wait has to survive cancellation.
+                await Self.uncancellableSleep(milliseconds: 100)
+            }
+        } onCancel: {
+            requestStop("cancel requested")
+        }
+        watchdog.value?.cancel()
+        live.value = nil
+        if dead.value {
+            // Forget the poisoned engine BEFORE returning — the gate releases on
+            // return, and the next turn must not find it in the cache. Release it
+            // off the user's path: `engine_delete` joins the (wedged) worker.
+            await EngineCache.shared.discard(modelPath, contextTokens: contextTokens)
+            DiagLog.note("[litert] dead engine discarded from the cache")
+            let doomed = engine
+            Task.detached(priority: .background) {
+                try? await Task.sleep(for: .seconds(2))
+                DiagLog.note("[litert] releasing the dead engine (engine_delete may block)")
+                _ = doomed
+                DiagLog.note("[litert] dead engine released")
+            }
+        }
+        let answer: String
+        switch outcome {
+        case .success(let text): answer = text
+        case .failure(let error): throw error
+        }
+        if stoppedByUs.value {
+            logger.error("[litert] stopped turn drained; native stopped=\(!dead.value, privacy: .public)")
+            DiagLog.note("[litert] stopped turn drained; native stopped=\(!dead.value) chars=\(answer.count)")
         }
 
         // LiteRT reports the prefill/decode split directly.

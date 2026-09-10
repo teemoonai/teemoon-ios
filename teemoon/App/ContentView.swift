@@ -148,7 +148,13 @@ struct ContentView: View {
                            UITestHostSecrets.stagedKeysDirectory ?? "nil",
                            UITestHostSecrets.teemoonHostHome ?? "nil",
                            UITestHostSecrets.simulatorHostHome ?? "nil")
-                    if let fromFile = UITestHostSecrets.keyFromHostFile(preset: presetName) {
+                    if env["UITEST_SEED_NO_KEY"] == "1" {
+                        // A keyed setup saved WITHOUT a key — the state the
+                        // no-key send gate and the "needs key" badge exist for.
+                        try? providerStore.setCredential("", forEndpoint: seeded.endpoint,
+                                                         legacyID: seeded.id)
+                        os_log(.error, "[uitest] seeded %{public}@ with no key", presetName)
+                    } else if let fromFile = UITestHostSecrets.keyFromHostFile(preset: presetName) {
                         do {
                             try providerStore.setCredential(fromFile, forEndpoint: seeded.endpoint,
                                                             legacyID: seeded.id)
@@ -156,8 +162,24 @@ struct ContentView: View {
                         } catch {
                             os_log(.error, "[uitest] could not write %{public}@ key from host file", presetName)
                         }
+                    } else if env["UITEST_SEED_ATTESTATION"] != nil {
+                        // An OFFLINE trust seed never reaches a server, so the
+                        // key's value is irrelevant — but the no-key send gate
+                        // runs before the trust gate, and on a machine with no
+                        // key file (the GitHub runner) it answered first:
+                        // "no api key" where the test expected "sending blocked"
+                        // (2026-09-10). A placeholder keeps the trust gate under test.
+                        try? providerStore.setCredential("uitest-offline-seed",
+                                                         forEndpoint: seeded.endpoint, legacyID: seeded.id)
+                        os_log(.error, "[uitest] seeded %{public}@ with a placeholder key (offline trust seed)", presetName)
                     } else {
-                        os_log(.error, "[uitest] no host-file key for %{public}@", presetName)
+                        // No key file on this machine (the GitHub runner, or
+                        // `UITEST_NO_HOST_KEYS=1`): clear the slot too, so a key a
+                        // previous simulator run stored cannot make the runner's
+                        // keyless state pass here.
+                        try? providerStore.setCredential("", forEndpoint: seeded.endpoint,
+                                                         legacyID: seeded.id)
+                        os_log(.error, "[uitest] no host-file key for %{public}@ — slot cleared", presetName)
                     }
                 }
             }

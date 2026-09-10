@@ -81,3 +81,99 @@ struct AddEditProviderModelTests {
         #expect(rec.haptics == 1)
     }
 }
+
+/// A tester picked the Brave Answers preset, left the key blank, and saved —
+/// the form only asked for a name, an endpoint and a model. The setup then
+/// sent its first message with no auth header (HTTP 422 "Field required" for
+/// `header x-subscription-token`).
+@MainActor
+@Suite("AddEditProviderModel required key")
+struct AddEditProviderModelRequiredKeyTests {
+
+    @Test func cloudPresetCannotBeAddedWithoutAKey() throws {
+        let store = ProviderStore(inMemory: true)
+        let form = AddEditProviderModel(mode: .add)
+        form.providerStore = store
+        form.apply(preset: .braveAnswers)
+        #expect(form.requiresAPIKey)
+        // Save stays ENABLED; the refusal is inline, on the field.
+        #expect(form.isValid)
+        #expect(form.apiKeyPlaceholder == "api key — required")
+        #expect(form.keyFieldError == nil)
+
+        #expect(form.save() == false)
+        #expect(store.providers.isEmpty, "a keyless cloud setup must not be created")
+        #expect(form.keyFieldError?.contains("api key") == true)
+        #expect(form.keyFocusRequest == 1)
+
+        form.apiKey = "   "
+        #expect(form.save() == false)
+        #expect(form.keyFocusRequest == 2)
+
+        // Typing clears the error; saving then stores the setup and its key.
+        form.apiKey = "BSA-test"
+        #expect(form.keyFieldError == nil)
+        #expect(form.apiKeyPlaceholder == "api key")
+        #expect(form.save())
+        let saved = try #require(store.providers.first)
+        defer { store.removeProvider(saved) }
+        #expect(store.credential(for: saved) == "BSA-test")
+    }
+
+    @Test func selfHostedSetupStillSavesKeyless() {
+        let form = AddEditProviderModel(mode: .add)
+        form.scheme = .http
+        form.endpointHost = "box.local:11434/v1"
+        form.model = "gemma4:e4b"
+        form.name = "box"
+        #expect(!form.requiresAPIKey)
+        #expect(!form.missingRequiredKey)
+    }
+
+    /// Editing must not recreate the keyless state either: a tester cleared the
+    /// key of a saved Brave Answers setup from Settings and could save. Revoking
+    /// is deleting the setup.
+    @Test func editingRefusesAnEmptiedKey() throws {
+        let store = ProviderStore(inMemory: true)
+        let saved = Provider.braveAnswers
+        store.addProvider(saved)
+        defer { store.removeProvider(saved) }
+        try store.setCredential("BSA-old", forProviderID: saved.id)
+
+        let form = AddEditProviderModel(mode: .edit(saved))
+        form.providerStore = store
+        form.loadInitialValues()
+        #expect(form.isEditing)
+        #expect(form.apiKey == "BSA-old")
+
+        form.apiKey = ""
+        #expect(form.missingRequiredKey)
+        #expect(form.save() == false)
+        #expect(form.keyFieldError != nil)
+        #expect(store.credential(for: saved) == "BSA-old", "a refused save must not touch the stored key")
+
+        form.apiKey = "BSA-new"
+        #expect(form.save())
+        #expect(store.credential(for: saved) == "BSA-new")
+    }
+
+    /// The clear path still exists where it is safe: a self-hosted box that had
+    /// a key and no longer needs one.
+    @Test func selfHostedEditCanStillClearItsKey() throws {
+        let store = ProviderStore(inMemory: true)
+        var box = Provider(name: "box", endpoint: "http://box.local:11434/v1/chat/completions",
+                           model: "gemma4:e4b")
+        box.requiresAPIKey = true
+        store.addProvider(box)
+        defer { store.removeProvider(box) }
+        try store.setCredential("old", forProviderID: box.id)
+
+        let form = AddEditProviderModel(mode: .edit(box))
+        form.providerStore = store
+        form.loadInitialValues()
+        form.apiKey = ""
+        #expect(!form.missingRequiredKey)
+        #expect(form.save())
+        #expect(store.credential(forEndpoint: box.endpoint) == nil)
+    }
+}

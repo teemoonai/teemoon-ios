@@ -12,6 +12,21 @@
 import Foundation
 
 enum WhereProviderPresentation {
+
+    /// One line under a preset's name in a picker row. `presetDescription` is
+    /// a paragraph for footers; at caption size it truncates mid-sentence.
+    /// Keep each under `presetCaptionMaxLength` — see WherePresentationTests.
+    static let presetCaptionMaxLength = 45
+
+    static func presetCaption(for preset: Provider) -> String? {
+        switch preset.id {
+        case Provider.nearAI.id:       return "open models in enclaves the host can't read"
+        case Provider.grok.id:         return "xai's models, 2m context, live web and x"
+        case Provider.fireworks.id:    return "fast, low-cost open models — large catalog"
+        case Provider.braveAnswers.id: return "answers from live web search, with citations"
+        default:                       return preset.presetDescription
+        }
+    }
     /// Short model label for the chip and list (not the raw API id).
     static func modelLabel(for provider: Provider) -> String {
         // On-device models carry a HuggingFace repo id, and the generic path

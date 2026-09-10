@@ -43,6 +43,25 @@ struct ProviderCredentialTests {
         #expect(store.credential(for: p) == "sk-secret-1")
     }
 
+    /// The send gate's question. A keyed provider answers false until a key is
+    /// stored; a keyless one (self-hosted) always answers true.
+    @Test func hasCredentialFollowsTheStoredKeyAndTheRequiresFlag() throws {
+        let store = makeStore()
+        let p = provider()
+        defer { store.removeProvider(p) }
+        store.addProvider(p)
+
+        #expect(store.hasCredential(for: p) == false)
+        try store.setCredential("sk-secret-5", forProviderID: p.id)
+        #expect(store.hasCredential(for: p) == true)
+        try store.setCredential("", forProviderID: p.id)
+        #expect(store.hasCredential(for: p) == false)
+
+        var keyless = provider("http://home-box.local:11434/v1")
+        keyless.requiresAPIKey = false
+        #expect(store.hasCredential(for: keyless) == true)
+    }
+
     /// The clear path: an emptied field must DELETE, not no-op.
     @Test func emptyCredentialDeletesTheStoredKey() throws {
         let store = makeStore()

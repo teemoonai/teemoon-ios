@@ -51,15 +51,21 @@ public class Conversation {
 
   private var handle: CConversationHandle?
   private let toolManager: ToolManager
+  // teemoon patch 7 (VENDORING.md): the engine outlives every conversation
+  // created from it. Upstream holds no reference, so the last release of an
+  // Engine could run `litert_lm_engine_delete` under a session whose native
+  // decode is still running (a stream abandoned after iOS revoked the GPU).
+  private let engine: AnyObject?
 
   /// Whether the conversation is alive and ready to be used.
   public var isAlive: Bool {
     return handle != nil
   }
 
-  init(handle: CConversationHandle, toolManager: ToolManager) {
+  init(handle: CConversationHandle, toolManager: ToolManager, engine: AnyObject? = nil) {
     self.handle = handle
     self.toolManager = toolManager
+    self.engine = engine
   }
 
   deinit {
@@ -197,6 +203,12 @@ public class Conversation {
         let messageJson: [String: Any] = message.toJson
         let context = StreamContext(
           continuation: continuation, conversation: self)
+        // teemoon patch 5 (VENDORING.md): a consumer that stops iterating must
+        // stop the NATIVE process too, or it runs on and the next conversation
+        // on this engine queues behind it.
+        continuation.onTermination = { [weak self] reason in
+          if case .cancelled = reason { try? self?.cancel() }
+        }
 
         try self.sendToStream(
           handle: handle, messageJson: messageJson, extraContext: extraContext, context: context)
@@ -416,6 +428,16 @@ public class Conversation {
   }
 }
 
+/// teemoon patch 6 (VENDORING.md): the last release of a `StreamContext` can be
+/// the last reference to its `Conversation`, whose `deinit` calls
+/// `litert_lm_conversation_delete` — never from inside the runtime's own
+/// callback thread.
+private func releaseContextOffCallbackThread(_ userData: UnsafeMutableRawPointer) {
+  DispatchQueue.global().async {
+    Unmanaged<Conversation.StreamContext>.fromOpaque(userData).release()
+  }
+}
+
 /// A callback function to bridge the C callback to the Swift AsyncThrowingStream.
 private func streamCallback(
   userData: UnsafeMutableRawPointer?,
@@ -432,7 +454,7 @@ private func streamCallback(
     let error = LiteRTLMError.conversation(.invalidResponse(errorString))
     context.continuation.finish(throwing: error)
 
-    Unmanaged<Conversation.StreamContext>.fromOpaque(userData).release()
+    releaseContextOffCallbackThread(userData)
     return
   }
 
@@ -456,7 +478,7 @@ private func streamCallback(
     } catch {
       logger.error("Failed to parse response JSON: \(error.localizedDescription)")
       context.continuation.finish(throwing: error)
-      Unmanaged<Conversation.StreamContext>.fromOpaque(userData).release()
+      releaseContextOffCallbackThread(userData)
       return
     }
   }
@@ -467,7 +489,7 @@ private func streamCallback(
         context.continuation.finish(
           throwing: LiteRTLMError.conversation(
             .recurringToolCallLimitExceeded(limit: recurringToolCallLimit)))
-        Unmanaged<Conversation.StreamContext>.fromOpaque(userData).release()
+        releaseContextOffCallbackThread(userData)
         return
       }
 
@@ -492,7 +514,7 @@ private func streamCallback(
       }
     } else {
       context.continuation.finish()
-      Unmanaged<Conversation.StreamContext>.fromOpaque(userData).release()
+      releaseContextOffCallbackThread(userData)
     }
   }
 }

@@ -22,6 +22,9 @@
 
 import Foundation
 import Testing
+#if canImport(UIKit)
+import UIKit
+#endif
 import ModelBackend
 import LiteRTLM
 @testable import teemoon
@@ -97,6 +100,22 @@ private struct TrimmedSearchTool: LMTool {
             .call(arguments: .init(query: arguments.query, freshness: nil,
                                    contextThresholdMode: nil, count: nil))
     }
+}
+
+/// Share of a reply taken by its single most common adjacent character pair.
+///
+/// A degenerate loop — one token emitted until the budget runs out — is what a
+/// broken decode step looks like from outside the runtime, and it passes every
+/// check the suite had: it is not empty, it arrives as a stream, and it ends.
+/// `设施设施设施…` scores ~0.5 here; ordinary prose stays under 0.05.
+private func repeatedPairShare(_ text: String) -> Double {
+    let chars = Array(text.filter { !$0.isWhitespace })
+    guard chars.count > 2 else { return 0 }
+    var counts: [String: Int] = [:]
+    for i in 0..<(chars.count - 1) {
+        counts["\(chars[i])\(chars[i + 1])", default: 0] += 1
+    }
+    return Double(counts.values.max() ?? 0) / Double(chars.count - 1)
 }
 
 @Suite("LiteRT-LM (live — downloads a .litertlm bundle)", .serialized)
@@ -1123,5 +1142,366 @@ extension LiteRTLiveTests {
         }
 
         await LiteRTTransport.evictEngines()
+    }
+    /// A second question in a thread came back as one CJK token repeated until
+    /// the budget ran out — `ॺा设施设施设施…`, still going 39 s in.
+    ///
+    /// Two things were true of that turn and either explains it, so this
+    /// isolates one. The thread carried a user message with NO reply, so the
+    /// history handed to LiteRT held two consecutive `user` turns: Gemma's
+    /// template alternates, and nothing in `GenerationEngine` (which maps the
+    /// transcript straight to the wire array) or in `runTurn` (which passes it
+    /// on as `initialMessages`) merges or drops the orphan.
+    ///
+    /// The control asks the same final question over an alternating history. If
+    /// only the orphan shape degenerates, the prompt is the bug. If neither
+    /// does, the cause is the other candidate — the app was backgrounded for
+    /// ~14 s mid-generation, and iOS does not let a backgrounded app run the
+    /// Metal work this transport is configured for.
+    @Test(.enabled(if: Self.enabled, "set LITERT_LIVE=1 (downloads ~2.5 GB)"),
+          .timeLimit(.minutes(30)))
+    @MainActor
+    func answersOverAHistoryWithAnUnansweredUserTurn() async throws {
+        try await downloadIfNeeded()
+
+        let transport = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 8192
+        )
+        let system: [String: Any] = ["role": "system", "content": "You are a helpful assistant."]
+        let opening: [[String: Any]] = [
+            ["role": "user", "content": "Hi whats your name"],
+            ["role": "assistant",
+             "content": "I am Gemma 2B. Large Language Model, trained on a dataset by Google DeepMind."],
+        ]
+        let orphan: [String: Any] = ["role": "user", "content": "Are you sure? I thought you were a potato"]
+        let live: [String: Any] = ["role": "user", "content": "Helloooooo potato"]
+
+        /// Returns the reply and how repetitive it is.
+        func ask(_ messages: [[String: Any]]) async throws -> (String, Double) {
+            let turn = try await transport.runTurn(messages: messages, includeTools: false) { _ in }
+            return (turn.content, repeatedPairShare(turn.content))
+        }
+
+        let (control, controlShare) = try await ask([system] + opening + [live])
+        print(String(format: "[orphan] control  repeat=%.3f chars=%d — %@",
+                     controlShare, control.count, String(control.prefix(160))))
+
+        let (withOrphan, orphanShare) = try await ask([system] + opening + [orphan, live])
+        print(String(format: "[orphan] +orphan  repeat=%.3f chars=%d — %@",
+                     orphanShare, withOrphan.count, String(withOrphan.prefix(160))))
+
+        // The control is the reference, not a second assertion: if it degenerates
+        // too, the prompt shape is exonerated and the report says so.
+        #expect(orphanShare < 0.25,
+                "an unanswered user turn in the history collapsed the reply into a repeated token (share \(orphanShare), control \(controlShare)) — \(withOrphan.prefix(200))")
+    }
+    /// Decodes with the app actually in the BACKGROUND, which is the state the
+    /// screen recording captured: the question was sent, the app was switched
+    /// away from for ~14 s, and the reply that appeared on return was one CJK
+    /// token repeated until the budget ran out.
+    ///
+    /// `ChatGeneration` brackets a turn in `BackgroundWork.begin`, which keeps
+    /// the PROCESS alive in the background; whether Metal work survives there
+    /// was the question. Here the host reached `.background` mid-decode and
+    /// answered normally — and that is a property of the TEST HOST, not the app.
+    /// A test host under testmanagerd keeps GPU access; the real app does not:
+    /// on 2026-09-04 the device log read "Execution of the command buffer was
+    /// aborted … Insufficient Permission (to submit GPU work from background)"
+    /// and LiteRT's decode thread never returned. This test therefore proves
+    /// only that the transport tolerates a background transition; the real
+    /// behaviour is the background-abandon poll, pinned by
+    /// `abandonsTheTurnWhenBackgrounded`, and must be verified in
+    /// the app itself.
+    ///
+    /// The reply goes to a FILE, not to `print`: stdout from a backgrounded app
+    /// does not reliably reach the runner.
+    @Test(.enabled(if: Self.diagnosticsEnabled, "set LITERT_DIAGNOSTICS=1 (backgrounds the test host)"),
+          .timeLimit(.minutes(5)))
+    @MainActor
+    func answersWhileTheAppIsBackgrounded() async throws {
+        try #require(FileManager.default.fileExists(atPath: Self.modelPath.path))
+
+        let transport = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 8192
+        )
+        // Warm the engine FIRST. A cold build costs 2.3-4.0 s, and paying it in
+        // the background would confound "the load failed" with "the decode did".
+        _ = try await transport.runTurn(messages: [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": "Name one colour."],
+        ], includeTools: false) { _ in }
+
+        let token = BackgroundWork.begin("LLM Inference") {}
+        defer { BackgroundWork.end(token) }
+
+        // SAMPLE the state, do not assume it. A pass here means nothing unless the
+        // host was really in the background while decoding, and `suspend` is a
+        // private entry point that can silently do nothing.
+        let states = LockedBox<Set<String>>([])
+        #if canImport(UIKit)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            UIApplication.shared.perform(NSSelectorFromString("suspend"))
+        }
+        let sampler = Task { @MainActor in
+            while !Task.isCancelled {
+                switch UIApplication.shared.applicationState {
+                case .active:     states.value.insert("active")
+                case .inactive:   states.value.insert("inactive")
+                case .background: states.value.insert("background")
+                @unknown default: states.value.insert("unknown")
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        defer { sampler.cancel() }
+        #endif
+
+        let turn = try await transport.runTurn(messages: [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": "Hi whats your name"],
+            ["role": "assistant", "content": "I am Gemma 2B, a large language model."],
+            ["role": "user", "content": "Helloooooo potato"],
+        ], includeTools: false) { _ in }
+
+        let share = repeatedPairShare(turn.content)
+        let report = """
+            repeat=\(share)
+            chars=\(turn.content.count)
+            states=\(states.value.sorted().joined(separator: ","))
+            ---
+            \(turn.content)
+            """
+        let out = URL.documentsDirectory.appending(component: "background-decode.txt")
+        try? report.write(to: out, atomically: true, encoding: .utf8)
+
+        #expect(states.value.contains("background"),
+                "the host never actually backgrounded — this test proves nothing about GPU suspension (saw \(states.value.sorted()))")
+        #expect(share < 0.25,
+                "decoding while backgrounded collapsed the reply into a repeated token (share \(share)) — \(turn.content.prefix(200))")
+    }
+
+    /// The same turn WITH TOOLS OFFERED — the composer showed the `web` chip.
+    ///
+    /// `includeTools: true` is the only path that reaches
+    /// `enableConversationConstrainedDecoding`, which pins generation to the tool
+    /// schema; a small model handed a non-question under a grammar constraint
+    /// was a plausible place for a decoder to collapse. Measured: it answers.
+    ///
+    /// A planted, network-free tool, so a failure is teemoon's and not Brave's.
+    @Test(.enabled(if: Self.enabled, "set LITERT_LIVE=1 (downloads ~2.5 GB)"),
+          .timeLimit(.minutes(20)))
+    @MainActor
+    func answersANonQuestionWithToolsOffered() async throws {
+        try #require(FileManager.default.fileExists(atPath: Self.modelPath.path))
+
+        let ran = LockedBox<Bool>(false)
+        let tool = BridgePlantedTool(result: "No results found.", ran: ran)
+        let events = StreamCallbacks(
+            onSourcesFound: { _ in }, onQueriesFound: { _ in },
+            onToolExecutionEnded: {}, onSuccess: { _ in }
+        )
+        let transport = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB,
+            contextTokens: 8192, tools: [tool], events: events
+        )
+        let turn = try await transport.runTurn(messages: [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": "Hi whats your name"],
+            ["role": "assistant", "content": "I am Gemma 2B, a large language model."],
+            ["role": "user", "content": "Are you sure? I thought you were a potato"],
+            ["role": "user", "content": "Helloooooo potato"],
+        ], includeTools: true) { _ in }
+
+        let share = repeatedPairShare(turn.content)
+        print("[tools] repeat=\(share) chars=\(turn.content.count) toolRan=\(ran.value) — \(turn.content.prefix(160))")
+
+        #expect(share < 0.25,
+                "offering tools collapsed the reply into a repeated token (share \(share)) — \(turn.content.prefix(200))")
+    }
+    /// The transcript the recording actually contains: `Are you sure? I thought
+    /// you were a potato` has NO reply under it — that generation was stopped —
+    /// and the very next question stalled, then came back as a repeated token.
+    ///
+    /// Stopping a turn used to leave the Swift loop and nothing else. LiteRT kept
+    /// decoding on its one worker thread, and the next `sendMessageStream` on the
+    /// same engine queued behind it: measured before the fix, a 34-character
+    /// reply took 641 s at 10 tok/s with `DEADLINE_EXCEEDED … callback_thread_pool`
+    /// in the native log. The other candidates — two consecutive user turns,
+    /// tools offered, decoding in the background — each answered normally on
+    /// this device and are pinned by the three tests above this one.
+    ///
+    /// WARM engine, and the cancel waits for the first chunk: that is the
+    /// mid-decode case. The cold case (cancelled during the engine build) is
+    /// `answersAfterATurnWasAbandonedDuringTheLoad`.
+    @Test(.enabled(if: Self.enabled, "set LITERT_LIVE=1 (downloads ~2.5 GB)"),
+          .timeLimit(.minutes(20)))
+    @MainActor
+    func answersAfterATurnWasAbandonedMidDecode() async throws {
+        try #require(FileManager.default.fileExists(atPath: Self.modelPath.path))
+        let transport = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 8192
+        )
+        _ = try await transport.runTurn(messages: [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": "Name one colour."],
+        ], includeTools: false) { _ in }
+
+        let chunks = LockedBox<Int>(0)
+        let abandoned = Task {
+            try await transport.runTurn(messages: [
+                ["role": "system", "content": "You are a helpful assistant."],
+                ["role": "user", "content": "Write a detailed 500 word essay about the history of the potato."],
+            ], includeTools: false) { _ in chunks.value += 1 }
+        }
+        // Cancel WHILE tokens are flowing.
+        let deadline = ContinuousClock.now + .seconds(20)
+        while chunks.value == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(chunks.value > 0, "the essay never started streaming — this cancel would not be mid-decode")
+        abandoned.cancel()
+        _ = try? await abandoned.value
+        print("[abandon] cancelled after \(chunks.value) chunks")
+
+        try await Self.expectPromptAnswer(from: transport, tag: "mid-decode")
+    }
+
+    /// Cancelled DURING THE ENGINE BUILD — before any native generation exists.
+    ///
+    /// This is what the first version of the test above did by accident (cold
+    /// engine, cancel at 2 s, `prefill=0tok decode=0tok`), and it wedged the
+    /// same way: the already-cancelled task went on to start a generation and
+    /// abandon it at once. The fix has to refuse to start one, not only cancel
+    /// one that is running.
+    @Test(.enabled(if: Self.enabled, "set LITERT_LIVE=1 (downloads ~2.5 GB)"),
+          .timeLimit(.minutes(20)))
+    @MainActor
+    func answersAfterATurnWasAbandonedDuringTheLoad() async throws {
+        try #require(FileManager.default.fileExists(atPath: Self.modelPath.path))
+        await LiteRTTransport.evictEngines()
+        let transport = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 8192
+        )
+        let chunks = LockedBox<Int>(0)
+        let abandoned = Task {
+            try await transport.runTurn(messages: [
+                ["role": "system", "content": "You are a helpful assistant."],
+                ["role": "user", "content": "Write a detailed 500 word essay about the history of the potato."],
+            ], includeTools: false) { _ in chunks.value += 1 }
+        }
+        // A cold build takes 2.3-4 s (`measuresWhatAColdStartCosts`); 1 s is inside it.
+        try await Task.sleep(for: .seconds(1))
+        abandoned.cancel()
+        _ = try? await abandoned.value
+        print("[abandon] cancelled during load, chunks=\(chunks.value)")
+
+        try await Self.expectPromptAnswer(from: transport, tag: "during-load")
+    }
+
+    /// A runaway answer is ended by the transport, not by the KV cache.
+    ///
+    /// The recording's `设施设施设施…` was still going 39 s in; at 8192 context
+    /// tokens it would have run for minutes. `maxAnswerTokens` cancels the
+    /// native decode instead — and drains it, so the next turn is unaffected
+    /// (the other way to stop, `break`, is the orphan bug above).
+    @Test(.enabled(if: Self.enabled, "set LITERT_LIVE=1 (downloads ~2.5 GB)"),
+          .timeLimit(.minutes(20)))
+    @MainActor
+    func capsARunawayAnswer() async throws {
+        try #require(FileManager.default.fileExists(atPath: Self.modelPath.path))
+        let capped = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 8192,
+            maxAnswerTokens: 40
+        )
+        let start = ContinuousClock.now
+        let turn = try await capped.runTurn(messages: [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": "Write a detailed 500 word essay about the history of the potato."],
+        ], includeTools: false) { _ in }
+        let elapsed = start.duration(to: .now)
+        print("[cap] chars=\(turn.content.count) took=\(elapsed) — \(turn.content.prefix(120))")
+
+        // ~40 tokens is ~160 chars by the transport's own estimate; one chunk of
+        // overshoot is expected, an essay is not.
+        #expect(turn.content.count < 600, "the cap did not end the answer: \(turn.content.count) chars")
+        #expect(elapsed < .seconds(30), "the capped turn took \(elapsed)")
+
+        try await Self.expectPromptAnswer(
+            from: LiteRTTransport(modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 8192),
+            tag: "after-cap")
+    }
+
+    /// Backgrounding mid-decode ABANDONS the turn at once — it does not hang —
+    /// and the next turn is normal.
+    ///
+    /// This is the customer bug: send, switch away ~15 s, return, and the reply
+    /// counted "thinking" forever while every later message hung behind it. On a
+    /// real phone iOS revokes GPU access from a backgrounded app, Metal aborts
+    /// the command buffer, and LiteRT's decode thread never returns — so the
+    /// stream never yields and awaiting it (and the one-generation gate) hangs.
+    /// The transport polls for background and abandons without awaiting the
+    /// stuck decode. `backgroundedForTest` stands in for that state, which a
+    /// test host cannot set; the GPU revocation itself only happens to the real
+    /// app, so this pins the ABANDON WIRING and the app-on-phone check remains.
+    @Test(.enabled(if: Self.enabled, "set LITERT_LIVE=1 (downloads ~2.5 GB)"),
+          .timeLimit(.minutes(20)))
+    @MainActor
+    func abandonsTheTurnWhenBackgrounded() async throws {
+        try #require(FileManager.default.fileExists(atPath: Self.modelPath.path))
+        let isBackground = LockedBox<Bool>(false)
+        let transport = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 8192,
+            backgroundedForTest: { isBackground.value }
+        )
+        _ = try await transport.runTurn(messages: [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": "Name one colour."],
+        ], includeTools: false) { _ in }
+
+        let chunks = LockedBox<Int>(0)
+        let start = ContinuousClock.now
+        let turn = Task {
+            try await transport.runTurn(messages: [
+                ["role": "system", "content": "You are a helpful assistant."],
+                ["role": "user", "content": "Write a detailed 500 word essay about the history of the potato."],
+            ], includeTools: false) { _ in chunks.value += 1 }
+        }
+        let deadline = ContinuousClock.now + .seconds(20)
+        while chunks.value == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(chunks.value > 0)
+        isBackground.value = true                       // the app goes to background
+        let output = try await turn.value
+        let elapsed = start.duration(to: .now)
+        print("[background] abandoned after \(elapsed) with \(output.content.count) chars")
+        // Abandoned, not awaited: the poll fires within ~150 ms, so this returns
+        // fast even though the (simulated-stuck) decode is still notionally running.
+        #expect(elapsed < .seconds(10), "the turn did not abandon on backgrounding (\(elapsed))")
+
+        // The gate must be free and the engine rebuilt: the next turn answers.
+        isBackground.value = false
+        try await Self.expectPromptAnswer(from: transport, tag: "after-background")
+    }
+
+    /// The next turn after an abandoned one must be a NORMAL turn: prompt and
+    /// coherent. A warm turn is ~3 s; 30 s is generous for a hot phone.
+    private static func expectPromptAnswer(from transport: LiteRTTransport, tag: String) async throws {
+        let start = ContinuousClock.now
+        let turn = try await transport.runTurn(messages: [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": "Hi whats your name"],
+            ["role": "assistant", "content": "I am Gemma 2B, a large language model."],
+            ["role": "user", "content": "Helloooooo potato"],
+        ], includeTools: false) { _ in }
+        let elapsed = start.duration(to: .now)
+        let share = repeatedPairShare(turn.content)
+        print("[abandon] \(tag): repeat=\(share) chars=\(turn.content.count) took=\(elapsed) — \(turn.content.prefix(160))")
+
+        #expect(elapsed < .seconds(30),
+                "\(tag): the next turn queued behind the abandoned decode (\(elapsed)) — runTurn is not stopping the native process")
+        #expect(share < 0.25,
+                "\(tag): the abandoned decode poisoned the next turn (share \(share)) — \(turn.content.prefix(200))")
     }
 }

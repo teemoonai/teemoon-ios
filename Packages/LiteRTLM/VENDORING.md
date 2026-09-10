@@ -15,7 +15,7 @@ This document is the LiteRTLM-specific rebuild/audit record.
 
 ## patch register
 
-Four deltas from upstream. Re-apply all of them on any version bump — the
+Seven deltas from upstream. Re-apply all of them on any version bump — the
 build will not catch a lost patch.
 
 1. **`Tool.getSchema()` promoted from protocol extension to protocol
@@ -55,6 +55,34 @@ build will not catch a lost patch.
    global shared mutable state" errors. This is vendored third-party code;
    it should build the way its authors build it, not be patched to satisfy
    a stricter mode.
+
+5. **`sendMessageStream` cancels the native process on stream termination** —
+   `Sources/LiteRTLM/Conversation.swift`, the `onTermination` handler in
+   `sendMessageStream`. Upstream sets none: a consumer whose task is
+   cancelled (or that drops the iterator) leaves `litert_lm_conversation_
+   send_message_stream` running to completion, and the next conversation on
+   the same engine queues behind it in the one-worker `callback_thread_pool`
+   (`DEADLINE_EXCEEDED` in the native log; a 34-character reply took 641 s).
+   teemoon's transport also cancels explicitly and drains — this is the
+   belt for other callers. Pinned by `LiteRTLiveTests.
+   answersAfterATurnWasAbandonedMidDecode`.
+
+6. **Terminal `StreamContext` releases hop off the callback thread** —
+   `releaseContextOffCallbackThread` in the same file. The final
+   `Unmanaged.release()` can be the last reference to the `Conversation`,
+   whose `deinit` calls `litert_lm_conversation_delete`; upstream runs that
+   from inside the runtime's own callback. Symptom without it is a wedge, not
+   a crash, and only when the consumer has already gone away.
+
+7. **`Conversation` retains its `Engine`** — `Conversation.swift` (the
+   `engine` stored property, set from `Engine.createConversation`). Upstream
+   holds no back-reference, so the last Swift release of an `Engine` runs
+   `litert_lm_engine_delete` even while a conversation created from it is
+   still decoding natively. That is exactly the state teemoon leaves behind
+   when it abandons a turn after iOS revokes GPU access in the background:
+   the wedged decode resumes on foreground against a freed engine. With the
+   reference, the engine is deleted only after that session's final
+   callback. Cost: a poisoned engine lives until its leaked decode ends.
 
 ## the macOS slice: repackaged, not just re-checksummed
 

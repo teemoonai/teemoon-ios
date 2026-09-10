@@ -15,6 +15,7 @@ struct ChatView: View {
     @Environment(\.modelContext) var modelContext
     @Binding var currentThread: Thread?
     @Environment(ChatGeneration.self) var llm
+    @Environment(\.scenePhase) private var scenePhase
     @Namespace var bottomID
     @State private var viewModel: ChatViewModel = {
         let vm = ChatViewModel()
@@ -25,6 +26,9 @@ struct ChatView: View {
         return vm
     }()
     @State private var showNoProviderAlert = false
+    @State private var showNoKeyAlert = false
+    /// The keyless setup the no-key alert sends the user to edit.
+    @State private var keylessProviderToEdit: Provider?
     @State private var showE2EEDegradedAlert = false
     @State private var e2eeRetrying = false
     /// Where sheet — option B chip above the composer.
@@ -46,6 +50,9 @@ struct ChatView: View {
     @Environment(OllamaDownloadCenter.self) private var pullCenter: OllamaDownloadCenter?
     /// Raised when send is pressed while the selected model is still arriving.
     @State private var showDownloadingAlert = false
+    /// A restart tapped on mobile data, waiting on the user's answer.
+    @State private var cellularRequest: CellularDownloadRequest?
+    private let pathObserver = NetworkPathObserver.shared
     /// Measured height of the whole bottom inset (note + chip + composer + padding).
     @State private var bottomInsetHeight: CGFloat = 96
     /// The Where chip's frame in the inset's own coordinate space. Both edges
@@ -290,6 +297,7 @@ struct ChatView: View {
                             // arriving — the chip is the only place that says so
                             // now, and the send button is disabled to match.
                             progress: arrivingAnywhere?.fraction,
+                            progressLabel: arrivingWaitingLabel,
                             // A HOME pull with no fraction yet has started and is
                             // simply pre-bytes, so it must not read as "needs
                             // download" — that badge means the weights aren't
@@ -354,6 +362,7 @@ struct ChatView: View {
                                 // that says so now, and the send button is
                                 // disabled to match.
                                 progress: arrivingAnywhere?.fraction,
+                            progressLabel: arrivingWaitingLabel,
                                 // A HOME pull with no fraction yet has started
                                 // and is simply pre-bytes, so it must not read as
                                 // "needs download" — that badge means the weights
@@ -481,6 +490,9 @@ struct ChatView: View {
                     .presentationDetents([.large])
                 }
             }
+            .sheet(item: $keylessProviderToEdit) { provider in
+                AddEditProviderView(mode: .edit(provider))
+            }
             // iOS keeps the sheet; the popover above replaces it on macOS.
             #if !os(macOS)
             .sheet(isPresented: $showWhereSheet, onDismiss: {
@@ -504,13 +516,20 @@ struct ChatView: View {
                     // through a screen that would tell them the same thing.
                     if let arriving = arrivingModel, arriving.fraction == nil {
                         Button("restart download") {
-                            downloader.start(arriving.model)
+                            // Same gate as the Where sheet: on mobile data this
+                            // asks before moving gigabytes, in a second alert.
+                            cellularRequest = CellularDownloadRequest.resolve(
+                                arriving.model, path: pathObserver
+                            ) { model, network in downloader.start(model, network: network) }
                         }
                     }
                     Button("choose another", role: .cancel) { showWhereSheet = true }
                     Button("wait", role: .cancel) {}
                 } message: {
                     Text(downloadingAlertMessage)
+                }
+                .cellularDownloadPrompt($cellularRequest) { model, network in
+                    downloader.start(model, network: network)
                 }
                 .alert("no provider configured", isPresented: $showNoProviderAlert) {
                     // One way in, and it is the same one the chip offers — no
@@ -536,6 +555,16 @@ struct ChatView: View {
                     // but still no account; the cloud needs both a key and
                     // trusting someone else with the text.
                     Text("download a model to this phone, connect a computer, or add a cloud key — then send again.")
+                }
+                .alert("no api key", isPresented: $showNoKeyAlert) {
+                    // Straight to the key field of THIS setup — not the
+                    // settings root, not the places list two taps away.
+                    Button("add a key") {
+                        keylessProviderToEdit = providerStore.activeProvider
+                    }
+                    Button("cancel", role: .cancel) {}
+                } message: {
+                    Text("\(providerStore.activeProvider?.name.lowercased() ?? "this provider") needs an api key, and none is saved on this phone. add one under setups, then send again.")
                 }
                 .alert(e2eeAlertTitle, isPresented: $showE2EEDegradedAlert) {
                     Button("retry verification") {
@@ -641,6 +670,15 @@ struct ChatView: View {
                     guard !isShown else { return }
                     runPendingSearchRetryIfReady()
                 }
+                // Back from the background: an on-device turn cut off while the
+                // app was away is re-asked. Policy lives on the view-model; the
+                // retry goes through the same send gate as any other.
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active,
+                          let message = viewModel.interruptedUserMessage(in: currentThread, llm: llm)
+                    else { return }
+                    retry(from: message)
+                }
         }
     }
 
@@ -663,6 +701,13 @@ struct ChatView: View {
             return "\(cause) Sending is blocked until this re-verifies — this could mean the enclave was tampered with or the connection intercepted."
         }
         return cause
+    }
+
+    /// "waiting for wi-fi" for a parked phone download, else nil (show progress).
+    private var arrivingWaitingLabel: String? {
+        guard let localID = providerStore.activeProvider?.localModelID,
+              let network = downloader.network(localID) else { return nil }
+        return CellularDownloadGate.waitingLabel(network: network, parked: downloader.isParked(localID))
     }
 
     private var arrivingModel: (model: LocalModel, fraction: Double?)? {
@@ -725,6 +770,7 @@ struct ChatView: View {
     private func generate() {
         presentSend(viewModel.prepareSend(
             hasProvider: providerStore.activeProvider != nil,
+            hasKey: activeProviderHasKey,
             isDownloading: arrival != nil,
             trust: confidentialSession.sendPolicy
         )) { performGenerate() }
@@ -735,10 +781,16 @@ struct ChatView: View {
         switch prep {
         case .blockedEmptyPrompt: return
         case .blockedNoProvider: showNoProviderAlert = true
+        case .blockedNoKey: showNoKeyAlert = true
         case .blockedDownloading: showDownloadingAlert = true
         case .confirmE2EE, .blockedE2EE: showE2EEDegradedAlert = true
         case .ready: ready()
         }
+    }
+
+    /// True when no provider is active only so the no-provider case wins.
+    private var activeProviderHasKey: Bool {
+        providerStore.activeProvider.map { providerStore.hasCredential(for: $0) } ?? true
     }
 
     private func performGenerate() {
@@ -799,6 +851,7 @@ struct ChatView: View {
     private func retry(from message: Message) {
         let prep = viewModel.prepareSend(
             hasProvider: providerStore.activeProvider != nil,
+            hasKey: activeProviderHasKey,
             isDownloading: arrival != nil,
             trust: confidentialSession.sendPolicy,
             requirePrompt: false

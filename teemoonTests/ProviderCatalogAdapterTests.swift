@@ -791,6 +791,27 @@ struct BraveProviderTests {
         #expect(message.contains("The option is not subscribed in the plan."))
     }
 
+    /// A request with no `X-Subscription-Token` header (the app sends none when
+    /// the stored key is empty) is a 422 whose `msg` is just "Field required";
+    /// the field is only in `loc`. Recorded live 2026-09-05. The card must
+    /// name the header, or the tester reads it as a malformed body.
+    @Test func missingSubscriptionTokenNamesTheHeader() {
+        let body = """
+        {"error":{"code":"VALIDATION","detail":"Unable to validate request parameter(s)",
+         "meta":{"errors":[{"input":null,"loc":["header","x-subscription-token"],
+         "msg":"Field required","type":"missing"}]},"status":422},"type":"ErrorResponse"}
+        """
+        let message = apiErrorMessage(from: body, httpStatus: 422, provider: "brave answers")
+        #expect(message == "brave answers (HTTP 422): Unable to validate request parameter(s) — Field required (header x-subscription-token)")
+
+        let bodyField = """
+        {"error":{"code":"VALIDATION","detail":"Unable to validate request parameter(s)",
+         "meta":{"errors":[{"loc":["body","messages",0,"content"],"msg":"Field required","type":"missing"}]},"status":422}}
+        """
+        #expect(apiErrorMessage(from: bodyField, httpStatus: 422, provider: "brave answers")
+                .hasSuffix("Field required (body.messages.0.content)"))
+    }
+
     /// Brave answers directly — it publishes no model list, so the add-provider
     /// screen must not offer one (`.fixed` rule ⇒ connection check, not picker).
     @Test func braveHasAFixedModelAndNoBrowsableCatalogue() {

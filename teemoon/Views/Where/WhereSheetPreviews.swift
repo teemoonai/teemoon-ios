@@ -241,6 +241,24 @@ import SwiftUI
     .environment(store)
 }
 
+/// The same download, parked: started on wi-fi, and the phone is now on mobile
+/// data. The row must say why nothing is moving instead of sitting at 42%.
+#Preview("where · phone, waiting for wi-fi", traits: .fixedLayout(width: 402, height: 850)) {
+    let e2b = LocalModelCatalog.all[0]
+    let store = ProviderStore(inMemory: true)
+    store.providers = [.local(e2b)]
+    store.currentProviderID = Provider.local(e2b).id.uuidString
+
+    return WhereSheetView(
+        startingAt: .phone,
+        pathObserver: NetworkPathObserver(simulatingSatisfied: true, expensive: true),
+        downloader: .previewing([(e2b, 0.42)], network: .wifiOnly),
+        isInstalled: { _ in false },
+        hasKey: { _ in true }
+    )
+    .environment(store)
+}
+
 /// Home, with the server identified: `ollama`, three models, one of them warm.
 /// `pulling` adds a server-side pull in flight.
 @MainActor private func whereHomePreview(pulling: Bool) -> some View {

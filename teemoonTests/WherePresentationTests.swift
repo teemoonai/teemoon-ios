@@ -783,3 +783,18 @@ struct ServerOutlivesItsModelsTests {
         #expect(emptied.id == p.id)           // SAME id — the Keychain hangs off it
     }
 }
+
+/// Picker rows show one caption line; the preset paragraph overflowed with an
+/// ellipsis on every row. Every preset gets a short caption that fits.
+@Suite("Preset captions")
+struct PresetCaptionTests {
+    @Test func everyPresetHasAOneLineCaption() {
+        for preset in Provider.presets {
+            let caption = WhereProviderPresentation.presetCaption(for: preset)
+            #expect(caption?.isEmpty == false, "\(preset.name) has no caption")
+            #expect((caption?.count ?? 0) <= WhereProviderPresentation.presetCaptionMaxLength,
+                    "\(preset.name): \(caption?.count ?? 0) chars")
+        }
+    }
+}
+

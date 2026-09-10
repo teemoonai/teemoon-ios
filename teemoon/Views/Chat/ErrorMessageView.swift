@@ -231,6 +231,26 @@ struct ErrorMessageView: View {
     }
 }
 
+/// The request a keyless Brave Answers setup sends: no auth header, and the
+/// server names the header only in `loc`. Built through `ErrorDrainer` so the
+/// card shows exactly what the transport produces.
+#Preview("Error View — 422 no key header") {
+    let body = Data(("{\"model\":\"brave\",\"messages\":[{\"role\":\"user\"," +
+        "\"content\":\"What's the best boutique shop in Paris\"}],\"stream\":true," +
+        "\"stream_options\":{\"include_usage\":true},\"enable_citations\":true}").utf8)
+    var drainer = ErrorDrainer(
+        status: 422, providerName: "brave answers",
+        requestURL: URL(string: "https://api.search.brave.com/res/v1/chat/completions")!,
+        requestHeaders: ["Content-Type": "application/json"], requestBody: body)
+    drainer.append(Data(("{\"error\":{\"code\":\"VALIDATION\",\"detail\":\"Unable to validate request parameter(s)\"," +
+        "\"meta\":{\"errors\":[{\"input\":null,\"loc\":[\"header\",\"x-subscription-token\"]," +
+        "\"msg\":\"Field required\",\"type\":\"missing\"}]},\"status\":422},\"type\":\"ErrorResponse\"}").utf8))
+    return ScrollView {
+        ErrorMessageView(error: drainer.makeLLMError(underlyingError: nil))
+            .padding()
+    }
+}
+
 #Preview("Error View — 402 credits") {
     ScrollView {
         let err = LLMError(
@@ -273,5 +293,15 @@ struct ErrorMessageView: View {
             consoleRecovery: Provider.consoleRecovery(for: err, activeProvider: nil)
         )
         .padding()
+    }
+}
+
+#Preview("Error View — no api key") {
+    ScrollView {
+        // The card ChatViewModel raises BEFORE attestation when the provider
+        // needs a key and none is stored. Built by the send path's own
+        // builder so the preview cannot drift from what ships.
+        ErrorMessageView(error: ChatViewModel.missingKeyError(for: .nearAI))
+            .padding()
     }
 }

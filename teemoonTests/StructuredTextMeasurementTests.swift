@@ -73,6 +73,36 @@ final class StructuredTextMeasurementTests: XCTestCase {
                                             height: UIView.layoutFittingExpandedSize.height)).height
     }
 
+    /// THE HAND-OFF MUST NOT REFLOW PROSE. A reply with no block markdown
+    /// streamed through Textual and then, once persisted, rendered through a
+    /// plain `Text` (`MessageView.needsStructuredText` was false) — 13pt
+    /// taller for three paragraphs, because `Text` puts a whole blank line
+    /// between paragraphs where Textual puts 0.8em. Reported on device
+    /// 2026-09-08 as the first reply "reformatting to have more vertical
+    /// spacing" the moment it landed. The answer now renders through Textual
+    /// on both sides; this pins that the two agree, settled.
+    func testAPlainReplyMeasuresTheSameStreamingAndPersisted() {
+        let prose = """
+        Here is the shortest version I can give you without losing the point.
+
+        It streams fast, it answers directly, and the pricing is aggressive. Those \
+        are the three things people actually notice in the first week.
+
+        If you want one line: fast, direct, cheap.
+        """
+        // SETTLED heights, in a window: Textual's block spacing is a
+        // preference, which a first `sizeThatFits` has not applied yet.
+        let streaming = settledHeight(of: StreamingMarkdownView(content: prose))
+        // What `MessageView.renderedAssistantText(structured: true)` renders —
+        // the answer's only path now — and the plain `Text` it used to take.
+        let persisted = settledHeight(of: StructuredText.cached(prose).textual.textSelection(.enabled))
+        let plain = settledHeight(of: Text(MessageView.cachedAttr(prose, key: "handoff-prose-test")))
+        XCTAssertEqual(streaming, persisted, accuracy: 1,
+            "streaming \(Int(streaming))pt vs persisted \(Int(persisted))pt: the hand-off reflows the prose")
+        XCTAssertGreaterThan(abs(plain - streaming), 5,
+            "the plain Text path now matches Textual (\(Int(plain))pt); the answer may use either again")
+    }
+
     func testTheFirstMeasurementIsTheRealHeightNotAnEmptyDocument() {
         let height = firstMeasuredHeight(of: StructuredText.cached(reply))
         // The fixture is a page and a half of blocks at 360pt wide. Before the

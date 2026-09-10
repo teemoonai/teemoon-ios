@@ -66,6 +66,17 @@ extension AttestationService {
             }
             let data = result.0
             let status = (result.1 as? HTTPURLResponse)?.statusCode ?? 0
+            // Same taxonomy as the gateway and model legs. Check the status
+            // BEFORE decoding: every field of GPUNodeReport is optional, so an
+            // error body decodes cleanly into empty "evidence".
+            if status >= 500 {
+                logger.warning("GPU fetch attempt \(attempt+1) HTTP \(status): server error — \(data.previewForLog(), privacy: .private)")
+                continue
+            }
+            if status >= 400 {
+                logger.warning("GPU fetch HTTP \(status): no GPU attestation — \(data.previewForLog(), privacy: .private)")
+                return nil
+            }
             guard let report = try? JSONDecoder().decode(GPUNodeReport.self, from: data) else {
                 logger.warning("GPU fetch attempt \(attempt+1) HTTP \(status) — decode failed: \(data.previewForLog(), privacy: .private)")
                 continue

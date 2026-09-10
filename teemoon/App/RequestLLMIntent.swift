@@ -82,6 +82,12 @@ struct RequestLLMIntent: AppIntent {
         ) {
             return .result(value: refusal, dialog: "\(refusal)")
         }
+        // Same gate as the chat composer: a keyed provider with no stored key
+        // would go out with no auth header and come back as a validation error.
+        guard providers.hasCredential(for: provider) else {
+            let refusal = "\(provider.name) needs an API key — open teemoon to add one."
+            return .result(value: refusal, dialog: "\(refusal)")
+        }
         let message = Message(role: .user, content: prompt, thread: thread,
                               isE2EE: session.canSeal)
         thread.messages.append(message)

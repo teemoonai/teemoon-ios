@@ -81,7 +81,17 @@ func apiErrorMessage(from responseBody: String, httpStatus: Int, provider: Strin
     if let detail = errorObj["detail"] as? String, !detail.isEmpty { parts.append(detail) }
     if let meta = errorObj["meta"] as? [String: Any],
        let errors = meta["errors"] as? [[String: Any]] {
-        let msgs = errors.compactMap { $0["msg"] as? String }.filter { !$0.isEmpty }
+        // `msg` alone is "Field required" — WHICH field is in `loc`, and
+        // without it a missing auth header reads as a malformed body.
+        let msgs = errors.compactMap { error -> String? in
+            guard let msg = error["msg"] as? String, !msg.isEmpty else { return nil }
+            let loc = (error["loc"] as? [Any] ?? []).map { "\($0)" }
+            guard !loc.isEmpty else { return msg }
+            let field = loc.first == "header"
+                ? "header " + loc.dropFirst().joined(separator: ".")
+                : loc.joined(separator: ".")
+            return "\(msg) (\(field))"
+        }
         parts.append(contentsOf: msgs)
     }
 

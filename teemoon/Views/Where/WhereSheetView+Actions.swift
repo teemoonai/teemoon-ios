@@ -31,13 +31,22 @@ extension WhereSheetView {
     /// first and selecting after would leave the user watching a bar with
     /// nothing decided at the end of it.
     func startAndSelect(_ model: LocalModel) {
+        // On mobile data the sheet asks first and stays open; the answer comes
+        // back through `PendingAlert.cellularDownload`.
+        if let request = CellularDownloadRequest.resolve(model, path: pathObserver,
+                                                         start: startAndSelect) {
+            pendingAlert = .cellularDownload(request)
+        }
+    }
+
+    func startAndSelect(_ model: LocalModel, network: DownloadNetwork) {
         let provider = providerStore.providers.first { $0.localModelID == model.id }
             ?? Provider.local(model)
         if !providerStore.providers.contains(where: { $0.id == provider.id }) {
             providerStore.addProvider(provider)
         }
         providerStore.activate(modelID: provider.model, on: provider)
-        downloader.start(model)
+        downloader.start(model, network: network)
         Haptics.play()
         dismiss()
     }
