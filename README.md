@@ -25,8 +25,6 @@ exactly what the attestation code does — see [`ATTESTATION.md`](ATTESTATION.md
 
 ## Features
 
-- no account, no subscription, no analytics. local history in SwiftData;
-  nothing syncs anywhere.
 - End-to-end encryption into near.ai's attested TEEs, verified on the phone rather than
   trusted from the server: the enclave's Intel TDX quote is checked on-device with DCAP, the
   encryption key is bound to the model enclave's own quote before a message is sealed, the
@@ -35,28 +33,30 @@ exactly what the attestation code does — see [`ATTESTATION.md`](ATTESTATION.md
   source and the per-model [audits](https://github.com/teemoonai/audits). An everyday proof
   view says it in plain language; an expert view shows the raw bindings. Every other cloud
   provider is TLS, and the row says so.
-- Streaming chat over SSE, with collapsible reasoning blocks for thinking models. Output
-  pacing is a `CADisplayLink` in the view layer; the model layer publishes tokens unthrottled.
 - On-device inference with Gemma 4 E2B/E4B via LiteRT-LM, tool calling included. Weights are
   downloaded once and SHA-verified.
+- no account, no subscription, no analytics. local history in SwiftData;
+  nothing syncs anywhere.
 - Web search the model can call: Brave's LLM Context API exposed as a `web_search` tool,
   with inline citations, a sources sheet with snippets and favicons, and a marker where a
   turn starts fresh. The model receives facts, not raw page markup. (Distinct from Brave
   Answers, the search-grounded provider preset — different API, different key.)
+- Background model downloads: a transfer survives the app being closed, resumes where it
+  stopped, waits for wi-fi when it was started on it, and starts over on its own if its link
+  expired while the phone was away.
 - Search your own chat history from the chats list; a result tap lands on the matching
   message, not the top of the thread.
 - Model browser with per-endpoint catalogs and capability gating — context length, tool
   support, and vision are read from the catalog, not assumed.
-- Background model downloads: a transfer survives the app being closed, resumes where it
-  stopped, waits for wi-fi when it was started on it, and starts over on its own if its link
-  expired while the phone was away.
-- Stop a reply mid-stream, retry a message that failed, and a notice when a server silently
-  truncates the conversation to fit its context window.
-- A Siri shortcut sends a question to the current model.
+- Streaming chat over SSE, with collapsible reasoning blocks for thinking models. Output
+  pacing is a `CADisplayLink` in the view layer; the model layer publishes tokens unthrottled.
 - A last-request debug view showing exactly what went over the wire — URL, headers, request
   body (message history included), any tool calls (name, arguments, result), and response
   body, in collapsible sections. Always shown when a request fails; on every request with
   developer mode enabled. Key-bearing headers are redacted on the copy path.
+- Stop a reply mid-stream, retry a message that failed, and a notice when a server silently
+  truncates the conversation to fit its context window.
+- A Siri shortcut sends a question to the current model.
 
 The attestation and verification features — the on-device attestation panel, the generated
 self-verification script, and the Fable miniaudits — are described in
