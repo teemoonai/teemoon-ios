@@ -27,6 +27,14 @@ exactly what the attestation code does — see [`ATTESTATION.md`](ATTESTATION.md
 
 - no account, no subscription, no analytics. local history in SwiftData;
   nothing syncs anywhere.
+- End-to-end encryption into near.ai's attested TEEs, verified on the phone rather than
+  trusted from the server: the enclave's Intel TDX quote is checked on-device with DCAP, the
+  encryption key is bound to the model enclave's own quote before a message is sealed, the
+  GPU's evidence is verified against NVIDIA's attestation service, TLS attestation proves the
+  connection terminates inside the enclave, and every enclave image is traced to published
+  source and the per-model [audits](https://github.com/teemoonai/audits). An everyday proof
+  view says it in plain language; an expert view shows the raw bindings. Every other cloud
+  provider is TLS, and the row says so.
 - Streaming chat over SSE, with collapsible reasoning blocks for thinking models. Output
   pacing is a `CADisplayLink` in the view layer; the model layer publishes tokens unthrottled.
 - On-device inference with Gemma 4 E2B/E4B via LiteRT-LM, tool calling included. Weights are
