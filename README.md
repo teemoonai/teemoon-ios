@@ -44,8 +44,10 @@ exactly what the attestation code does — see [`ATTESTATION.md`](ATTESTATION.md
 - Background model downloads: a transfer survives the app being closed, resumes where it
   stopped, waits for wi-fi when it was started on it, and starts over on its own if its link
   expired while the phone was away.
-- Search your own chat history from the chats list; a result tap lands on the matching
-  message, not the top of the thread.
+- Full-text search over your own chat history — a SQLite FTS5 index kept on the device
+  beside the store, updated as you chat and reconciled at launch, so it works offline and
+  nothing leaves the phone. A result tap lands on the matching message, not the top of the
+  thread.
 - Model browser with per-endpoint catalogs and capability gating — context length, tool
   support, and vision are read from the catalog, not assumed.
 - Streaming chat over SSE, with collapsible reasoning blocks for thinking models. Output
