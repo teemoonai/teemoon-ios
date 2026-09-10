@@ -15,13 +15,13 @@ beta builds on [TestFlight](https://testflight.apple.com/join/WHZ9VPms) · iPhon
            alt="A teemoon chat labeled end-to-end encrypted, with live markdown rendering, a model chip reading glm-5.2 · near.ai, and the web search tool switched on.">
     </td>
     <td align="center">
-      <img src="assets/proof.png" width="300"
-           alt="The proof view: encrypted to GLM-5.1 — only it can read this. A ladder of checks, each one passed, flagged, or not yet reviewed, in plain language.">
+      <img src="assets/proof-expert-glm52.png" width="300"
+           alt="The proof view in expert mode for GLM-5.2: the running code traces to public source across seven near.ai images, every reply comes back signed, and the model enclave's own quote pins its compose file — with a Fable miniaudit verdict for the guest OS.">
     </td>
   </tr>
   <tr>
     <td align="center"><em>a chat, end-to-end encrypted, searching the web</em></td>
-    <td align="center"><em>who can read this? — the proof, in plain language</em></td>
+    <td align="center"><em>who can read this? — the expert proof for glm-5.2</em></td>
   </tr>
 </table>
 
