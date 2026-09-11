@@ -36,6 +36,9 @@ struct TeemoonApp: App {
     }
 
     init() {
+        // First, before any URLSession exists: authenticated requests must not
+        // be archived to disk with their headers. See SharedURLCache.
+        SharedURLCache.disable()
         Self.captureNativeLogIfAsked()
         #if DEBUG
         // Armed by -scrollTrace, like the traces. When the main thread stops

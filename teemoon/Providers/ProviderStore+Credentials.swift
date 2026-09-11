@@ -136,6 +136,9 @@ extension ProviderStore {
     func setCredential(_ apiKey: String, forEndpoint endpoint: String?, legacyID: UUID?) throws {
         let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
         let account = endpoint.flatMap { Self.keyAccount(endpoint: $0) }
+        // A key that is removed or replaced must not survive in any cached
+        // request either. See SharedURLCache.
+        defer { SharedURLCache.purge() }
         if trimmed.isEmpty {
             if let account { try Keychain.delete(for: account) }
             if let legacyID { try? Keychain.delete(for: legacyID.uuidString) }
