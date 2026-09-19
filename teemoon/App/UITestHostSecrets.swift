@@ -20,6 +20,8 @@ enum UITestHostSecrets {
     static let nearAIFileNames = [".NEAR_AI_API_KEY", ".nearai_api_key"]
     static let grokFileNames = [".XAI_API_KEY", ".xai_api_key"]
     static let fireworksFileNames = [".FIREWORKS_API_KEY", ".fireworks_api_key"]
+    static let openRouterFileNames = [".OPENROUTER_API_KEY", ".openrouter_api_key"]
+    static let nvidiaFileNames = [".NVIDIA_API_KEY", ".nvidia_api_key"]
     static let braveAnswersFileNames = [".BRAVE_ANSWERS_API_KEY"]
     /// Brave *Search* / grounding — not the Answers chat key.
     static let braveGroundingFileNames = [".BRAVE_API_KEY", ".brave_api_key"]
@@ -29,6 +31,8 @@ enum UITestHostSecrets {
         case "nearai", "near.ai", "near": return nearAIFileNames
         case "grok", "xai":               return grokFileNames
         case "fireworks":                 return fireworksFileNames
+        case "openrouter":                return openRouterFileNames
+        case "nvidia":                    return nvidiaFileNames
         case "brave", "braveanswers":     return braveAnswersFileNames
         default:                          return []
         }

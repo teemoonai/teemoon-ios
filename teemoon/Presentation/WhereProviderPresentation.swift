@@ -13,17 +13,19 @@ import Foundation
 
 enum WhereProviderPresentation {
 
-    /// One line under a preset's name in a picker row. `presetDescription` is
-    /// a paragraph for footers; at caption size it truncates mid-sentence.
-    /// Keep each under `presetCaptionMaxLength` — see WherePresentationTests.
-    static let presetCaptionMaxLength = 45
+    /// Under a preset's name in a picker row, at most two caption lines at
+    /// phone width. `presetDescription` is a paragraph for footers. Keep each
+    /// under `presetCaptionMaxLength` — see WherePresentationTests.
+    static let presetCaptionMaxLength = 90
 
     static func presetCaption(for preset: Provider) -> String? {
         switch preset.id {
         case Provider.nearAI.id:       return "open models in enclaves the host can't read"
         case Provider.grok.id:         return "xai's models, 2m context, live web and x"
         case Provider.fireworks.id:    return "fast, low-cost open models — large catalog"
-        case Provider.braveAnswers.id: return "answers from live web search, with citations"
+        case Provider.openRouter.id:   return "most comprehensive collection of models"
+        case Provider.nvidia.id:       return "free, rate limited to 40 requests per minute"
+        case Provider.braveAnswers.id: return "cited answers and strong privacy from an independent index"
         default:                       return preset.presetDescription
         }
     }
@@ -157,7 +159,7 @@ enum WhereProviderPresentation {
             // Only stated where it's a real distinction the user can act on:
             // near.ai runs some models in enclaves and PROXIES others, so the
             // negative is news. Elsewhere it's the unremarkable default.
-            if provider.endpoint.contains("near.ai") {
+            if provider.isNearAI {
                 return "\(name) · not end-to-end encrypted"
             }
             return name
@@ -185,23 +187,13 @@ enum WhereProviderPresentation {
         return model.blurb.lowercased()
     }
 
-    /// Offline catalog rows for browse, when the place supports browsing.
-    ///
-    /// A FALLBACK, never the answer on its own — see `liveCatalogSource`. What
-    /// these rows carry varies by provider and has nothing to do with the
-    /// provider: near.ai's snapshot is a full catalogue (price, context, tiers),
-    /// Grok's is built from `grokDisplayNames` — a name table, so every row has
-    /// `price: ""` and no context — and Fireworks' from `fireworksPrices`, which
-    /// has prices and no context. Rendering these *instead of* live is what made
-    /// the three providers' rows look like three different designs.
-    static func browseModels(for provider: Provider) -> [KnownModel] {
-        if let preset = Provider.presets.first(where: { $0.sameEndpoint(as: provider) }) {
-            return KnownModel.models(for: preset.id)
-        }
-        if provider.endpoint.contains("near.ai") {
-            return KnownModel.nearAIModels
-        }
-        return []
+    /// What this server answered with last time, for the first frame of a
+    /// browse and for naming a model offline. Empty until it has answered
+    /// once; the live loader fills it in behind whatever this returns.
+    @MainActor
+    static func browseModels(for provider: Provider, apiKey: String = "") -> [KnownModel] {
+        if provider.isFixedAnswerService { return [KnownModel.braveAnswersModel] }
+        return LiveCatalogStore.shared.models(for: provider, apiKey: apiKey)
     }
 
     /// Which live catalogue a browse row should fetch, or nil when there is
@@ -237,20 +229,18 @@ enum WhereProviderPresentation {
     /// a home server with no metadata endpoint teemoon speaks — LM Studio and
     /// llama.cpp answer `/v1/models` with ids and nothing else, so their pages
     /// stay thin and honestly so.
+    @MainActor
     static func liveModelsLoader(
         for provider: Provider,
         apiKey: String,
         homeKind: LocalServerKind?
     ) -> (() async -> [KnownModel]?)? {
         guard let base = provider.openAIBaseURL else { return nil }
-        if let source = liveCatalogSource(for: provider) {
-            let header = provider.authHeaderName
-            return {
-                guard case .connected(let models) = await ModelCatalog.liveCatalog(
-                    for: source, baseURL: base, apiKey: apiKey, authHeaderName: header
-                ) else { return nil }
-                return models
-            }
+        if liveCatalogSource(for: provider) != nil {
+            // Through the store, so opening a browser is also what updates the
+            // count on the row behind it. An hour old is fresh enough to show
+            // first and refresh behind.
+            return { await LiveCatalogStore.shared.refresh(provider, apiKey: apiKey, maxAge: 3600) }
         }
         // A home box teemoon has a real adapter for.
         if WhereLocality.of(provider) == .home, homeKind == .ollama {
@@ -263,8 +253,29 @@ enum WhereProviderPresentation {
         return nil
     }
 
+    /// Who can serve a model, for the card — or nil for a catalogue that
+    /// publishes no such list, since an empty section would imply it does.
+    /// The source decides, so no screen has to know which vendor that is.
+    @MainActor
+    static func offersLoader(
+        for provider: Provider,
+        apiKey: String
+    ) -> ((String) async -> [ModelOffer])? {
+        guard let base = provider.openAIBaseURL else { return nil }
+        switch liveCatalogSource(for: provider) {
+        case .openRouter:
+            let header = provider.authHeaderName
+            return { modelID in
+                await OpenRouterAdapter.listOffers(
+                    modelID: modelID, baseURL: base, apiKey: apiKey, authHeaderName: header)
+            }
+        default:
+            return nil
+        }
+    }
+
     static func showsConfidentialityTags(for provider: Provider) -> Bool {
-        provider.endpoint.contains("near.ai")
+        provider.isNearAI
     }
 
     /// Joins a caption with one more piece of metadata using this file's `·`

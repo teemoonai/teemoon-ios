@@ -151,6 +151,13 @@ struct ProviderConnectionSection: View {
     @ViewBuilder
     private var connectionFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Arriving with the preset chosen hides the preset section and,
+            // with it, the description that section's footer shows — including
+            // brave's line that it needs a different key than the grounding
+            // api. Said here instead, beside the field it is about.
+            if let description = form.initialPreset?.presetDescription {
+                Text(description)
+            }
             if form.scheme == .http {
                 Text("http is unencrypted — use only on a trusted network")
             }

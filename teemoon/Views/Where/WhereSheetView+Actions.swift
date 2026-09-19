@@ -172,38 +172,17 @@ extension WhereSheetView {
 
     @ViewBuilder
     func browseSheet(for provider: Provider) -> some View {
-        if provider.prefersSearchFirstBrowse {
-            SearchFirstModelBrowser(
-                provider: provider,
-                apiKey: providerStore.credential(for: provider),
-                onSelect: { known in
-                    applyBrowseSelection(provider: provider, model: known)
-                }
-            )
-        } else {
-            // LIVE first for near.ai, snapshot only as the offline fallback.
-            //
-            // This sheet used to render `KnownModel.nearAIModels` unconditionally
-            // while settings' own browser fetched `/v1/models` — so the same
-            // provider's catalog looked different depending on which door you came
-            // through, and this door was the stale one. Measured 2026-07-29: it
-            // showed a "new" badge on two models published 55 days earlier and no
-            // badge on six that qualified, plus snapshot prices and context windows.
-            //
-            // The fallback keeps its place: with no key or no network there is
-            // nothing live to show, and a curated list beats an empty sheet.
-            // `ModelBrowserView` already had the seam for this — `liveLoader`,
-            // built for settings' near.ai browser and simply never passed here.
-            ModelBrowserView(
-                selectedModel: $browseSelectedModel,
-                models: WhereProviderPresentation.browseModels(for: provider),
-                onSelect: { known in
-                    applyBrowseSelection(provider: provider, model: known)
-                },
-                liveLoader: liveCatalogLoader(for: provider),
-                showsConfidentialityTags: WhereProviderPresentation.showsConfidentialityTags(for: provider)
-            )
-        }
+        // ONE browser for every catalogue, however large. OpenRouter used to
+        // get a second, search-only one that fetched through the generic probe,
+        // so its rows arrived with no price while the same models priced fine
+        // in settings.
+        ModelBrowserView(
+            selectedModel: $browseSelectedModel,
+            door: .browsing(provider, apiKey: browseKey(for: provider), homeKind: nil),
+            onSelect: { known in
+                applyBrowseSelection(provider: provider, model: known)
+            }
+        )
     }
 
     /// Browse EQUIPS. It used to replace `provider.model`, so picking a second
@@ -214,9 +193,9 @@ extension WhereSheetView {
     /// model is still in the list when they come back.
     func applyBrowseSelection(provider: Provider, model: KnownModel) {
         var updated = provider.equipping(model.id)
-        if let caps = model.capabilities {
-            updated.modelCapabilities = caps
-        }
+        // Always the picked model's own answer, nil included: keeping the
+        // previous model's bits is how a no-tools pick kept the tools gate open.
+        updated.modelCapabilities = model.capabilities
         // MATERIALISE THE RECORD IF THERE ISN'T ONE.
         //
         // `updateProvider` only ever updates — it has no insert branch, so a

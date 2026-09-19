@@ -10,111 +10,60 @@ import SwiftUI
 
 // MARK: - Model browser sheet
 
-/// How the browser groups rows. Sorting reorders rows *within* these groups; it
-/// never dissolves them — so a flat price list can't bury the trust structure.
-enum ModelGrouping: CaseIterable { case confidentiality, vendor }
-/// Sort applied within each group.
-enum ModelSortWithin: CaseIterable { case `default`, priceAsc, priceDesc }
-
 struct ModelBrowserView: View {
     @Binding var selectedModel: String
-    /// Curated / offline model list, shown immediately.
-    let models: [KnownModel]
+    /// Everything this browser knows about the catalogue it is opened onto.
+    let door: ModelBrowserDoor
     var onSelect: ((KnownModel) -> Void)? = nil
-    /// Optional live catalogue loader (near.ai). When it returns a non-empty
-    /// list, it replaces `models`; on failure the curated list stays.
-    var liveLoader: (() async -> [KnownModel]?)? = nil
-    /// near.ai only: tag each row with its confidentiality tier.
-    var showsConfidentialityTags = false
     @State private var liveModels: [KnownModel]? = nil
     @State private var isLoadingLive = false
-    @State private var sortWithin: ModelSortWithin = .default
-    /// nil = use the default for this catalog (confidentiality when tiered, else vendor).
-    @State private var groupingOverride: ModelGrouping? = nil
-    /// The model whose detail is pushed, if any.
+    @State private var loadFailed = false
+    @State private var query = ModelBrowserQuery()
     @State private var detailModel: KnownModel? = nil
     @Environment(\.dismiss) var dismiss
 
-    /// Live list once loaded, else the curated fallback.
-    private var effectiveModels: [KnownModel] { liveModels ?? models }
+    private var effectiveModels: [KnownModel] { liveModels ?? door.models }
 
-    /// Default grouping: confidentiality is the *resting structure* for a tiered
-    /// (near.ai) catalog so trust never scatters; vendor otherwise.
-    private var grouping: ModelGrouping {
-        groupingOverride ?? (showsConfidentialityTags ? .confidentiality : .vendor)
-    }
-    private var groupingBinding: Binding<ModelGrouping> {
-        Binding(get: { grouping }, set: { groupingOverride = $0 })
-    }
-
-    /// Sort applied within each group (never across groups).
-    private var sortedModels: [KnownModel] {
-        switch sortWithin {
-        case .default:   return effectiveModels
-        case .priceAsc:  return effectiveModels.sorted { priceScore($0) < priceScore($1) }
-        case .priceDesc: return effectiveModels.sorted { priceScore($0) > priceScore($1) }
-        }
-    }
-
-    /// Combined price for sorting: input + output per-1M rates. Output usually
-    /// dominates real spend, so summing both reflects cost far better than the input
-    /// rate alone (e.g. a cheap-input / dear-output model shouldn't read as "cheap").
-    private func priceScore(_ model: KnownModel) -> Double {
-        // "$1.40/$4.40" → 1.40 + 4.40
-        model.price.split(separator: "/").reduce(0.0) { acc, part in
-            let digits = part.drop(while: { !$0.isNumber && $0 != "." })
-            return acc + (Double(digits.prefix(while: { $0.isNumber || $0 == "." })) ?? 0)
-        }
-    }
-
-    /// Forwards to the tier's own label — see `Confidentiality.label`. Kept as a
-    /// name because the call sites read better with it.
-    private func tierHeader(_ t: NearAIModelCatalog.Confidentiality) -> String { t.label }
-
-    /// Rows bucketed by the active grouping, each bucket sorted by `sortWithin`.
-    /// Confidentiality groups run in trust order (e2ee → attested → proxied); vendor
-    /// groups run in first-appearance order.
-    private var groups: [(id: String, header: String, models: [KnownModel])] {
-        let rows = sortedModels
-        switch grouping {
-        case .confidentiality:
-            let order: [NearAIModelCatalog.Confidentiality] = [.teeOwn, .teeThirdParty, .proxied]
-            return order.compactMap { tier in
-                let ms = rows.filter { NearAIModelCatalog.confidentiality(forID: $0.id) == tier }
-                return ms.isEmpty ? nil : (String(describing: tier), tierHeader(tier), ms)
-            }
-        case .vendor:
-            var seen: [String] = []
-            for m in rows where !seen.contains(m.vendor) { seen.append(m.vendor) }
-            return seen.map { v in (v, v.lowercased(), rows.filter { $0.vendor == v }) }
-        }
-    }
-
-    private var groupSummary: String {
-        switch grouping { case .confidentiality: return "confidentiality"; case .vendor: return "vendor" }
-    }
-    private var sortSummary: String {
-        switch sortWithin {
-        case .default:   return "default"
-        case .priceAsc:  return "price ↑"
-        case .priceDesc: return "price ↓"
-        }
+    private var listing: ModelBrowserListing {
+        ModelBrowserListing(models: effectiveModels,
+                            query: query,
+                            tiered: door.showsConfidentialityTags,
+                            selectedID: selectedModel,
+                            allowsCustomID: door.allowsCustomID)
     }
 
     var body: some View {
         NavigationStack {
+            let listing = listing
             List {
-                Section { sortGroupControl }
-                ForEach(groups, id: \.id) { group in
+                if !effectiveModels.isEmpty {
+                    Section { controls(listing) }
+                }
+                if let typed = listing.customID {
                     Section {
-                        ForEach(group.models) { model in
-                            modelRow(model)
+                        Button {
+                            pick(KnownModel(id: typed,
+                                            displayName: typed.split(separator: "/").last.map(String.init) ?? typed,
+                                            vendor: "", price: ""))
+                        } label: {
+                            Label("use “\(typed)” as model id", systemImage: "plus.circle")
+                                .textCase(.lowercase)
                         }
+                    } footer: {
+                        Text("no match in the list — sends the typed id as-is.")
+                            .textCase(.lowercase)
+                    }
+                }
+                ForEach(listing.sections) { section in
+                    Section {
+                        ForEach(section.rows) { row in modelRow(row) }
                     } header: {
-                        Text(group.header).textCase(.lowercase)
+                        if let header = section.header { Text(header).textCase(.lowercase) }
                     }
                 }
             }
+            .overlay { emptyState(listing) }
+            .searchable(text: $query.text, prompt: "search models")
             .navigationTitle("browse models")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -128,17 +77,18 @@ struct ModelBrowserView: View {
                     // near.ai is the only catalogue that tiers its models, and
                     // that tier is the app's central claim — so it is passed in
                     // only where it is real.
-                    confidentiality: showsConfidentialityTags
-                        ? tierHeader(NearAIModelCatalog.confidentiality(forID: model.id))
-                        : nil
+                    confidentiality: door.showsConfidentialityTags
+                        ? NearAIModelCatalog.confidentiality(forID: model.id).label
+                        : nil,
+                    // An alias has no providers of its own; ask about the model
+                    // it redirects to.
+                    offersLoader: door.offersLoader.map { loader in
+                        { await loader(model.aliasOf ?? model.id) }
+                    }
                 )
             }
-            .task {
-                guard let liveLoader, liveModels == nil else { return }
-                isLoadingLive = true
-                if let live = await liveLoader(), !live.isEmpty { liveModels = live }
-                isLoadingLive = false
-            }
+            .task { await loadLive() }
+            .refreshable { await loadLive(force: true) }
             .toolbar {
                 #if os(iOS) || os(visionOS)
                 ToolbarItem(placement: .topBarLeading) {
@@ -156,92 +106,155 @@ struct ModelBrowserView: View {
         }
     }
 
-    /// The list-header control that states both dimensions at rest — "confidentiality ·
-    /// price ↑" — and opens one menu holding group + sort, so they're never two separate
-    /// hunts. Replaces the old nav-bar 3-way cycle icon that never said what it sorted by.
-    private var sortGroupControl: some View {
-        Menu {
-            if showsConfidentialityTags {
-                Picker("group by", selection: groupingBinding) {
-                    Text("confidentiality").tag(ModelGrouping.confidentiality)
-                    Text("vendor").tag(ModelGrouping.vendor)
+    /// The count on the left, one menu on the right. Both dimensions live in
+    /// that menu, so sort and filter are never two separate hunts, and the
+    /// caption under it says what is currently hiding rows.
+    @ViewBuilder
+    private func controls(_ listing: ModelBrowserListing) -> some View {
+        HStack(spacing: 8) {
+            Text(listing.countLabel)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .textCase(.lowercase)
+                .accessibilityIdentifier("modelBrowser.count")
+            Spacer(minLength: 6)
+            Menu {
+                Picker("sort", selection: $query.sort) {
+                    ForEach(listing.sorts, id: \.self) { sort in
+                        Text(sort.label).tag(sort)
+                    }
                 }
+                if !listing.filters.isEmpty {
+                    Section("show only") {
+                        ForEach(listing.filters, id: \.self) { filter in
+                            Toggle(filter.label, isOn: binding(for: filter))
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "line.3.horizontal.decrease").font(.caption)
+                    Text(listing.effectiveSort.summary).textCase(.lowercase)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             }
-            Picker("sort", selection: $sortWithin) {
-                Text("default").tag(ModelSortWithin.default)
-                Text("price · low to high").tag(ModelSortWithin.priceAsc)
-                Text("price · high to low").tag(ModelSortWithin.priceDesc)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "line.3.horizontal.decrease").font(.caption)
-                Text(showsConfidentialityTags ? "\(groupSummary) · \(sortSummary)" : sortSummary)
-                    .textCase(.lowercase)
-                Image(systemName: "chevron.down").font(.caption2)
-                Spacer()
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("modelBrowser.sortMenu")
         }
-        .buttonStyle(.plain)
+        if let active = listing.activeSummary {
+            HStack {
+                Text(active).font(.caption).foregroundStyle(.secondary).textCase(.lowercase)
+                Spacer()
+                Button("clear") { query.filters = [] }
+                    .font(.caption)
+                    .textCase(.lowercase)
+            }
+        }
+    }
+
+    private func binding(for filter: ModelBrowserQuery.Filter) -> Binding<Bool> {
+        Binding(get: { query.filters.contains(filter) },
+                set: { on in
+                    if on { query.filters.insert(filter) } else { query.filters.remove(filter) }
+                })
+    }
+
+    /// Three empty states, because they need three different answers: still
+    /// loading, the fetch failed with nothing saved, or the filters hide
+    /// everything.
+    @ViewBuilder
+    private func emptyState(_ listing: ModelBrowserListing) -> some View {
+        if effectiveModels.isEmpty && isLoadingLive {
+            ProgressView("loading models…").textCase(.lowercase)
+        } else if effectiveModels.isEmpty && loadFailed {
+            ContentUnavailableView {
+                Label("couldn't load models", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text("check the key and network.")
+                    .textCase(.lowercase)
+            } actions: {
+                Button("try again") { Task { await loadLive(force: true) } }
+                    .textCase(.lowercase)
+                    .accessibilityIdentifier("modelBrowser.retry")
+            }
+        } else if listing.isEmpty && listing.customID == nil && !effectiveModels.isEmpty {
+            ContentUnavailableView {
+                Label("no models match", systemImage: "line.3.horizontal.decrease")
+            } description: {
+                Text(listing.activeSummary == nil ? "try a different search."
+                                                  : "try a different search, or clear the filters.")
+                    .textCase(.lowercase)
+            }
+        }
+    }
+
+    /// One fetch per appearance; `force` is the retry, from pull-down or the
+    /// failed state's button, and clears the failure so the states re-evaluate.
+    private func loadLive(force: Bool = false) async {
+        guard let liveLoader = door.liveLoader, force || liveModels == nil else { return }
+        loadFailed = false
+        isLoadingLive = true
+        if let live = await liveLoader(), !live.isEmpty { liveModels = live } else if liveModels == nil { loadFailed = true }
+        isLoadingLive = false
+    }
+
+    private func pick(_ model: KnownModel) {
+        selectedModel = model.id
+        onSelect?(model)
+        dismiss()
     }
 
     @ViewBuilder
-    private func modelRow(_ model: KnownModel) -> some View {
+    private func modelRow(_ row: ModelBrowserListing.Row) -> some View {
+        let model = row.model
         Button {
-            selectedModel = model.id
-            onSelect?(model)
-            dismiss()
+            pick(model)
         } label: {
-            // One flowing line: name (truncates, never wraps) → tags right after it →
-            // price/context right-aligned. Flattened so a long name shrinks itself
-            // instead of wrapping under the tag.
-            HStack(spacing: 6) {
-                Text(model.displayName)
-                    .tint(.primary)
-                    .textCase(.lowercase)
-                    .lineLimit(1)
-                // RETIRING, next to `new` and in its place when both would show:
-                // a model on its way out is the more decision-relevant fact, and
-                // two badges on one row is where the name starts truncating.
-                if model.isRetiring {
-                    Text("retiring")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.orange.opacity(0.14)))
-                        .fixedSize()
-                } else if model.isNew {
-                    Text("new")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-                        .fixedSize()
+            VStack(alignment: .leading, spacing: 2) {
+                // One flowing line: name (truncates, never wraps) → tags right
+                // after it → price/context right-aligned.
+                HStack(spacing: 6) {
+                    if row.isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .fixedSize()
+                    }
+                    Text(model.displayName)
+                        .tint(.primary)
+                        .textCase(.lowercase)
+                        .lineLimit(1)
+                    // RETIRING, next to `new` and in its place when both would
+                    // show: a model on its way out is the more decision-relevant
+                    // fact, and two badges is where the name starts truncating.
+                    if model.isRetiring {
+                        badge("retiring", .orange)
+                    } else if model.isNew {
+                        badge("new", Color.accentColor)
+                    }
+                    Spacer(minLength: 6)
+                    Text(model.metaLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)      // reference data — quiet gray
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize()                      // price stays intact; the name yields first
                 }
-                // Not when the list is GROUPED by confidentiality: the section
-                // header directly above already says "attested on third-party
-                // hardware", so the tag repeats it once per row and spends the
-                // width doing it. It's `.fixedSize()` and the name isn't, so the
-                // name is what paid — `deepseek v3.2` rendered as "deeps…" beside
-                // a 17-character tag restating its own heading. The tag earns its
-                // place under any OTHER grouping, where trust would otherwise
-                // scatter across vendor sections.
-                if showsConfidentialityTags, grouping != .confidentiality {
-                    confidentialityTag(NearAIModelCatalog.confidentiality(forID: model.id))
-                        .fixedSize()
+                // Only when the list is flat. Grouped, the header above the row
+                // already says the vendor or the tier, and repeating it spends
+                // the width the name needs.
+                if row.showsVendor || row.showsTier {
+                    HStack(spacing: 6) {
+                        if row.showsVendor, !model.vendor.isEmpty {
+                            Text(model.vendor).font(.caption).foregroundStyle(.secondary)
+                                .textCase(.lowercase).lineLimit(1)
+                        }
+                        if row.showsTier, let tier = row.tier {
+                            confidentialityTag(tier).fixedSize()
+                        }
+                    }
                 }
-                Spacer(minLength: 6)
-                Text(model.metaLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)          // reference data — quiet gray
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize()                          // price stays intact; the name yields first
             }
         }
         // .plain so price/context + tier tags render in true label colors instead of
@@ -265,6 +278,17 @@ struct ModelBrowserView: View {
                 Label("model info", systemImage: "info.circle")
             }
         }
+    }
+
+    private func badge(_ text: String, _ tint: Color) -> some View {
+        Text(text)
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(tint.opacity(0.13)))
+            .fixedSize()
     }
 
     // Trust-tier badge is now the file-level `confidentialityTag(_:)` so the inline
@@ -301,6 +325,16 @@ struct ModelBrowserView: View {
 
 #Preview("Where → add fireworks key") {
     AddEditProviderView(mode: .add, initialPreset: .fireworks)
+        .environment(ProviderStore(inMemory: true))
+}
+
+#Preview("Where → add openrouter key") {
+    AddEditProviderView(mode: .add, initialPreset: .openRouter)
+        .environment(ProviderStore(inMemory: true))
+}
+
+#Preview("Where → add nvidia key") {
+    AddEditProviderView(mode: .add, initialPreset: .nvidia)
         .environment(ProviderStore(inMemory: true))
 }
 
@@ -451,7 +485,7 @@ private let previewNow: Date = {
 }()
 
 #Preview("Model Browser — Grok") {
-    ModelBrowserView(selectedModel: .constant("grok-4.5"), models: previewGrokRows())
+    ModelBrowserView(selectedModel: .constant("grok-4.5"), door: .init(models: previewGrokRows()))
 }
 
 #Preview("Model Browser — LM Studio (local)") {
@@ -471,18 +505,10 @@ private let previewNow: Date = {
     """
     let list = try! JSONDecoder().decode(LMStudioAdapter.ModelsResponse.self, from: Data(sample.utf8))
     return ModelBrowserView(selectedModel: .constant("qwen2.5-7b-instruct"),
-                            models: LMStudioAdapter.buildModels(from: list.data))
+                            door: .init(models: LMStudioAdapter.buildModels(from: list.data)))
 }
 
-#Preview("Model Browser — near.ai") {
-    ModelBrowserView(selectedModel: .constant("zai-org/GLM-5.1-FP8"),
-                     models: KnownModel.nearAIModels,
-                     showsConfidentialityTags: true)
-}
-
-/// The LIVE near.ai catalog, which is what both browsers now render — the
-/// preview above shows the offline fallback, and the two used to be the same
-/// thing.
+/// The near.ai catalog as the app builds it, from a captured `/v1/models`.
 ///
 /// Real `created` values from a captured `/v1/models`, and `now` pinned to
 /// 2026-07-29, so the badge is asserted rather than left to the clock: glm-5.2
@@ -490,8 +516,8 @@ private let previewNow: Date = {
 /// (2026-06-04, 55 days) do not. Those last two were the rows the frozen
 /// snapshot was still badging.
 ///
-/// `models: []` on purpose — nothing curated to fall back to, so anything on
-/// screen came from the live path.
+/// `models: []` is the cold case: nothing saved yet, so anything on screen
+/// came from the live path.
 #Preview("Model Browser — near.ai · live") {
     let sample = """
     {"object":"list","data":[
@@ -518,14 +544,14 @@ private let previewNow: Date = {
     let pinned = Calendar(identifier: .gregorian).date(from: when)!
     return ModelBrowserView(
         selectedModel: .constant("z-ai/glm-5.2"),
-        models: [],
-        liveLoader: {
-            guard let list = try? JSONDecoder().decode(
-                NearAIModelCatalog.ModelsResponse.self, from: Data(sample.utf8)
-            ) else { return nil }
-            return await NearAIModelCatalog.buildModels(from: list.data, now: pinned)
-        },
-        showsConfidentialityTags: true)
+        door: .init(
+            liveLoader: {
+                guard let list = try? JSONDecoder().decode(
+                    NearAIModelCatalog.ModelsResponse.self, from: Data(sample.utf8)
+                ) else { return nil }
+                return await NearAIModelCatalog.buildModels(from: list.data, now: pinned)
+            },
+            showsConfidentialityTags: true))
 }
 
 /// Fireworks rows as the app builds them, from a sample of the real control-plane
@@ -537,6 +563,20 @@ private let previewNow: Date = {
 /// ordering (each section ranked by its newest model). Against `previewNow`,
 /// glm 5.2 (2026-06-16, 43 days) earns the badge and kimi k2.7 code (47 days)
 /// just misses it — which is the badge working, not the badge broken.
+/// near.ai rows shaped like the live catalogue's: one row per tier, so the
+/// parity preview shows the tags a near.ai browse actually carries.
+private func previewNearAIRows() -> [KnownModel] {
+    [
+        KnownModel(id: "z-ai/glm-5.3-flash", displayName: "GLM 5.3 Flash", vendor: "Z.ai",
+                   price: "$0.15/$0.50", contextWindow: "1M",
+                   directBaseURL: "https://glm-5-3-flash.completions.near.ai/v1"),
+        KnownModel(id: "moonshotai/kimi-k3", displayName: "Kimi K3", vendor: "Moonshot",
+                   price: "$3.30/$16.50", contextWindow: "1M"),
+        KnownModel(id: "anthropic/claude-sonnet-5", displayName: "Claude Sonnet 5",
+                   vendor: "Anthropic", price: "$2.00/$10.00", contextWindow: "1M"),
+    ]
+}
+
 private func previewFireworksRows() -> [KnownModel] {
     let sample = """
     {"models":[
@@ -568,7 +608,7 @@ private func previewFireworksRows() -> [KnownModel] {
 
 #Preview("Model Browser — Fireworks") {
     ModelBrowserView(selectedModel: .constant("accounts/fireworks/models/kimi-k2p7-code"),
-                     models: previewFireworksRows())
+                     door: .init(models: previewFireworksRows()))
 }
 
 /// The comparison being made on the device: the three cloud catalogues side
@@ -587,13 +627,12 @@ private func previewFireworksRows() -> [KnownModel] {
 /// and it is the one difference that should survive.
 #Preview("Model Browser — cloud parity", traits: .fixedLayout(width: 1240, height: 880)) {
     HStack(spacing: 0) {
-        ModelBrowserView(selectedModel: .constant("grok-4.5"), models: previewGrokRows())
+        ModelBrowserView(selectedModel: .constant("grok-4.5"), door: .init(models: previewGrokRows()))
         Divider()
         ModelBrowserView(selectedModel: .constant("accounts/fireworks/models/kimi-k2p7-code"),
-                         models: previewFireworksRows())
+                         door: .init(models: previewFireworksRows()))
         Divider()
-        ModelBrowserView(selectedModel: .constant("zai-org/GLM-5.1-FP8"),
-                         models: KnownModel.nearAIModels,
-                         showsConfidentialityTags: true)
+        ModelBrowserView(selectedModel: .constant("z-ai/glm-5.3-flash"),
+                         door: .init(models: previewNearAIRows(), showsConfidentialityTags: true))
     }
 }

@@ -2,16 +2,12 @@
 //  ProviderCatalogValidationTests.swift
 //  teemoonTests
 //
-//  Validation gate for the shipped provider catalog (Provider+Presets). The
-//  load-bearing invariant: every near.ai model the app would treat as
-//  attestable MUST ship an offline direct TEE host. Without one the attestation
-//  path resolves no host, the model-enclave manifest never loads, and E2EE
-//  key-binding stalls then fails closed — the GLM-5.2 / DeepSeek-v3.2 class of
-//  bug. This turns that silent runtime failure into a build-time test failure.
-//
-//  Uses `classify` (the pure offline heuristic, no shared cache) so the gate is
-//  deterministic and parallel-safe — it validates the shipped fallback exactly
-//  as the app resolves it before the live catalog loads.
+//  teemoon ships no model catalogue: a provider's models are whatever its
+//  `/models` answers with. What it still ships is the data no API serves —
+//  Fireworks' prices and near.ai's attested-3p id set — plus the invariant
+//  those lists exist to protect: an own-fleet near.ai model has a confidential
+//  host, and nothing else does. Both captured lists are real responses, so the
+//  gate holds offline and deterministically.
 //
 
 import Foundation
@@ -21,68 +17,69 @@ import Testing
 @Suite("ProviderCatalogValidation")
 struct ProviderCatalogValidationTests {
 
-    /// THE gate: a shipped near.ai own-fleet (teeOwn) model must carry an
-    /// offline direct host so it can attest without waiting on the live
-    /// directory. teeOwn ⟺ confidential endpoint is the invariant the runtime
-    /// no-confidential-endpoint fail-fast also rests on.
-    @Test func teeOwnNearAIModelsShipADirectHost() {
-        for model in KnownModel.nearAIModels
-        where NearAIModelCatalog.classify(model.id) == .teeOwn {
-            #expect(model.directBaseURL != nil,
-                    "\(model.id) is own-fleet (teeOwn) but ships no directBaseURL — its model-enclave manifest won't load and E2EE will fail closed. Add its https://<slug>.completions.near.ai/v1 host.")
+    private func liveModels(file: String = #filePath) throws -> [NearAIModelCatalog.ModelsResponse.Model] {
+        let data = try TestFixture.data("nearai_models.json", file: file)
+        return try JSONDecoder().decode(NearAIModelCatalog.ModelsResponse.self, from: data).data
+    }
+
+    private func directory(file: String = #filePath) throws -> [String: String] {
+        let data = try TestFixture.data("nearai_endpoints_directory.json", file: file)
+        return try #require(EndpointDirectory.parseDirectory(data))
+    }
+
+    /// THE gate, now against the two live lists rather than a compiled copy:
+    /// every model near.ai runs itself publishes a direct host. Without one the
+    /// model-enclave manifest never loads and E2EE stalls, which is why a
+    /// missing host degrades the session instead of reading as "ordinary".
+    @Test func everyOwnFleetModelHasAConfidentialHost() throws {
+        let hosts = try directory()
+        for model in try liveModels()
+        where model.owned_by == "nearai" && !NearAIModelCatalog.isNonChat(model.id) {
+            #expect(hosts[model.id.lowercased()] != nil,
+                    "\(model.id) is own-fleet but near.ai publishes no direct host for it")
         }
     }
 
-    /// Proxied and attested-3p models have no confidential endpoint, so they
-    /// must NOT claim a direct TEE host — a host here would put a non-E2EE
-    /// model into every "encrypted models" surface.
-    @Test func nonTeeOwnNearAIModelsHaveNoDirectHost() {
-        for model in KnownModel.nearAIModels
-        where NearAIModelCatalog.classify(model.id) != .teeOwn {
-            #expect(model.directBaseURL == nil,
-                    "\(model.id) is \(NearAIModelCatalog.classify(model.id)) (no confidential endpoint) but ships a directBaseURL.")
+    /// And nothing else claims one: a host on a proxied or third-party model
+    /// would put a model teemoon cannot seal into every "encrypted" surface.
+    @Test func noOtherTierHasAConfidentialHost() throws {
+        let hosts = try directory()
+        for model in try liveModels() where model.owned_by != "nearai" {
+            #expect(hosts[model.id.lowercased()] == nil,
+                    "\(model.id) is \(model.owned_by ?? "untiered") yet has a direct host")
         }
     }
 
-    /// The attested-3p exact-id set (the offline discriminator) must stay
-    /// consistent with the shipped catalog: every id in it exists in the list,
-    /// and classifies as teeThirdParty.
-    @Test func attestedThirdPartySetMatchesCatalog() {
-        let ids = Set(KnownModel.nearAIModels.map(\.id))
-        for tp in KnownModel.nearAIAttestedThirdPartyIDs {
-            #expect(ids.contains(tp), "\(tp) is in the attested-3p set but not the shipped catalog — stale set?")
-            #expect(NearAIModelCatalog.classify(tp) == .teeThirdParty)
+    /// The offline discriminator must agree with what near.ai says: every id in
+    /// the shipped attested-3p set that is still served is labelled that way.
+    /// Stale ids stay in the set on purpose — a user can still have one equipped.
+    @Test func theAttestedThirdPartySetMatchesTheLiveTiers() throws {
+        let live = Dictionary(try liveModels().map { ($0.id.lowercased(), $0.owned_by) },
+                              uniquingKeysWith: { first, _ in first })
+        for id in KnownModel.nearAIAttestedThirdPartyIDs {
+            #expect(NearAIModelCatalog.classify(id) == .teeThirdParty)
+            if let owner = live[id.lowercased()] {
+                #expect(owner == "attested 3p",
+                        "\(id) is in the attested-3p set but near.ai now calls it \(owner ?? "nothing")")
+            }
         }
     }
 
-    /// Every shipped direct host is a well-formed https `/v1` completions base.
-    @Test func directHostsAreWellFormed() {
-        for model in KnownModel.nearAIModels {
-            guard let raw = model.directBaseURL else { continue }
-            #expect(URL(string: raw)?.scheme == "https",
-                    "\(model.id): directBaseURL must be https — \(raw)")
-            #expect(raw.hasSuffix("/v1"),
-                    "\(model.id): directBaseURL must end in /v1 — \(raw)")
+    /// Every published host is an https near.ai `/v1` base. The directory picks
+    /// where sealed prompts go, so a row that is anything else is dropped.
+    @Test func directHostsAreWellFormed() throws {
+        for (id, raw) in try directory() {
+            let url = URL(string: raw)
+            #expect(url?.scheme == "https", "\(id): \(raw) is not https")
+            #expect(raw.hasSuffix("/v1"), "\(id): \(raw) does not end in /v1")
+            #expect(Provider.isNearAIHost(url?.host), "\(id): \(raw) is not a near.ai host")
         }
     }
 
-    /// No duplicate model ids in the one list that is still a full snapshot.
-    /// (xAI and Fireworks ship keyed maps now — duplicates are impossible.)
-    @Test func noDuplicateModelIDs() {
-        let dupes = Dictionary(grouping: KnownModel.nearAIModels.map(\.id), by: { $0 })
-            .filter { $0.value.count > 1 }.keys.sorted()
-        #expect(dupes.isEmpty, "near.ai has duplicate model ids: \(dupes)")
-    }
-
-    /// The shrunk snapshots must stay minimal AND well-formed: xAI ships only
-    /// names (it serves price, context and recency itself), Fireworks only
-    /// prices (the one thing it serves nowhere — verified 2026-07-26).
-    @Test func shrunkSnapshotsAreWellFormed() {
-        #expect(!KnownModel.grokDisplayNames.isEmpty)
-        for (id, name) in KnownModel.grokDisplayNames {
-            #expect(!id.isEmpty && !name.isEmpty)
-            #expect(id.hasPrefix("grok"), "\(id) is not an xAI id")
-        }
+    /// Fireworks prices are the one table that stays: no Fireworks API serves a
+    /// price (verified 2026-07-26), so a stale entry is the only way a row can
+    /// lie about cost.
+    @Test func fireworksPricesAreWellFormed() {
         #expect(!KnownModel.fireworksPrices.isEmpty)
         for (id, price) in KnownModel.fireworksPrices {
             #expect(id.hasPrefix("accounts/"), "\(id) is not a Fireworks resource id")

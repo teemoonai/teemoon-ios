@@ -25,7 +25,7 @@ extension Provider {
         id:                   UUID(uuidString: "A0000000-0000-0000-0000-000000000001")!,
         name:                 "near.ai",
         endpoint:             "https://cloud-api.near.ai/v1/chat/completions",
-        model:                "z-ai/glm-5.2",   // top e2ee flagship (not a proxied Claude)
+        model:                "z-ai/glm-5.3-flash",   // the E2EE flagship near.ai still serves (5.2 retired 2026-09-12)
         supportsModelBrowsing: true,
         presetDescription:    "open models running inside attested enclaves encrypted to the llm model, so the operator can't read your chats. teemoon checks the proof on the device.",
         // cloud.near.ai CTAs ("Get an API key") land here; app.near.ai redirects to marketing.
@@ -52,7 +52,7 @@ extension Provider {
         id:                   UUID(uuidString: "A0000000-0000-0000-0000-000000000003")!,
         name:                 "Grok",
         endpoint:             "https://api.x.ai/v1/chat/completions",
-        model:                "grok-4.3",
+        model:                "grok-4.6",   // the fallback before a key exists; live picks newest-first
         supportsModelBrowsing: true,
         presetDescription:    "xai's models, with a 2m token context window, reasoning modes, and live web and x knowledge.",
         // Deliberately the bare console, unlike the other three. The keys page is
@@ -73,8 +73,31 @@ extension Provider {
         signupURL:            "https://fireworks.ai/api-keys"
     )
 
+    static let openRouter = Provider(
+        id:                   UUID(uuidString: "A0000000-0000-0000-0000-000000000005")!,
+        name:                 "OpenRouter",
+        endpoint:             "https://openrouter.ai/api/v1/chat/completions",
+        model:                "moonshotai/kimi-k3",   // open weights first: the fallback before a key exists
+        supportsModelBrowsing: true,
+        presetDescription:    "one key for every vendor's models — claude, gpt, gemini, deepseek and hundreds more, each with its price and context window.",
+        signupURL:            "https://openrouter.ai/settings/keys"
+    )
+
+    static let nvidia = Provider(
+        id:                   UUID(uuidString: "A0000000-0000-0000-0000-000000000006")!,
+        name:                 "NVIDIA",
+        endpoint:             "https://integrate.api.nvidia.com/v1/chat/completions",
+        model:                "nvidia/nemotron-3-super-120b-a12b",
+        supportsModelBrowsing: true,
+        // "free" is a fact about the tier, not a promise: the hosted catalogue
+        // is free for development under the NVIDIA Developer Program and
+        // rate-limited per model. There is no per-token price to show.
+        presetDescription:    "nvidia's hosted catalog — nemotron, kimi, deepseek, gemma and more. free, rate limited to 40 requests per minute.",
+        signupURL:            "https://build.nvidia.com/settings/api-keys"
+    )
+
     /// Order here controls the button order in the quick-start row.
-    static let presets: [Provider] = [.nearAI, .grok, .fireworks, .braveAnswers]
+    static let presets: [Provider] = [.nearAI, .grok, .fireworks, .openRouter, .nvidia, .braveAnswers]
 
     /// Endpoints whose MODEL LIST is gated behind the api key, so asking without
     /// one can only 401.
@@ -112,20 +135,27 @@ extension Provider {
     /// Brave has no /models endpoint so its model is fixed. See [[ModelDefaultRule]].
     static let defaultModelRules: [UUID: ModelDefaultRule] = [
         Provider.nearAI.id:       .mostExpensive(e2eeOnly: true),
-        Provider.grok.id:         .first,                 // one family — refine later
-        Provider.fireworks.id:    .first,                 // .curated([…]) once curated
+        Provider.grok.id:         .first,                 // closed weights; the list is newest-first
+        // Open-weight hosts: the strongest published model wins, by price
+        // tier, then parameter count, then recency — no shortlist to keep.
+        Provider.fireworks.id:    .strongestOpenWeight,
+        Provider.openRouter.id:   .strongestOpenWeight,
+        Provider.nvidia.id:       .strongestOpenWeight,
         Provider.braveAnswers.id: .fixed("brave"),        // no /models endpoint
     ]
 
     /// The default-model rule for this provider, if it's a known preset.
-    var defaultModelRule: ModelDefaultRule? { Provider.defaultModelRules[id] }
+    /// Falls through `matchingPreset`: `save()` mints a fresh UUID, so a saved
+    /// setup no longer carries the preset's id.
+    var defaultModelRule: ModelDefaultRule? {
+        Provider.defaultModelRules[id] ?? matchingPreset.flatMap { Provider.defaultModelRules[$0.id] }
+    }
 
-    /// The preset this provider's endpoint matches, if any. Matching by endpoint
-    /// (not id) is what makes it work for a provider the user added themselves:
-    /// `save()` mints a fresh UUID, so the preset's id is long gone by then.
+    /// The preset this provider's endpoint matches, if any. `sameEndpoint`, not
+    /// a raw `==`: the saved spelling may carry `/chat/completions` or a trailing
+    /// slash, and matching literally made a keyed setup read as unconfigured.
     var matchingPreset: Provider? {
-        let target = endpoint.trimmingCharacters(in: .whitespaces).lowercased()
-        return Provider.presets.first { $0.endpoint.lowercased() == target }
+        Provider.presets.first { $0.sameEndpoint(as: self) }
     }
 
     /// Vendor console / keys / credits URL for this provider when it matches a
@@ -223,7 +253,11 @@ extension Provider {
     /// returns HTTP 400 `OPTION_NOT_IN_PLAN` on the first message. That case is
     /// surfaced verbatim by `apiErrorMessage`, which reads Brave's `detail`.
     var keyValidationEndpoint: ProviderKeyValidator.Endpoint? {
-        id == Provider.braveAnswers.id ? .braveSearch : nil
+        switch matchingPreset?.id ?? id {
+        case Provider.braveAnswers.id: return .braveSearch
+        case Provider.openRouter.id:   return .openRouter   // /models is 200 for any key
+        default:                       return nil
+        }
     }
 
     /// Base URL for inference. For near.ai providers, returns the model's direct
@@ -231,8 +265,8 @@ extension Provider {
     /// the provider's configured endpoint for all other cases.
     var inferenceBaseURL: URL? {
         if capabilities.contains(.attestation),
-           let direct = KnownModel.nearAIModels.first(where: { $0.id == model })?.directBaseURL {
-            return URL(string: direct)
+           let direct = EndpointDirectory.persistedBase(forModel: model) {
+            return direct
         }
         return openAIBaseURL
     }
@@ -254,122 +288,15 @@ extension KnownModel {
 
     // ── Near.ai ──────────────────────────────────────────────────────────────
 
-    // ── BEGIN GENERATED · near.ai catalog ───────────────────────────────────
-    // Edits between these markers are overwritten by --write; regenerate,
-    // review the git diff, and commit manually — never auto-applied.
-    /// Curated near.ai models — used for display metadata (price, context)
-    /// and as the offline fallback for the model browser, which otherwise
-    /// loads the live catalogue from `/v1/models` (see NearAIModelCatalog).
-    /// Snapshot of /v1/models + /endpoints taken 2026-08-31; refresh both
-    /// together (prices/context from /v1/models `pricing`/`context_length`,
-    /// direct hosts from /endpoints, tiers from `owned_by`).
-    ///
-    /// THREE tiers, mirroring `owned_by`:
-    ///  · nearai        — near.ai's own TEE fleet: E2EE-capable, each with a
-    ///                    direct confidential host (the only tier teemoon can
-    ///                    attest end-to-end).
-    ///  · attested 3p   — third-party "attested" hosting (Chutes): anonymous,
-    ///                    NO confidential endpoint, NO E2EE path. Never give
-    ///                    these a directBaseURL.
-    ///  · proxied       — plain passthrough to the upstream vendor API:
-    ///                    anonymized, no enclave.
-    static let nearAIModels: [KnownModel] = [
-        // Ordering: newest first within each vendor family; vendor blocks by
-        // their newest entry. Confidential tiers use the catalog's `created`;
-        // the proxied tier uses semantic version recency (its `created` is
-        // mostly one bulk-import date and would mislead).
-
-        // ── nearai · own TEE fleet (E2EE) ────────────────────────────────────
-        KnownModel(id: "Qwen/Qwen3.8-27B",                 displayName: "Qwen3.8 27B",       vendor: "Qwen",     price: "$0.44/$3.30",  contextWindow: "262K",              directBaseURL: "https://qwen3-8-27b.completions.near.ai/v1"),
-        KnownModel(id: "Qwen/Qwen3.6-35B-A3B-FP8",         displayName: "Qwen3.6 35B",       vendor: "Qwen",     price: "$0.17/$1.10",  contextWindow: "262K",              directBaseURL: "https://qwen3-6-35b.completions.near.ai/v1"),
-        KnownModel(id: "Qwen/Qwen3-VL-30B-A3B-Instruct",   displayName: "Qwen3-VL 30B",      vendor: "Qwen",     price: "$0.15/$0.55",  contextWindow: "16K",               directBaseURL: "https://qwen3-vl-30b.completions.near.ai/v1"),
-        KnownModel(id: "z-ai/glm-5.2",                     displayName: "GLM 5.2",           vendor: "Z.ai",     price: "$1.40/$4.40",  contextWindow: "1M",                directBaseURL: "https://glm-5-2.completions.near.ai/v1"),
-        KnownModel(id: "zai-org/GLM-5.1-FP8",              displayName: "GLM 5.1",           vendor: "Z.ai",     price: "$1.40/$4.40",  contextWindow: "203K",              directBaseURL: "https://glm-5-1.completions.near.ai/v1"),
-        KnownModel(id: "deepseek-ai/DeepSeek-V4-Flash",    displayName: "DeepSeek V4 Flash", vendor: "DeepSeek", price: "$0.17/$0.35",  contextWindow: "1M",                directBaseURL: "https://dsv4-flash.completions.near.ai/v1"),
-
-        // ── attested 3p · Chutes hardware (anonymous, NOT E2EE) ──────────────
-        KnownModel(id: "moonshotai/kimi-k3",               displayName: "Kimi K3",           vendor: "Moonshot", price: "$3.30/$16.50", contextWindow: "1M"),
-        KnownModel(id: "moonshotai/kimi-k2.6",             displayName: "Kimi K2.6",         vendor: "Moonshot", price: "$0.81/$3.85",  contextWindow: "262K"),
-        KnownModel(id: "deepseek/deepseek-v3.2",           displayName: "DeepSeek V3.2",     vendor: "DeepSeek", price: "$1.10/$1.10",  contextWindow: "128K"),
-        KnownModel(id: "qwen/qwen3.5-397b-a17b",           displayName: "Qwen3.5 397B",      vendor: "Qwen",     price: "$0.50/$3.30",  contextWindow: "128K"),
-        KnownModel(id: "qwen/qwen3-32b",                   displayName: "Qwen3 32B",         vendor: "Qwen",     price: "$0.11/$0.46",  contextWindow: "128K"),
-
-        // ── proxied · upstream vendor APIs (anonymized, no enclave) ──────────
-        KnownModel(id: "qwen/qwen3.7-max",                 displayName: "Qwen3.7 Max",       vendor: "Qwen",      price: "$2.80/$7.50",  contextWindow: "1M"),
-        KnownModel(id: "google/gemini-3.5-flash",          displayName: "Gemini 3.5 Flash",  vendor: "Google",    price: "$1.50/$9.00",  contextWindow: "1M"),
-        KnownModel(id: "google/gemini-3.1-flash-lite",     displayName: "Gemini 3.1 Flash Lite", vendor: "Google", price: "$0.25/$1.50", contextWindow: "1M"),
-        KnownModel(id: "google/gemini-2.5-pro",            displayName: "Gemini 2.5 Pro",    vendor: "Google",    price: "$1.25/$10.00", contextWindow: "1M"),
-        KnownModel(id: "google/gemini-2.5-flash",          displayName: "Gemini 2.5 Flash",  vendor: "Google",    price: "$0.30/$2.50",  contextWindow: "1M"),
-        KnownModel(id: "google/gemini-2.5-flash-lite",     displayName: "Gemini 2.5 Flash Lite", vendor: "Google", price: "$0.10/$0.40", contextWindow: "1M"),
-        KnownModel(id: "anthropic/claude-fable-5",         displayName: "Claude Fable 5",    vendor: "Anthropic", price: "$10.00/$50.00", contextWindow: "1M"),
-        KnownModel(id: "anthropic/claude-opus-5",          displayName: "Claude Opus 5",     vendor: "Anthropic", price: "$5.00/$25.00", contextWindow: "1M"),
-        KnownModel(id: "anthropic/claude-sonnet-5",        displayName: "Claude Sonnet 5",   vendor: "Anthropic", price: "$2.00/$10.00", contextWindow: "1M"),
-        KnownModel(id: "anthropic/claude-opus-4-8",        displayName: "Claude Opus 4.8",   vendor: "Anthropic", price: "$5.00/$25.00", contextWindow: "1M"),
-        KnownModel(id: "anthropic/claude-opus-4-7",        displayName: "Claude Opus 4.7",   vendor: "Anthropic", price: "$5.00/$25.00", contextWindow: "1M"),
-        KnownModel(id: "anthropic/claude-opus-4-6",        displayName: "Claude Opus 4.6",   vendor: "Anthropic", price: "$5.00/$25.00", contextWindow: "200K"),
-        KnownModel(id: "anthropic/claude-sonnet-4-6",      displayName: "Claude Sonnet 4.6", vendor: "Anthropic", price: "$3.00/$15.00", contextWindow: "1M"),
-        KnownModel(id: "anthropic/claude-sonnet-4-5",      displayName: "Claude Sonnet 4.5", vendor: "Anthropic", price: "$3.00/$15.00", contextWindow: "200K"),
-        KnownModel(id: "anthropic/claude-haiku-4-5",       displayName: "Claude Haiku 4.5",  vendor: "Anthropic", price: "$1.00/$5.00",  contextWindow: "200K"),
-        KnownModel(id: "openai/gpt-5.6-sol",               displayName: "GPT-5.6 Sol",       vendor: "OpenAI",    price: "$4.00/$20.00", contextWindow: "1.1M"),
-        KnownModel(id: "openai/gpt-5.5",                   displayName: "GPT-5.5",           vendor: "OpenAI",    price: "$5.00/$30.00", contextWindow: "1.1M"),
-        KnownModel(id: "openai/gpt-5.4",                   displayName: "GPT-5.4",           vendor: "OpenAI",    price: "$2.50/$15.00", contextWindow: "1.1M"),
-        KnownModel(id: "openai/gpt-5.4-mini",              displayName: "GPT-5.4 Mini",      vendor: "OpenAI",    price: "$0.75/$4.50",  contextWindow: "400K"),
-        KnownModel(id: "openai/gpt-5.4-nano",              displayName: "GPT-5.4 Nano",      vendor: "OpenAI",    price: "$0.20/$1.25",  contextWindow: "400K"),
-        KnownModel(id: "openai/gpt-5.2",                   displayName: "GPT-5.2",           vendor: "OpenAI",    price: "$1.75/$14.00", contextWindow: "400K"),
-        KnownModel(id: "openai/gpt-5.1",                   displayName: "GPT-5.1",           vendor: "OpenAI",    price: "$1.25/$10.00", contextWindow: "400K"),
-        KnownModel(id: "openai/gpt-5",                     displayName: "GPT-5",             vendor: "OpenAI",    price: "$1.25/$10.00", contextWindow: "400K"),
-        KnownModel(id: "openai/gpt-5-mini",                displayName: "GPT-5 Mini",        vendor: "OpenAI",    price: "$0.25/$2.00",  contextWindow: "400K"),
-        KnownModel(id: "openai/gpt-5-nano",                displayName: "GPT-5 Nano",        vendor: "OpenAI",    price: "$0.05/$0.40",  contextWindow: "400K"),
-        KnownModel(id: "openai/o4-mini",                   displayName: "o4 Mini",           vendor: "OpenAI",    price: "$1.10/$4.40",  contextWindow: "200K"),
-        KnownModel(id: "openai/o3",                        displayName: "o3",                vendor: "OpenAI",    price: "$2.00/$8.00",  contextWindow: "200K"),
-        KnownModel(id: "openai/o3-mini",                   displayName: "o3 Mini",           vendor: "OpenAI",    price: "$1.10/$4.40",  contextWindow: "200K"),
-        KnownModel(id: "openai/gpt-4.1",                   displayName: "GPT-4.1",           vendor: "OpenAI",    price: "$2.00/$8.00",  contextWindow: "1M"),
-        KnownModel(id: "openai/gpt-4.1-mini",              displayName: "GPT-4.1 Mini",      vendor: "OpenAI",    price: "$0.40/$1.60",  contextWindow: "1M"),
-        KnownModel(id: "openai/gpt-4.1-nano",              displayName: "GPT-4.1 Nano",      vendor: "OpenAI",    price: "$0.10/$0.40",  contextWindow: "1M"),
-    ]
-
-    /// The `attested 3p` tier ids from the 2026-08-31 snapshot — third-party
-    /// (Chutes) hosting with no confidential endpoint. Used by
-    /// `NearAIModelCatalog.classify` so the offline heuristic doesn't misfile
-    /// them as E2EE-capable (their lowercased ids collide with the own-fleet
-    /// namespace, e.g. `qwen/…` vs `Qwen/…`, so an exact-id set is the only
-    /// safe offline discriminator).
+    /// near.ai's `attested 3p` ids — third-party (Chutes) hosting, attested but
+    /// with NO confidential endpoint, so no E2EE path via near.ai. APPEND-ONLY,
+    /// and never pruned: a user can still have a retired one equipped, and the
+    /// offline classifier must not promote it to E2EE-capable. Live tiers from
+    /// `/v1/models` override this the moment they arrive.
     static let nearAIAttestedThirdPartyIDs: Set<String> = [
-        "deepseek/deepseek-v3.2", "moonshotai/kimi-k2.6",
-        "moonshotai/kimi-k3", "qwen/qwen3-32b",
-        "qwen/qwen3.5-397b-a17b",
-    ]
-    // ── END GENERATED · near.ai catalog ─────────────────────────────────────
-
-    /// Attested-3p ids RETIRED from the live catalog. APPEND-ONLY, hand-kept:
-    /// a user can still have one equipped, and the offline classifier must not
-    /// misfile a Chutes model as E2EE-capable just because it left the fleet.
-    /// When a regen drops an id from the generated set above, it moves here.
-    static let nearAIRetiredAttestedThirdPartyIDs: Set<String> = [
-        "minimax/minimax-m2.5", "moonshotai/kimi-k2.5", "z-ai/glm-5",
-    ]
-
-    // ── xAI / Grok ───────────────────────────────────────────────────────────
-    //
-    // NOT a snapshot: xAI publishes price, context window, modalities and
-    // `created` on `GET /v1/(language-)models`, so the live catalogue is the
-    // source of truth for everything about a Grok model EXCEPT what it should be
-    // called. Ids read like build artifacts ("grok-4.20-0309-non-reasoning"), so
-    // this is the id → product-name map, and nothing else. An id missing here
-    // still lists — `XAIAdapter.displayName(forID:)` synthesizes a readable name.
-    //
-    // Verified read-only by the catalog generator: every id must still be a
-    // live CANONICAL model (xAI retires ids by demoting them to aliases of a
-    // newer model, which silently redirects), and live models missing from the
-    // map are reported so a new Grok gets a proper name.
-
-    static let grokDisplayNames: [String: String] = [
-        "grok-4.5":                     "Grok 4.5",
-        "grok-4.3":                     "Grok 4.3",
-        "grok-4.20-0309-reasoning":     "Grok 4.20 Reasoning",
-        "grok-4.20-0309-non-reasoning": "Grok 4.20",
-        "grok-4.20-multi-agent-0309":   "Grok 4.20 Multi-Agent",
-        "grok-build-0.1":               "Grok Build",
+        "deepseek/deepseek-v3.2", "minimax/minimax-m2.5", "moonshotai/kimi-k2.5",
+        "moonshotai/kimi-k2.6", "moonshotai/kimi-k3", "qwen/qwen3-32b",
+        "qwen/qwen3.5-397b-a17b", "z-ai/glm-5",
     ]
 
     // ── Fireworks.ai ─────────────────────────────────────────────────────────
@@ -386,22 +313,25 @@ extension KnownModel {
     // `createTime` (which drives the "new" badge and ordering). A model missing
     // here still lists — it just shows no price.
     //
-    // Rates are per 1M tokens, input/output, from docs.fireworks.ai/serverless/pricing
-    // (2026-07-30 — every rate below re-read that day, and only K3 had changed:
-    // the other twelve are unchanged from the 2026-07-18 pass). Verified read-only
-    // by the catalog generator: every id must exist upstream, be serverless +
-    // READY + not deprecated, and live serverless models with no price here are
-    // reported.
+    // Rates are per 1M tokens, uncached input/output, Standard tier (never Fast,
+    // Priority, or a US-only premium), from docs.fireworks.ai/serverless/pricing,
+    // last re-read 2026-09-10. The catalog generator verifies every id upstream
+    // (serverless, READY, not deprecated) and reports live models with no price.
     //
-    // **THE PRICING PAGE IS NOT THE WHOLE CATALOGUE.** Found on device 2026-07-30:
-    // `inkling` came back from the live control plane, rendered with a context
-    // window and no price, and it is absent from that pricing table entirely — its
-    // rate is published on its own model page (fireworks.ai/models/fireworks/…).
-    // So a refresh has to walk the model pages for anything serverless that the
-    // pricing table omits; reading the table alone is what left a row priceless.
+    // The pricing page is not the whole catalogue: some models are priced only
+    // on their own model page, so a refresh walks the page of every live
+    // serverless model the table omits.
     //
-    // Cached-input tiers (inkling quotes $0.17) are deliberately not modelled: a
-    // picker row quotes the rate a first request pays.
+    // Dated snapshots are keyed by their FULL id (`deepseek-v4-flash-0731`);
+    // do not tidy them to the undated family name — the row goes blank.
+    //
+    // Deliberately absent: `qwen3p8-2p4t-a95b` — same weights as `qwen3p8-max`
+    // (both HF Qwen/Qwen3.8-2.4T-A95B) but its model page is login-gated and it
+    // is not in the pricing table, so its rate is unpublished. A blank row is
+    // the honest state; do not borrow Max's number.
+    //
+    // Cached-input tiers are deliberately not modelled: a picker row quotes the
+    // rate a first request pays.
     //
     // NOT here: `accounts/fireworks/routers/kimi-k3-us`, the US-only K3 at +10%
     // (docs: "$3.30/$16.50"). It is a **router**, not a model — a different path
@@ -409,71 +339,44 @@ extension KnownModel {
     // the adapter reads, and an entry for it could only ever be dead weight.
 
     static let fireworksPrices: [String: String] = [
-        // Standard tier. K3 also sells a "Fast" variant at a premium, as do
-        // K2.7 Code, K2.6 and both GLMs; the standard rate is what a picker row
-        // should quote — same rule as Grok's base tier over its long-context one.
-        "accounts/fireworks/models/kimi-k3":                "$3.00/$15.00",
-        // 975B MoE (41B active) from Thinking Machines Lab, multimodal. Priced on
-        // its model page only — see the note above about the pricing table.
-        "accounts/fireworks/models/inkling":                "$1.00/$4.05",
-        "accounts/fireworks/models/kimi-k2p7-code":         "$0.95/$4.00",
-        "accounts/fireworks/models/kimi-k2p6":              "$0.95/$4.00",
-        "accounts/fireworks/models/glm-5p2":                "$1.40/$4.40",
-        "accounts/fireworks/models/glm-5p1":                "$1.40/$4.40",
-        "accounts/fireworks/models/qwen3p7-plus":           "$0.40/$1.60",
-        "accounts/fireworks/models/minimax-m3":             "$0.30/$1.20",
-        "accounts/fireworks/models/nemotron-3-ultra-nvfp4": "$0.60/$2.40",
-        "accounts/fireworks/models/gpt-oss-120b":           "$0.15/$0.60",
+        "accounts/fireworks/models/kimi-k3":                       "$3.00/$15.00",
+        "accounts/fireworks/models/kimi-k2p7-code":                "$0.95/$4.00",
+        "accounts/fireworks/models/kimi-k2p6":                     "$0.95/$4.00",
+        // 975B MoE (41B active) from Thinking Machines Lab, multimodal.
+        "accounts/fireworks/models/inkling":                       "$1.00/$4.05",
+        "accounts/fireworks/models/deepseek-v4p1-flash":           "$0.22/$0.66",
+        "accounts/fireworks/models/deepseek-v4-flash-0731":        "$0.22/$0.66",
+        "accounts/fireworks/models/deepseek-v4-flash-vision-exp":  "$0.22/$0.66",
+        "accounts/fireworks/models/deepseek-v4-pro-0813":          "$1.32/$3.96",
+        "accounts/fireworks/models/glm-5p3":                       "$1.40/$4.40",
+        "accounts/fireworks/models/glm-5p3-flash":                 "$0.15/$0.50",
+        "accounts/fireworks/models/glm-5p2":                       "$1.40/$4.40",
+        "accounts/fireworks/models/qwen3p8-max":                   "$2.00/$6.00",
+        "accounts/fireworks/models/muse-glimmer-30b":              "$0.35/$1.50",
+        "accounts/fireworks/models/minimax-m3":                    "$0.30/$1.20",
+        "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b": "$0.05/$0.20",
+        "accounts/fireworks/models/nemotron-3-ultra-nvfp4":        "$0.60/$2.40",
+        "accounts/fireworks/models/gpt-oss-120b":                  "$0.15/$0.60",
     ]
 
-    // ── Lookup ───────────────────────────────────────────────────────────────
+    // ── The one fixed service ────────────────────────────────────────────────
 
-    /// Offline rows for a preset — the fallback when its live catalogue can't be
-    /// reached, and the source of the pretty name in the providers list. near.ai
-    /// ships a full snapshot (it also carries the E2EE hosts); xAI and Fireworks
-    /// are synthesized from their minimal maps, since everything else about them
-    /// is live-sourced.
-    static func models(for providerID: UUID) -> [KnownModel] {
-        switch providerID {
-        case Provider.nearAI.id: return nearAIModels
-        case Provider.grok.id:
-            return grokDisplayNames
-                .map { KnownModel(id: $0.key, displayName: $0.value, vendor: "xAI", price: "",
-                                  // xAI's per-model doc page. The slug is the api
-                                  // id verbatim — verified for every id in this
-                                  // table; a bogus one 307s where a real one 200s.
-                                  // Set here as well as in `XAIAdapter` so the
-                                  // link is there before the live fetch lands,
-                                  // and offline.
-                                  modelPageURL: "https://docs.x.ai/developers/models/" + $0.key) }
-                .sorted { $0.displayName > $1.displayName }   // newest name first, stable
-        case Provider.fireworks.id:
-            return fireworksPrices
-                .map { KnownModel(id: $0.key,
-                                  displayName: ModelCatalog.displayName(forID: $0.key),
-                                  vendor: ModelCatalog.familyVendor(forID: ModelCatalog.slug($0.key)) ?? "Fireworks",
-                                  price: $0.value) }
-                .sorted { $0.id < $1.id }
-        case Provider.braveAnswers.id:
-            // ONE FIXED SERVICE, not a catalogue — but it still gets a row in
-            // `ready now` once set up, and that row's long press should reach
-            // something. The docs page is its equivalent of a model page.
-            //
-            // No `price`: Brave bills per REQUEST plus per token ($4/1,000
-            // requests + $5/1M), a shape `price` cannot express, and half of it
-            // rendered as a per-1M rate would be wrong. It goes in the summary,
-            // in words, where it can say what it actually is.
-            return [KnownModel(
-                id: Provider.braveAnswers.model,
-                displayName: "Brave Answers",
-                vendor: "Brave",
-                price: "",
-                summary: "Single answers grounded in live web search, with citations. "
-                    + "Billed per request plus per token — $4 per 1,000 requests and "
-                    + "$5 per 1M input/output tokens — so it does not price like a model.",
-                features: ["grounding", "citations"],
-                modelPageURL: "https://api-dashboard.search.brave.com/documentation/services/answers")]
-        default: return []
-        }
-    }
+    /// Brave Answers is a service, not a catalogue: one id, no `/models`. It
+    /// still gets a `ready now` row whose long press must reach something, so
+    /// the row lives here rather than in a model list.
+    ///
+    /// No `price`: Brave bills per REQUEST plus per token ($4/1,000 requests +
+    /// $5/1M), a shape `price` cannot express, and half of it rendered as a
+    /// per-1M rate would be wrong. It goes in the summary, in words.
+    static let braveAnswersModel = KnownModel(
+        id: Provider.braveAnswers.model,
+        displayName: "Brave Answers",
+        vendor: "Brave",
+        price: "",
+        summary: "Single answers grounded in live web search, with citations. "
+            + "Billed per request plus per token — $4 per 1,000 requests and "
+            + "$5 per 1M input/output tokens — so it does not price like a model.",
+        features: ["grounding", "citations"],
+        modelPageURL: "https://api-dashboard.search.brave.com/documentation/services/answers")
+
 }

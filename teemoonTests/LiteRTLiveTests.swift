@@ -244,6 +244,41 @@ struct LiteRTLiveTests {
                 "ran but did not answer — reply: \(turn.content)")
     }
 
+    /// The decode benchmark behind the speculative-decoding decision: one
+    /// warm-up turn, then two measured turns on a fixed ~150-token answer.
+    /// The numbers are the transport's `[litert] bench …` lines in native.log
+    /// (TEEMOON_NATIVE_LOG=1); the flag is TEEMOON_SPECULATIVE=0/1, read at
+    /// engine creation, so each arm is its own process. Also written to
+    /// Documents/decode-bench.txt, since test stdout is unreliable off a phone.
+    @Test(.enabled(if: Self.enabled, "set LITERT_LIVE=1"), .timeLimit(.minutes(30)))
+    @MainActor
+    func decodeBenchThreeTurns() async throws {
+        try #require(FileManager.default.fileExists(atPath: Self.modelPath.path), "bundle missing")
+        let transport = LiteRTTransport(
+            modelPath: Self.modelPath, estimatedSizeMB: Self.sizeMB, contextTokens: 4096
+        )
+        let prompt = "Explain in about 150 words how a bicycle stays upright while moving. Plain prose, no lists."
+        var lines: [String] = ["speculative disabled=\(LiteRTSpeculativeDecoding.disabledByEnvironment) greedy=\(LiteRTSpeculativeDecoding.benchSampler != nil)"]
+        var lastReply = ""
+        for turn in 1...3 {
+            let start = ContinuousClock.now
+            let out = try await transport.runTurn(messages: [
+                ["role": "system", "content": "You are a helpful assistant."],
+                ["role": "user", "content": prompt],
+            ], includeTools: false) { _ in }
+            let elapsed = start.duration(to: .now)
+            let line = "turn \(turn): \(out.content.count) chars, decodeTokens=\(out.completionTokens.map(String.init) ?? "?"), wall=\(elapsed)"
+            print("[litert-bench] \(line)")
+            lines.append(line)
+            lastReply = out.content
+            #expect(out.content.count > 200, "turn \(turn) produced almost nothing: \(out.content.prefix(80))")
+        }
+        lines.append("--- reply (turn 3) ---")
+        lines.append(lastReply)
+        let url = URL.documentsDirectory.appending(component: "decode-bench.txt")
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
     /// Prefill at a REALISTIC prompt size.
     ///
     /// The short prompts above report 171-193 tok/s prefill against MLX's 1,304,

@@ -372,3 +372,79 @@ struct EgressRollupTests {
     }
 
 }
+
+// MARK: - refresh: the index revalidates instead of refetching
+
+/// Serves index.json with an ETag; a matching If-None-Match gets a bodiless 304.
+/// Records every request so a test can see which header went out.
+private final class IndexStubProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requests: [URLRequest] = []
+    static let etag = "\"idx-v1\""
+    static let body = Data(#"{"schema":1,"images":{"nearaidev/x":["sha256:abc"]},"manifests":{},"measured":[]}"#.utf8)
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url == AuditIndex.indexURL
+    }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.append(request)
+        let matches = request.value(forHTTPHeaderField: "If-None-Match") == Self.etag
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: matches ? 304 : 200, httpVersion: "HTTP/1.1",
+            headerFields: ["ETag": Self.etag, "Cache-Control": "max-age=300"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if !matches { client?.urlProtocol(self, didLoad: Self.body) }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+@Suite("AuditIndex refresh", .serialized)
+struct AuditIndexRefreshTests {
+
+    private func freshDefaults() -> UserDefaults {
+        let name = "auditIndex.test.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        return d
+    }
+
+    @Test("a second refresh sends the ETag and a 304 keeps the index")
+    func secondRefreshRevalidates() async {
+        URLProtocol.registerClass(IndexStubProtocol.self)
+        defer { URLProtocol.unregisterClass(IndexStubProtocol.self) }
+        IndexStubProtocol.requests = []
+
+        let index = AuditIndex(defaults: freshDefaults())
+        await index.refresh()
+        #expect(index.index?.images["nearaidev/x"] == ["sha256:abc"])
+        #expect(IndexStubProtocol.requests.first?.value(forHTTPHeaderField: "If-None-Match") == nil)
+
+        let firstLoad = index.loadedAt
+        await index.refresh()
+        #expect(IndexStubProtocol.requests.count == 2)
+        #expect(IndexStubProtocol.requests.last?.value(forHTTPHeaderField: "If-None-Match") == IndexStubProtocol.etag)
+        #expect(index.index?.images["nearaidev/x"] == ["sha256:abc"])
+        #expect(index.loadedAt != nil && index.loadedAt! >= firstLoad!)
+    }
+
+    @Test("a snapshot younger than the TTL is not refetched at launch")
+    func freshSnapshotSkipsTheFetch() async throws {
+        URLProtocol.registerClass(IndexStubProtocol.self)
+        defer { URLProtocol.unregisterClass(IndexStubProtocol.self) }
+        IndexStubProtocol.requests = []
+
+        let defaults = freshDefaults()
+        let first = AuditIndex(defaults: defaults)
+        await first.refresh()
+        #expect(IndexStubProtocol.requests.count == 1)
+
+        // A new process: only the persisted snapshot, fetched a moment ago.
+        let relaunched = AuditIndex(defaults: defaults)
+        relaunched.loadIfNeeded()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(relaunched.index?.images["nearaidev/x"] == ["sha256:abc"])
+        #expect(IndexStubProtocol.requests.count == 1, "the fresh snapshot should have answered")
+    }
+}

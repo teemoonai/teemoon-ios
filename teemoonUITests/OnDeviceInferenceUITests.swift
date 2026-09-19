@@ -34,6 +34,19 @@ final class OnDeviceInferenceUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launchEnvironment["UITEST_SEED_ONDEVICE_MODEL"] = Self.model
+        // native.log is read after the run. TEEMOON_SPECULATIVE is forwarded
+        // only when the runner has it (the benchmark's baseline arm sets "0");
+        // unset means the app's default, which is the drafter ON.
+        app.launchEnvironment["TEEMOON_NATIVE_LOG"] = "1"
+        if let spec = ProcessInfo.processInfo.environment["TEEMOON_SPECULATIVE"] {
+            app.launchEnvironment["TEEMOON_SPECULATIVE"] = spec
+        }
+        if let flags = ProcessInfo.processInfo.environment["TEEMOON_BENCH_FLAGS"] {
+            app.launchEnvironment["TEEMOON_BENCH_FLAGS"] = flags
+        }
+        if let ignore = ProcessInfo.processInfo.environment["TEEMOON_IGNORE_BRAVE_KEY"] {
+            app.launchEnvironment["TEEMOON_IGNORE_BRAVE_KEY"] = ignore
+        }
         app.launch()
         return app
     }
@@ -104,6 +117,77 @@ final class OnDeviceInferenceUITests: XCTestCase {
 
         XCTAssertFalse(refused,
                        "the model declined instead of searching — this is the bug: \(body.prefix(400))")
+    }
+
+    /// The decode benchmark: one warm-up turn, then two measured turns on a
+    /// fixed prompt long enough to decode ~150 tokens. The numbers are the
+    /// `[litert] bench …` lines in the app's native.log (pull it with
+    /// devicectl after the run); this test only drives the turns and checks
+    /// each one finished. Run it twice, TEEMOON_SPECULATIVE=0 and =1.
+    /// THE KEYLESS PATH, the one the constrained-decoding question could not
+    /// reach with a key on the phone: with `TEEMOON_IGNORE_BRAVE_KEY=1` the
+    /// model must still emit a well-formed `web_search` call for a
+    /// time-sensitive question — that call, not a search, is what raises
+    /// the offer card — and must not emit one for a plain prompt.
+    func testKeylessTimeSensitiveQuestionRaisesTheOffer() throws {
+        let app = launchSeeded()
+        let composer = app.textFields["chat.composer"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
+        composer.tap()
+        composer.typeText("what's the weather in tokyo right now?")
+        app.buttons["chat.send"].tap()
+        let card = app.descendants(matching: .any)["chat.webSearchOffer"]
+        XCTAssertTrue(card.waitForExistence(timeout: 180),
+                      "keyless time-sensitive question did not raise the web-search offer")
+    }
+
+    func testKeylessPlainPromptRaisesNoOffer() throws {
+        let app = launchSeeded()
+        ask(app, "write me a haiku about rain")
+        let card = app.descendants(matching: .any)["chat.webSearchOffer"]
+        XCTAssertFalse(card.waitForExistence(timeout: 10),
+                       "a haiku raised the web-search offer — the model called the tool indiscriminately")
+    }
+
+    func testDecodeBenchThreeTurns() throws {
+        let app = launchSeeded()
+        let prompt = "Explain in about 150 words how a bicycle stays upright while moving. Plain prose, no lists."
+        for turn in 1...3 {
+            let card = ask(app, prompt, timeout: 240)
+            print("[uitest] bench turn \(turn) card: \(card.prefix(200))")
+        }
+    }
+
+    /// The customer bug of build 28, re-run with the drafter in the loop: send
+    /// a long question, leave the app mid-answer for 15 s, come back. The turn
+    /// must be abandoned (no stuck "thinking"), re-asked on return, and the
+    /// re-asked turn must finish with a real answer. Real device, real app —
+    /// the test host keeps GPU access in the background and proves nothing.
+    func testBackgroundingMidAnswerAbandonsAndResumes() throws {
+        let app = launchSeeded()
+        let composer = app.textFields["chat.composer"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
+        composer.tap()
+        composer.typeText("Write a detailed 500 word essay about the history of the potato.")
+        app.buttons["chat.send"].tap()
+        let stop = app.buttons["chat.stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 60), "generation never started")
+        sleep(3)                                            // let tokens flow
+        #if os(iOS)
+        XCUIDevice.shared.press(.home)
+        #else
+        throw XCTSkip("backgrounding via the home button is iOS-only")
+        #endif
+        sleep(15)
+        app.activate()
+        // The abandoned turn is re-asked on return: a generation runs again…
+        XCTAssertTrue(stop.waitForExistence(timeout: 30), "no resumed generation after returning")
+        // …and finishes, within the time a warm 500-word answer takes.
+        let deadline = Date().addingTimeInterval(240)
+        while stop.exists && Date() < deadline { usleep(300_000) }
+        XCTAssertFalse(stop.exists, "the resumed generation did not finish — the customer hang")
+        let body = visibleText(app).lowercased()
+        XCTAssertTrue(body.contains("potato"), "no answer on screen after resume: \(body.prefix(300))")
     }
 
     /// Plain chat must stay fast and must NOT drag in the tool machinery.

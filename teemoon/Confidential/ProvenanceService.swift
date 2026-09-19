@@ -363,6 +363,19 @@ struct ProvenanceService {
         return "nearai/\(repoAliases[name] ?? name)"
     }
 
+    /// Where to look after the guessed repo answers a clean 404: near.ai
+    /// publishes attestations for the engine images it builds from the compose
+    /// repo's own workflows. The identity policy is org-level, so a hit here
+    /// verifies as-is. `SelfVerifyScript` restates this list (its offline
+    /// renderer substitutes only the session block); a test pins the two.
+    static let fallbackRepos = [modelComposeRepo]
+
+    /// The repos to ask for an image's attestation, guessed one first.
+    static func githubRepos(forImage image: String) -> [String] {
+        guard let guessed = githubRepo(forImage: image) else { return [] }
+        return [guessed] + fallbackRepos.filter { $0 != guessed }
+    }
+
     /// Fetches the model-layer compose YAML at the attested commit and path and
     /// hash-checks it against the action log's pinned `file_sha256`. The three
     /// outcomes are DISTINCT and must stay so: a `.hashMismatch` is an
@@ -433,6 +446,21 @@ struct ProvenanceService {
     /// launch — one attempt each, so a rate-limited hour can't be burned by
     /// re-fetching the same digests on every verification run.
     private static let upgradeAttempted = OSAllocatedUnfairLock(initialState: Set<String>())
+    /// Digests every candidate repo answered 404 for, with when: an unpublished
+    /// image is asked about once an hour, not on every pass, so the anonymous
+    /// GitHub quota is not spent re-learning the same absence.
+    private static let recentMisses = OSAllocatedUnfairLock(initialState: [String: Date]())
+    static let missTTL: TimeInterval = 3600
+
+    static func recentlyMissed(_ digest: String, now: Date = Date()) -> Bool {
+        recentMisses.withLock { misses in
+            guard let at = misses[digest] else { return false }
+            if now.timeIntervalSince(at) < missTTL { return true }
+            misses[digest] = nil
+            return false
+        }
+    }
+    static func forgetMisses() { recentMisses.withLock { $0.removeAll() } }
 
     func verify(_ ref: ImageRef) async -> ImageProvenance {
         if let cached = Self.cachedVerification(digest: ref.digest, defaults: defaults) {
@@ -447,26 +475,56 @@ struct ProvenanceService {
             }
             return cached
         }
+        if Self.recentlyMissed(ref.digest) {
+            return .unverified(.fetchFailed("GitHub attestations HTTP 404 (asked within the hour)"))
+        }
         return await fetchAndVerify(ref)
     }
 
+    private enum AttestationFetch {
+        case found(Data)
+        case notFound
+        case transient(String)
+    }
+
     private func fetchAndVerify(_ ref: ImageRef) async -> ImageProvenance {
-        guard let repo = Self.githubRepo(forImage: ref.image),
-              let url = URL(string: "https://api.github.com/repos/\(repo)/attestations/sha256:\(ref.digest)") else {
+        let repos = Self.githubRepos(forImage: ref.image)
+        guard !repos.isEmpty else {
             return .unverified(.fetchFailed("no GitHub repo for image \(ref.image)"))
+        }
+        for repo in repos {
+            // Every candidate gets the retry; one answer is never believed.
+            switch await fetchAttestation(repo: repo, digest: ref.digest) {
+            case .found(let data):
+                let outcome = verifier.verify(attestationJSON: data, expectedDigest: ref.digest)
+                if case .verified = outcome {
+                    Self.cacheVerification(digest: ref.digest, outcome: outcome, defaults: defaults)
+                }
+                return outcome
+            case .transient(let reason):
+                return .unverified(.fetchTransient(reason))
+            case .notFound:
+                continue
+            }
+        }
+        Self.recentMisses.withLock { $0[ref.digest] = Date() }
+        return .unverified(.fetchFailed("GitHub attestations HTTP 404"))
+    }
+
+    private func fetchAttestation(repo: String, digest: String) async -> AttestationFetch {
+        guard let url = URL(string: "https://api.github.com/repos/\(repo)/attestations/sha256:\(digest)") else {
+            return .notFound
         }
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         do {
-            var data = Data()
-            attempts: for attempt in 0..<2 {
+            for attempt in 0..<2 {
                 let (d, response) = try await session.data(for: request)
                 let http = response as? HTTPURLResponse
                 switch http?.statusCode ?? 0 {
                 case 200:
-                    data = d
-                    break attempts
+                    return .found(d)
                 case 404:
                     // A 404 is only definitive when GitHub actually answered
                     // the question. Under rate pressure the unauthenticated
@@ -479,25 +537,21 @@ struct ProvenanceService {
                     // transient, non-blocking. A clean 404 gets one retry;
                     // only a repeatable, un-throttled 404 fails closed.
                     if http?.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0" {
-                        return .unverified(.fetchTransient("GitHub attestations HTTP 404 under rate limit"))
+                        return .transient("GitHub attestations HTTP 404 under rate limit")
                     }
                     if attempt == 0 {
                         try? await Task.sleep(nanoseconds: 1_500_000_000)
                         continue
                     }
-                    return .unverified(.fetchFailed("GitHub attestations HTTP 404"))
+                    return .notFound
                 default:
                     // Rate limits (403/429), server errors: no evidence either way.
-                    return .unverified(.fetchTransient("GitHub attestations HTTP \(http?.statusCode ?? 0)"))
+                    return .transient("GitHub attestations HTTP \(http?.statusCode ?? 0)")
                 }
             }
-            let outcome = verifier.verify(attestationJSON: data, expectedDigest: ref.digest)
-            if case .verified = outcome {
-                Self.cacheVerification(digest: ref.digest, outcome: outcome, defaults: defaults)
-            }
-            return outcome
+            return .notFound
         } catch {
-            return .unverified(.fetchTransient(error.localizedDescription))
+            return .transient(error.localizedDescription)
         }
     }
 

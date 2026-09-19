@@ -36,6 +36,43 @@ final class ProductE2ETests: XCTestCase {
 
     // MARK: - Chat
 
+    // MARK: - Switching providers mid-session
+
+    /// NVIDIA on the dev build, 2026-09-12: after a near.ai session whose
+    /// verifier was still running, every send on a plain-TLS provider was
+    /// refused with "Verification is still running, so nothing was sent".
+    /// The provider smokes never see this — they bypass the gate. This is
+    /// the sequence a user does constantly: verify on near.ai, switch, send.
+    func testSwitchingFromAVerifyingAttestedSessionToALocalProviderSends() {
+        let app = ProductE2E.launch(environment: [
+            "UITEST_SEED_NEARAI_MODEL": "zai-org/GLM-5.1-FP8",
+            "UITEST_SEED_ATTESTATION": "verifyingPending",
+            "UITEST_SEED_ALSO_LOCAL_ENDPOINT": server.baseURL,
+            "UITEST_SEED_LOCAL_MODEL": "fake-model",
+        ])
+        XCTAssertTrue(ProductE2E.titleBlock(app).waitForExistence(timeout: 15), "title block missing")
+        XCTAssertTrue(ProductE2E.folded(ProductE2E.titleLabel(app)).contains("verifying"),
+                      "precondition: the near.ai session is verifying — \(ProductE2E.titleLabel(app))")
+
+        // Switch to the local setup through the Where sheet.
+        let chip = ProductE2E.whereChip(app)
+        XCTAssertTrue(chip.waitForExistence(timeout: 10), "where chip missing")
+        chip.tap()
+        let localRow = app.descendants(matching: .any)
+            .matching(identifier: "where.row")
+            .matching(NSPredicate(format: "label CONTAINS[c] 'fake-model'")).firstMatch
+        XCTAssertTrue(localRow.waitForExistence(timeout: 10), "local row missing in the where sheet")
+        localRow.tap()
+        XCTAssertTrue(ProductE2E.composer(app).waitForExistence(timeout: 10), "composer missing after the switch")
+
+        ProductE2E.sendAndWait(app, "after-switch")
+        XCTAssertTrue(ProductE2E.elementContaining(app, "first-reply-alpha").waitForExistence(timeout: 10),
+                      "the reply never arrived after switching providers")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "no alert on a plain-TLS send: \(app.alerts.firstMatch.label)")
+        XCTAssertFalse(app.descendants(matching: .any)["chat.error"].firstMatch.exists,
+                       "a plain-TLS send after an attested session must not raise the error surface")
+    }
+
     func testSendThenSettleShowsAReply() {
         let app = ProductE2E.launchLocal(server: server)
         ProductE2E.sendAndWait(app, "ping-one")
@@ -96,6 +133,84 @@ final class ProductE2ETests: XCTestCase {
         ProductE2E.assertNoToolMarkup(app)
         XCTAssertTrue(ProductE2E.webSearchOffer(app).waitForExistence(timeout: 8),
                       "keyless web_search should raise the offer card")
+    }
+
+    /// The offer card and the developer-mode card as neighbours: a keyless
+    /// tool round raises the offer, the panel lands under it. Captured
+    /// because the band between them was reported as a gap (2026-09-17).
+    func testOfferAndDebugCardAreNeighbours() {
+        server.emitToolRound = true
+        // LONG ENOUGH TO CROSS THE SEED RULE. `TranscriptHandoffSizing.floor`
+        // keeps the streamed seed over the fitted height only when the seed
+        // is over 2,000pt and the fit under 1,000 — so a 40-line reply
+        // (~1,050pt) never showed the bands the phone showed on a 2,656pt
+        // nemotron answer with the offer as the last item. Ninety lines
+        // put the seed past the threshold; the offer card fits at ~310.
+        server.toolFollowUpReply = (1...90).map { "tool-round-ok-zeta line \($0) of a long answer that wraps." }
+            .joined(separator: "\n")
+        let app = ProductE2E.launchLocal(
+            server: server,
+            extraEnv: ["UITEST_DEVELOPER_MODE": "1", "TEEMOON_SCROLL_TRACE": "1"]
+        )
+        ProductE2E.sendAndWait(app, "tool-round-please-search", timeout: 40)
+        XCTAssertTrue(ProductE2E.webSearchOffer(app).waitForExistence(timeout: 8),
+                      "keyless web_search should raise the offer card")
+        XCTAssertTrue(ProductE2E.waitForDebugCardOnScreen(app),
+                      "developer mode is on but the debug card never landed on screen")
+        Thread.sleep(forTimeInterval: 1.5)
+        ProductE2E.attachScreenshot(app, name: "offer-and-debug-card", to: self)
+
+        // THE BANDS, MEASURED. Text elements resolve to real frames where the
+        // cards themselves resolve to inner elements a few points tall: the
+        // reply's last line, the offer's first and last lines, the card's
+        // first label. Each gap is padding — a band is hundreds of points.
+        func frame(_ text: String) -> CGRect {
+            let element = app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", text)).firstMatch
+            XCTAssertTrue(element.waitForExistence(timeout: 5), "missing text: \(text)")
+            return element.frame
+        }
+        let replyEnd = frame("line 90 of a long answer").maxY
+        let offerTop = frame("to answer this").minY
+        let offerEnd = frame("privacy: brave sees").maxY
+        // The card's header is not a label to XCUI; its url row is. That
+        // row sits ~100pt under the card's top edge, hence the allowance.
+        let cardURL = frame("/v1/chat/completions").minY
+        XCTAssertLessThan(offerTop - replyEnd, 80,
+                          "band between the reply and the offer card: \(Int(offerTop - replyEnd))pt")
+        XCTAssertLessThan(cardURL - offerEnd, 200,
+                          "band between the offer card and the debug card: \(Int(cardURL - offerEnd))pt")
+    }
+
+    /// Expanding a section of the developer-mode card: the cell must move
+    /// with its content. Recorded from the host with `simctl io recordVideo`
+    /// — a still cannot show a jump.
+    func testDebugCardSectionExpands() {
+        let app = ProductE2E.launchLocal(
+            server: server,
+            // The scroll trace names every offset write; the recording only
+            // shows their sum. Read from Documents/scrolltrace.log.
+            extraEnv: ["UITEST_DEVELOPER_MODE": "1", "TEEMOON_SCROLL_TRACE": "1"]
+        )
+        ProductE2E.sendAndWait(app, "expand-please", timeout: 40)
+        XCTAssertTrue(ProductE2E.waitForDebugCardOnScreen(app),
+                      "developer mode is on but the debug card never landed on screen")
+        Thread.sleep(forTimeInterval: 1.5)
+        let headers = app.staticTexts
+            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "headers"))
+            .firstMatch
+        XCTAssertTrue(headers.waitForExistence(timeout: 5), "no headers row on the card")
+        headers.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        let body = app.staticTexts
+            .matching(NSPredicate(format: "label ==[c] %@", "request body"))
+            .firstMatch
+        XCTAssertTrue(body.waitForExistence(timeout: 5), "no request body row on the card")
+        body.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        headers.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        ProductE2E.attachScreenshot(app, name: "debug-card-expanded", to: self)
     }
 
     // MARK: - Where

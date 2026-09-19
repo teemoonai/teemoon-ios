@@ -91,7 +91,10 @@ struct TrustVerdict: Equatable {
 
     static func chipMode(_ input: Input) -> TrustChipMode {
         if input.degradeIsHardFailure { return .hardBlock }
-        if input.mismatchedResponseCount > 0 && input.attestationState == .ok { return .mismatch }
+        // A sealed session that is re-sweeping provenance reads .verifying;
+        // a reply that failed its check must not vanish for the sweep.
+        if input.mismatchedResponseCount > 0,
+           input.attestationState == .ok || input.attestationState == .verifying { return .mismatch }
         switch input.attestationState {
         case .ok:        return .verified
         case .verifying: return .verifying
@@ -144,11 +147,13 @@ struct TrustVerdict: Equatable {
                 : "\(input.mismatchedResponseCount) replies didn't check out"
         }
         let label = input.quant.map { "\(input.modelName) · \($0)" } ?? input.modelName
-        if input.unpublishedButSealed {
-            return "encrypted to \(label) — one image unpublished"
-        }
+        // A reviewed leak outranks a provenance gap: "your words are copied"
+        // is the stronger claim, and an unpublished image must not hide it.
         if input.auditState == .leaks {
             return "encrypted to \(label) — but its logs copy what you type"
+        }
+        if input.unpublishedButSealed {
+            return "encrypted to \(label) — one image unpublished"
         }
         return "encrypted to \(label) — only it can read this"
     }
@@ -168,11 +173,11 @@ struct TrustVerdict: Equatable {
             let phrase = input.mismatchedResponseCount == 1 ? "one reply" : "\(input.mismatchedResponseCount) replies"
             return "your session is still sealed and encrypted to \(input.modelName), but \(phrase) couldn't be verified — read below."
         }
-        if input.unpublishedButSealed {
-            return "your message is still sealed to \(input.modelName)'s hardware key. one running image has no published attestation — see the ladder."
-        }
         if input.auditState == .leaks {
             return "the seal holds on the way in, but a review of this exact build found your messages are copied into its operator's monitoring logs — see the ladder below."
+        }
+        if input.unpublishedButSealed {
+            return "your message is still sealed to \(input.modelName)'s hardware key. one running image has no published attestation — see the ladder."
         }
         return "only you and \(input.modelName)'s sealed hardware can read this chat."
     }

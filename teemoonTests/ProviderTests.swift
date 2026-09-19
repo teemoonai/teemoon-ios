@@ -357,3 +357,135 @@ struct ProviderTests {
         #expect(!silent.isRetiring)
     }
 }
+
+// MARK: - retired near.ai models
+
+/// near.ai retired GLM-5.2 on 2026-09-11 while it was the shipped default:
+/// every 1.0.3 user's near.ai setup pointed at a dead host, and nothing moved
+/// it. Given what near.ai serves, a setup on a retired model moves to the
+/// preset default; one on a served model is left alone.
+@Suite("ProviderStore heals retired near.ai models")
+struct RetiredNearAIModelHealingTests {
+
+    private let served = ["z-ai/glm-5.3-flash", "Qwen/Qwen3.8-27B", "deepseek-ai/DeepSeek-V4-Flash"]
+
+    @MainActor private func store(model: String, equipped: [String]? = nil) -> (ProviderStore, Provider) {
+        let store = ProviderStore(inMemory: true)
+        var p = Provider.nearAI
+        p.model = model
+        p.equippedModels = equipped
+        store.addProvider(p)
+        store.currentProviderID = p.id.uuidString
+        return (store, p)
+    }
+
+    @Test @MainActor func aRetiredModelMovesToThePresetDefault() {
+        let (store, p) = store(model: "z-ai/glm-5.2", equipped: ["z-ai/glm-5.2", "Qwen/Qwen3.8-27B"])
+        let moved = store.healRetiredNearAIModels(served: served)
+        #expect(moved.map(\.id) == [p.id])
+        let healed = store.providers.first { $0.id == p.id }
+        #expect(healed?.model == "z-ai/glm-5.3-flash")
+        #expect(healed?.equippedModels == ["Qwen/Qwen3.8-27B"])
+    }
+
+    @Test @MainActor func aServedModelIsLeftAlone() {
+        let (store, p) = store(model: "Qwen/Qwen3.8-27B")
+        #expect(store.healRetiredNearAIModels(served: served).isEmpty)
+        #expect(store.providers.first { $0.id == p.id }?.model == "Qwen/Qwen3.8-27B")
+    }
+
+    @Test @MainActor func nothingMovesWithoutALiveList() {
+        let (store, p) = store(model: "z-ai/glm-5.2")
+        #expect(store.healRetiredNearAIModels(served: []).isEmpty)
+        #expect(store.providers.first { $0.id == p.id }?.model == "z-ai/glm-5.2")
+    }
+
+    @Test @MainActor func otherProvidersAreNeverTouched() {
+        let store = ProviderStore(inMemory: true)
+        var p = Provider.nvidia
+        p.model = "z-ai/glm-5.2"   // not near.ai's problem
+        store.addProvider(p)
+        #expect(store.healRetiredNearAIModels(served: served).isEmpty)
+    }
+
+    @Test @MainActor func whenTheDefaultIsGoneTooTheFirstServedModelWins() {
+        let (store, p) = store(model: "z-ai/glm-5.2")
+        store.healRetiredNearAIModels(served: ["Qwen/Qwen3.8-27B"])
+        #expect(store.providers.first { $0.id == p.id }?.model == "Qwen/Qwen3.8-27B")
+    }
+}
+
+// MARK: - the add-key picker offers only what still needs a key
+
+/// Settings → add cloud key listed every preset, keyed or not; picking a
+/// keyed one silently replaced its key. The picker now asks the store.
+@Suite("ProviderStore presets without a key")
+struct PresetsWithoutKeyTests {
+
+    /// The simulator's Keychain is real and shared across runs; a key another
+    /// test or a live smoke left behind must not decide these.
+    @MainActor private func clearKeys(_ store: ProviderStore, _ presets: [Provider]) {
+        for p in presets { try? store.setCredential("", forEndpoint: p.endpoint, legacyID: p.id) }
+    }
+
+    @Test @MainActor func aKeyedPresetLeavesThePicker() throws {
+        let store = ProviderStore(inMemory: true)
+        clearKeys(store, [.nearAI, .nvidia, .openRouter])
+        let near = Provider.nearAI
+        store.addProvider(near)
+        try store.setCredential("k-near", forEndpoint: near.endpoint, legacyID: near.id)
+        defer { try? store.setCredential("", forEndpoint: near.endpoint, legacyID: near.id) }
+
+        let offered = store.presetsWithoutKey().map(\.id)
+        #expect(!offered.contains(Provider.nearAI.id))
+        #expect(offered.contains(Provider.nvidia.id))
+        #expect(offered.contains(Provider.openRouter.id))
+    }
+
+    @Test @MainActor func aSetupWithoutAKeyIsStillOffered() {
+        let store = ProviderStore(inMemory: true)
+        clearKeys(store, [.grok])
+        store.addProvider(Provider.grok)   // exists, no key
+        #expect(store.presetsWithoutKey().map(\.id).contains(Provider.grok.id))
+    }
+}
+
+
+/// The host rule behind every E2EE claim. `endpoint.contains("near.ai")` was
+/// true for hosts near.ai does not run.
+@Suite("near.ai host identity")
+struct NearAIHostIdentityTests {
+
+    private func provider(_ endpoint: String) -> Provider {
+        Provider(name: "p", endpoint: endpoint, model: "z-ai/glm-5.3-flash")
+    }
+
+    @Test func realNearAIHostsAreNearAI() {
+        #expect(provider("https://cloud-api.near.ai/v1/chat/completions").isNearAI)
+        #expect(provider("https://glm-5-3-flash.completions.near.ai/v1").isNearAI)
+        #expect(Provider.nearAI.isNearAI)
+    }
+
+    @Test func lookAlikeHostsAreNot() {
+        #expect(!provider("https://api.linear.ai/v1/chat/completions").isNearAI)
+        #expect(!provider("https://near.ai.evil.com/v1/chat/completions").isNearAI)
+        #expect(!provider("https://nearsai.example/v1").isNearAI)
+    }
+
+    /// A look-alike must not collect the attestation capabilities either — the
+    /// tier guess answers `.teeOwn` for ids it does not know.
+    @Test func aLookAlikeHostClaimsNoEncryption() {
+        let fake = provider("https://api.linear.ai/v1/chat/completions")
+        #expect(!fake.capabilities.contains(.endToEndEncryption))
+        #expect(!fake.capabilities.contains(.attestation))
+    }
+
+    /// Saving mints a fresh UUID, so preset facts have to resolve by endpoint.
+    @Test func aSavedSetupKeepsItsPresetRuleAndKeyCheck() {
+        var saved = Provider.openRouter
+        saved.id = UUID()
+        saved.endpoint = Provider.openRouter.endpoint + "/"
+        #expect(saved.defaultModelRule == .strongestOpenWeight)
+        #expect(saved.keyValidationEndpoint == .openRouter)
+    }
+}

@@ -82,6 +82,12 @@ struct RequestLLMIntent: AppIntent {
         ) {
             return .result(value: refusal, dialog: "\(refusal)")
         }
+        // Same hold as the composer: `prepareTurn` waited for the verdicts;
+        // one still missing is not a pass.
+        if provider.capabilities.contains(.attestation), session.verdictsPending {
+            let refusal = "Verification is still running — try again in a moment."
+            return .result(value: refusal, dialog: "\(refusal)")
+        }
         // Same gate as the chat composer: a keyed provider with no stored key
         // would go out with no auth header and come back as a validation error.
         guard providers.hasCredential(for: provider) else {

@@ -50,13 +50,23 @@ private final class RouteBox {
     var routes: [String: (status: Int, body: Data)] = [:]
     var requestedURLs: [URL] = []
     var authHeaders: [String] = []
+    /// Set when the answer depends on the request itself.
+    var handler: ((URLRequest) -> (Int, Data))?
 }
 
 private class StubCatalogAPI: URLProtocol {
     /// Each subclass supplies its own box, so two suites never share routes.
     class var box: RouteBox { fatalError("use a subclass") }
 
-    static func reset() { box.routes = [:]; box.requestedURLs = []; box.authHeaders = [] }
+    static func reset() {
+        box.routes = [:]; box.requestedURLs = []; box.authHeaders = []; box.handler = nil
+    }
+    /// Answers per REQUEST rather than per path, for the cases where the reply
+    /// depends on what was sent (a key that is refused, then absent).
+    static var handler: ((URLRequest) -> (Int, Data))? {
+        get { box.handler } set { box.handler = newValue }
+    }
+    static var requestCount: Int { box.requestedURLs.count }
     static var routes: [String: (status: Int, body: Data)] {
         get { box.routes } set { box.routes = newValue }
     }
@@ -72,8 +82,9 @@ private class StubCatalogAPI: URLProtocol {
         box.requestedURLs.append(url)
         if let auth = request.value(forHTTPHeaderField: "Authorization") { box.authHeaders.append(auth) }
         let match = box.routes.first { url.path.hasSuffix($0.key) }
-        let status = match?.value.status ?? 404
-        let body = match?.value.body ?? Data("{}".utf8)
+        let answered = box.handler?(request)
+        let status = answered?.0 ?? match?.value.status ?? 404
+        let body = answered?.1 ?? match?.value.body ?? Data("{}".utf8)
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
@@ -208,10 +219,19 @@ struct ModelCatalogTests {
     /// `ModelCatalog.slug` peels precision and quant markers and nothing else.
     ///
     /// The rate is not inferred: Fireworks lists the dated form at the same
-    /// rate as the undated entry. (The incident family, deepseek-v4-flash, has
-    /// since been retired from the price map — the mechanism is pinned against
-    /// a family that still ships.)
+    /// rate as the undated entry. The mechanism is pinned against a family that
+    /// ships undated (glm-5p2).
+    ///
+    /// The incident family regressed a second way on 2026-08-31: the fleet
+    /// refresh dropped the undated `deepseek-v4-flash` and `deepseek-v4-pro`
+    /// keys, so the fallback had nothing to inherit from and both dated rows
+    /// went blank again for a month. Those ids are now keyed in full, and the
+    /// first two expectations pin that they never depend on an undated twin.
     @Test func aDatedSnapshotInheritsItsFamilysPrice() {
+        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/deepseek-v4-flash-0731")
+                == "$0.22/$0.66")
+        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/deepseek-v4-pro-0813")
+                == "$1.32/$3.96")
         #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/glm-5p2-0731")
                 == "$1.40/$4.40")
         // Longer date forms too — Fireworks has used both.
@@ -229,7 +249,7 @@ struct ModelCatalogTests {
 
     @Test func priceAndContextFormatting() {
         #expect(ModelCatalog.priceLabel(inputPerMillion: 1.25, outputPerMillion: 2.5) == "$1.25/$2.50")
-        #expect(ModelCatalog.priceLabel(inputPerMillion: 2, outputPerMillion: 6) == "$2/$6")
+        #expect(ModelCatalog.priceLabel(inputPerMillion: 2, outputPerMillion: 6) == "$2.00/$6.00")
         #expect(ModelCatalog.priceLabel(inputPerMillion: nil, outputPerMillion: 6) == "")
         #expect(ModelCatalog.contextLabel(1_048_576) == "1M")     // not "1.0M"
         #expect(ModelCatalog.contextLabel(1_100_000) == "1.1M")
@@ -335,7 +355,7 @@ struct XAIAdapterTests {
         #expect(models.first?.id == "grok-4.5")
         let flagship = try #require(models.first)
         #expect(flagship.displayName == "Grok 4.5")     // curated name, not the raw id
-        #expect(flagship.price == "$2/$6")
+        #expect(flagship.price == "$2.00/$6.00")
         #expect(flagship.contextWindow == "500k")       // joined from /v1/models
 
         // Both endpoints were called, both authenticated.
@@ -344,11 +364,18 @@ struct XAIAdapterTests {
         #expect(StubXAIAPI.authHeaders.allSatisfy { $0 == "Bearer test-key" })
     }
 
-    /// An id the curated block hasn't caught up with still reads as a product.
-    @Test func uncuratedIDsGetASynthesizedName() {
+    /// xAI spells ids like build artifacts and teemoon ships no name table, so
+    /// every Grok row is synthesized. A bare four-digit token is a build stamp,
+    /// not part of the product's name.
+    @Test func grokIDsReadAsProducts() {
         #expect(XAIAdapter.displayName(forID: "grok-5") == "Grok 5")
+        #expect(XAIAdapter.displayName(forID: "grok-4.6") == "Grok 4.6")
         #expect(XAIAdapter.displayName(forID: "grok-4.20-0309-non-reasoning")
-                == "Grok 4.20 0309 Non Reasoning")
+                == "Grok 4.20 Non Reasoning")
+        #expect(XAIAdapter.displayName(forID: "grok-4.20-multi-agent-0309")
+                == "Grok 4.20 Multi Agent")
+        // Version digits are not a stamp, however many there are.
+        #expect(XAIAdapter.displayName(forID: "grok-build-0.1") == "Grok Build 0.1")
     }
 
     /// A rejected key must classify as unauthorized (the add-provider screen
@@ -573,12 +600,6 @@ struct CloudBrowseRoutingTests {
         // xai_language_models.json is 2026-06-29; as of 2026-08-15 that
         // window is closed, so this no longer asserts a badge. The
         // routing claim is the non-empty metaLabel against an empty snapshot.
-
-        // What the sheet showed instead, and why it looked like another design.
-        let curated = WhereProviderPresentation.browseModels(for: .grok)
-        #expect(!curated.isEmpty, "the fallback still exists — it is offline cover")
-        #expect(curated.allSatisfy { $0.metaLabel.isEmpty },
-                "if the snapshot ever gains prices, this test is measuring the wrong thing")
     }
 
     /// Fireworks: the snapshot has prices but no context window, so its rows read
@@ -606,14 +627,12 @@ struct CloudBrowseRoutingTests {
         #expect(!live.contains { $0.vendor == "Accounts" })
         // Every model the control plane reports a window for carries it. ONE in
         // the captured fixture reports `contextLength: 0` — qwen3p7-plus, a
-        // CUSTOM_MODEL deployment — and that row is a price with no context
-        // rather than a blank rail, which is what `metaLabel` joins for.
+        // CUSTOM_MODEL deployment. It has since left serverless and the price
+        // table (2026-09-10), so the row is now blank on both sides: `metaLabel`
+        // joins nothing, and the rail is empty rather than a stray separator.
         let noContext = live.filter { $0.contextWindow.isEmpty }
         #expect(noContext.map(\.id) == ["accounts/fireworks/models/qwen3p7-plus"])
-        #expect(noContext.allSatisfy { !$0.metaLabel.isEmpty })
-
-        let curated = WhereProviderPresentation.browseModels(for: .fireworks)
-        #expect(curated.allSatisfy { $0.contextWindow.isEmpty })
+        #expect(noContext.allSatisfy { $0.price.isEmpty && $0.metaLabel.isEmpty })
     }
 
     /// The other half of "look like near rows": what the row SAYS, not just what
@@ -772,9 +791,11 @@ struct BraveProviderTests {
     /// Brave has no model list, so the add-provider screen used to jump straight
     /// to "connected" without touching the network — a wrong key only surfaced
     /// when the first message failed. It now has an endpoint to verify against.
-    @Test func braveIsTheOnlyPresetWithAKeyValidationEndpoint() {
+    /// OpenRouter has one too: its public list answers 200 to any bearer.
+    @Test func onlyBraveAndOpenRouterHaveAKeyValidationEndpoint() {
         #expect(Provider.braveAnswers.keyValidationEndpoint == .braveSearch)
-        for preset in Provider.presets where preset.id != Provider.braveAnswers.id {
+        #expect(Provider.openRouter.keyValidationEndpoint == .openRouter)
+        for preset in Provider.presets where ![Provider.braveAnswers.id, Provider.openRouter.id].contains(preset.id) {
             #expect(preset.keyValidationEndpoint == nil)
         }
     }
@@ -892,4 +913,381 @@ struct BraveAnswersFormatTests {
         #expect(visible == plain)
         #expect(sources.isEmpty)
     }
+}
+
+
+// MARK: - OpenRouter
+
+private final class StubOpenRouterAPI: StubCatalogAPI {
+    nonisolated(unsafe) static let sharedBox = RouteBox()
+    override class var box: RouteBox { sharedBox }
+}
+
+private final class StubNVIDIAAPI: StubCatalogAPI {
+    nonisolated(unsafe) static let sharedBox = RouteBox()
+    override class var box: RouteBox { sharedBox }
+}
+
+private final class StubFirstPartyAPI: StubCatalogAPI {
+    nonisolated(unsafe) static let sharedBox = RouteBox()
+    override class var box: RouteBox { sharedBox }
+}
+
+/// openrouter_models.json is a trimmed capture of the PUBLIC /api/v1/models
+/// (2026-09-10): twelve records chosen to cover a frontier vendor, a `:free`
+/// variant, two `:batch` variants, the dynamic auto router and a model with
+/// no tool support.
+@Suite("OpenRouterAdapter", .serialized)
+struct OpenRouterAdapterTests {
+    typealias Pricing = OpenRouterAdapter.ModelsResponse.Model.Pricing
+
+    private func records() throws -> [OpenRouterAdapter.ModelsResponse.Model] {
+        try JSONDecoder().decode(OpenRouterAdapter.ModelsResponse.self,
+                                 from: fixture("openrouter_models.json")).data
+    }
+
+    /// OpenRouter quotes USD per TOKEN as a decimal string.
+    /// The catalog's `hugging_face_id` is the open-weights signal: set for a
+    /// published model, absent for a closed one. The rows carry it so the
+    /// default rule can prefer open weights without a hand-kept list.
+    @Test func openWeightsFollowTheHuggingFaceId() throws {
+        let rows = OpenRouterAdapter.buildModels(from: try records())
+        let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        let published = try records().first { $0.hugging_face_id?.isEmpty == false }?.id
+        let closed = try records().first { ($0.hugging_face_id ?? "").isEmpty && $0.id.hasPrefix("anthropic/") }?.id
+        #expect(published != nil && byID[published!]?.openWeights == true)
+        #expect(closed != nil && byID[closed!]?.openWeights == false)
+    }
+
+    @Test func perTokenStringsBecomePerMillion() {
+        #expect(OpenRouterAdapter.perMillion("0.0000025") == 2.5)
+        #expect(OpenRouterAdapter.perMillion("0.000000269") == 0.27)
+        #expect(OpenRouterAdapter.perMillion("0") == 0)
+        #expect(OpenRouterAdapter.perMillion(nil) == nil)
+        #expect(OpenRouterAdapter.perMillion("n/a") == nil)
+    }
+
+    /// Three shapes, three renderings: a rate, a free model, and "not a price"
+    /// (the auto router's -1) — which must be blank, never "$-1".
+    @Test func pricingClassifiesPaidFreeAndDynamic() {
+        let paid = OpenRouterAdapter.priceLabel(Pricing(prompt: "0.0000025", completion: "0.000015"))
+        #expect(paid.label == "$2.50/$15.00" && !paid.isFree)
+        let free = OpenRouterAdapter.priceLabel(Pricing(prompt: "0", completion: "0"))
+        #expect(free.label.isEmpty && free.isFree)
+        let dynamic = OpenRouterAdapter.priceLabel(Pricing(prompt: "-1", completion: "-1"))
+        #expect(dynamic.label.isEmpty && !dynamic.isFree)
+        let none = OpenRouterAdapter.priceLabel(nil)
+        #expect(none.label.isEmpty && !none.isFree)
+    }
+
+    /// "Vendor: Product" loses the vendor half — the section header already
+    /// says it — and the product half reads like every other catalogue name.
+    @Test func namesDropTheVendorPrefix() {
+        #expect(OpenRouterAdapter.productName("OpenAI: GPT-5.4", id: "openai/gpt-5.4", vendor: "OpenAI") == "GPT 5.4")
+        #expect(OpenRouterAdapter.productName("SpaceXAI: Grok 4.5", id: "x-ai/grok-4.5", vendor: "xAI") == "Grok 4.5")
+        #expect(OpenRouterAdapter.productName("Auto Router (Beta)", id: "openrouter/auto-beta", vendor: "Openrouter") == "Auto Router (Beta)")
+        #expect(OpenRouterAdapter.productName(nil, id: "qwen/qwen3.5-397b-a17b", vendor: "Qwen")
+                == ModelCatalog.displayName(forID: "qwen/qwen3.5-397b-a17b"))
+    }
+
+    /// `:batch` cannot answer a chat turn; a `:free` variant can, and so can a
+    /// text model whose price is dynamic.
+    @Test func chatFilterDropsBatchVariants() throws {
+        let all = try records()
+        #expect(all.count == 12)
+        let chat = all.filter(\.isChatModel).map(\.id)
+        #expect(chat.count == 10)
+        #expect(!chat.contains { $0.hasSuffix(":batch") })
+        #expect(chat.contains("inclusionai/ling-3.0-flash-vl:free"))
+        #expect(chat.contains("openrouter/auto-beta"))
+    }
+
+    /// The whole picker row, end-to-end through URLSession, with NO key: the
+    /// list is public, so a keyless probe lists and sends no auth header.
+    @Test func listModelsBuildsCompletePickerRowsWithoutAKey() async throws {
+        StubOpenRouterAPI.reset()
+        StubOpenRouterAPI.routes = ["/models": (200, try fixture("openrouter_models.json"))]
+        let result = await OpenRouterAdapter.listModels(
+            baseURL: URL(string: "https://openrouter.ai/api/v1")!, apiKey: "",
+            session: stubSession(StubOpenRouterAPI.self))
+        guard case .connected(let models) = result else {
+            Issue.record("expected .connected, got \(result)"); return
+        }
+        #expect(models.count == 10)
+        #expect(StubOpenRouterAPI.authHeaders.isEmpty)
+        #expect(StubOpenRouterAPI.requestedURLs.map(\.path) == ["/api/v1/models"])
+        #expect(models.allSatisfy { !$0.contextWindow.isEmpty })
+
+        let gpt = try #require(models.first { $0.id == "openai/gpt-5.4" })
+        #expect(gpt.displayName == "GPT 5.4")
+        #expect(gpt.vendor == "OpenAI")
+        #expect(gpt.price == "$2.50/$15.00")
+        #expect(gpt.contextWindow == "1.1M")
+        #expect(gpt.capabilities?.contains(.tools) == true)
+        #expect(gpt.capabilities?.contains(.vision) == true)
+        #expect(gpt.modelPageURL == "https://openrouter.ai/openai/gpt-5.4")
+        #expect(gpt.summary?.isEmpty == false)
+
+        // Namespaces the vendor map has to know, or the section reads "X-ai".
+        let grok = try #require(models.first { $0.id == "x-ai/grok-4.5" })
+        #expect(grok.vendor == "xAI")
+
+        // A free model says so; a dynamic price says nothing.
+        let free = try #require(models.first { $0.id.hasSuffix(":free") })
+        #expect(free.price.isEmpty && free.isFree)
+        #expect(free.metaLabel.hasPrefix("free"))
+        let auto = try #require(models.first { $0.id == "openrouter/auto-beta" })
+        #expect(auto.price.isEmpty && !auto.isFree)
+
+        // No tools claimed for a model that lists none.
+        let mt = try #require(models.first { $0.id == "tencent/hy-mt2-1.8b" })
+        #expect(mt.capabilities?.contains(.tools) == false)
+
+        // Newest first, so the browser's vendor sections lead with the fresh release.
+        #expect(models.first?.id == "inclusionai/ling-3.0-flash-vl:free")
+    }
+
+    @Test func aKeyIsSentWhenPresentAndARejectedOneIsUnauthorized() async {
+        StubOpenRouterAPI.reset()
+        StubOpenRouterAPI.routes = [
+            "/models": (401, Data("{\"error\":{\"message\":\"No auth credentials found\"}}".utf8)),
+        ]
+        let result = await OpenRouterAdapter.listModels(
+            baseURL: URL(string: "https://openrouter.ai/api/v1")!, apiKey: "nope",
+            session: stubSession(StubOpenRouterAPI.self))
+        #expect(result == .failed(.unauthorized))
+        #expect(StubOpenRouterAPI.authHeaders == ["Bearer nope"])
+    }
+}
+
+// MARK: - NVIDIA
+
+/// nvidia_models.json is the full PUBLIC /v1/models list (80 records,
+/// 2026-09-10) — ids and `owned_by`, nothing else, with embedders, guards,
+/// translators and encoders mixed in with the chat models.
+@Suite("NVIDIAAdapter", .serialized)
+struct NVIDIAAdapterTests {
+
+    private func records() throws -> [OpenAIModelsResponse.Model] {
+        try JSONDecoder().decode(OpenAIModelsResponse.self, from: fixture("nvidia_models.json")).data
+    }
+
+    @Test func nonChatFamiliesAreFilteredOut() throws {
+        let all = try records()
+        #expect(all.count == 80)
+        let ids = NVIDIAAdapter.buildModels(from: all).map(\.id)
+        #expect(ids.count == 54)
+        for dropped in [
+            "nvidia/embed-qa-4", "nvidia/nemotron-4-340b-reward", "meta/llama-guard-4-12b",
+            "nvidia/nemotron-parse", "nvidia/riva-translate-4b-instruct", "nvidia/nvclip",
+            "nvidia/vila", "snowflake/arctic-embed-l", "nvidia/nemotron-3.5-content-safety",
+            "nvidia/ai-synthetic-video-detector", "google/deplot", "microsoft/kosmos-2",
+            "nvidia/neva-22b", "adept/fuyu-8b", "google/diffusiongemma-26b-a4b-it",
+            "nvidia/llama-3.1-nemoguard-8b-topic-control", "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+        ] {
+            #expect(!ids.contains(dropped), Comment(rawValue: dropped))
+        }
+        for kept in [
+            "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b",
+            "moonshotai/kimi-k3", "deepseek-ai/deepseek-v4-flash-0731", "google/gemma-4-31b-it",
+            "openai/gpt-oss-20b", "meta/llama-3.2-90b-vision-instruct",
+        ] {
+            #expect(ids.contains(kept), Comment(rawValue: kept))
+        }
+    }
+
+    /// Free is a fact about the tier, so every row says it — and says nothing
+    /// about context, which the list does not report.
+    @Test func rowsAreFreeNamedAndVendored() throws {
+        let models = NVIDIAAdapter.buildModels(from: try records())
+        #expect(models.allSatisfy { $0.isFree && $0.price.isEmpty })
+        #expect(models.allSatisfy { $0.metaLabel == "free" })
+        #expect(models.allSatisfy { $0.contextWindow.isEmpty })
+        #expect(models.first?.vendor == "NVIDIA")
+        let kimi = try #require(models.first { $0.id == "moonshotai/kimi-k3" })
+        #expect(kimi.vendor == "Moonshot")
+        #expect(kimi.displayName == "kimi-k3")
+        #expect(kimi.modelPageURL == "https://build.nvidia.com/moonshotai/kimi-k3")
+        let nemo = try #require(models.first { $0.id == "nv-mistralai/mistral-nemo-12b-instruct" })
+        #expect(nemo.vendor == "Mistral")
+        let meta = try #require(models.first { $0.id == "meta/llama2-70b" })
+        #expect(meta.vendor == "Meta")
+    }
+
+    @Test func listModelsThroughURLSessionWithoutAKey() async throws {
+        StubNVIDIAAPI.reset()
+        StubNVIDIAAPI.routes = ["/models": (200, try fixture("nvidia_models.json"))]
+        let result = await NVIDIAAdapter.listModels(
+            baseURL: URL(string: "https://integrate.api.nvidia.com/v1")!, apiKey: "",
+            session: stubSession(StubNVIDIAAPI.self))
+        guard case .connected(let models) = result else {
+            Issue.record("expected .connected, got \(result)"); return
+        }
+        #expect(models.count == 54)
+        #expect(StubNVIDIAAPI.authHeaders.isEmpty)
+        #expect(StubNVIDIAAPI.requestedURLs.map(\.path) == ["/v1/models"])
+    }
+}
+
+// MARK: - First-party list prices
+
+/// `ListPriceSnapshot` is generated from OpenRouter's public list for the
+/// first-party vendor hosts a user adds as a CUSTOM endpoint.
+@Suite("ListPriceSnapshot")
+struct ListPriceSnapshotTests {
+
+    @Test func firstPartyHostsGetTheirListPrice() {
+        #expect(ListPriceSnapshot.price(host: "api.openai.com", modelID: "gpt-5.4") == "$2.50/$15.00")
+        #expect(ListPriceSnapshot.price(host: "API.OpenAI.com", modelID: "GPT-5.4") == "$2.50/$15.00")
+        // Google's OpenAI-compat list prefixes ids with "models/".
+        #expect(ListPriceSnapshot.price(host: "generativelanguage.googleapis.com",
+                                        modelID: "models/gemini-2.5-flash") == "$0.30/$2.50")
+        // Anthropic's own API spells versions with a dash; OpenRouter with a dot.
+        #expect(ListPriceSnapshot.price(host: "api.anthropic.com", modelID: "claude-opus-4-8") == "$5.00/$25.00")
+        #expect(ListPriceSnapshot.price(host: "api.anthropic.com", modelID: "claude-sonnet-5") == "$2.00/$10.00")
+    }
+
+    /// Blank over borrowed: a host the table does not know, an id it does not
+    /// carry, or another vendor's id on the wrong host all render nothing.
+    @Test func unknownHostsAndUnmatchedIDsStayBlank() {
+        #expect(ListPriceSnapshot.price(host: "llm.example.com", modelID: "gpt-5.4").isEmpty)
+        #expect(ListPriceSnapshot.price(host: nil, modelID: "gpt-5.4").isEmpty)
+        #expect(ListPriceSnapshot.price(host: "api.openai.com", modelID: "gpt-5.4-2026-03-05").isEmpty)
+        #expect(ListPriceSnapshot.price(host: "api.openai.com", modelID: "claude-sonnet-5").isEmpty)
+        #expect(ListPriceSnapshot.price(host: "api.openai.com", modelID: "").isEmpty)
+    }
+
+    @Test func snapshotIsWellFormed() {
+        #expect(ListPriceSnapshot.prices.count > 50)
+        let namespaces = Set(ListPriceSnapshot.hosts.values)
+        for (id, price) in ListPriceSnapshot.prices {
+            #expect(!id.contains(":"), "\(id) is an OpenRouter-only variant")
+            #expect(price.split(separator: "/").count == 2 && price.hasPrefix("$"),
+                    "\(id) has a malformed price: \(price)")
+            #expect(namespaces.contains(String(id.split(separator: "/")[0])),
+                    "\(id) is under no first-party host")
+        }
+    }
+
+    /// The generic probe is where a custom OpenAI key lists its models, and it
+    /// is where the snapshot has to land: an OpenAI row now carries its list
+    /// price, an id the table lacks stays blank, and embeddings stay out.
+    @Test func genericProbeFillsFirstPartyPrices() async throws {
+        StubFirstPartyAPI.reset()
+        StubFirstPartyAPI.routes = ["/models": (200, Data("""
+            {"object":"list","data":[
+              {"id":"gpt-5.4","object":"model","owned_by":"openai"},
+              {"id":"gpt-5.4-mini","object":"model","owned_by":"openai"},
+              {"id":"ft:gpt-5.4:acme::abc123","object":"model","owned_by":"acme"},
+              {"id":"text-embedding-3-small","object":"model","owned_by":"openai"}]}
+            """.utf8))]
+        let result = await EndpointModelCatalog.probe(
+            baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "sk-test",
+            session: stubSession(StubFirstPartyAPI.self))
+        guard case .connected(let models) = result else {
+            Issue.record("expected .connected, got \(result)"); return
+        }
+        #expect(models.map(\.id) == ["gpt-5.4", "gpt-5.4-mini", "ft:gpt-5.4:acme::abc123"])
+        #expect(models[0].price == "$2.50/$15.00")
+        #expect(models[1].price == "$0.75/$4.50")
+        #expect(models[2].price.isEmpty)
+        #expect(models.allSatisfy { !$0.isFree })
+
+        // The same ids on a self-hosted server carry no price at all.
+        StubFirstPartyAPI.reset()
+        StubFirstPartyAPI.routes = ["/models": (200, Data("""
+            {"object":"list","data":[{"id":"gpt-5.4","object":"model"}]}
+            """.utf8))]
+        let selfHosted = await EndpointModelCatalog.probe(
+            baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "",
+            session: stubSession(StubFirstPartyAPI.self))
+        guard case .connected(let rows) = selfHosted else {
+            Issue.record("expected .connected, got \(selfHosted)"); return
+        }
+        #expect(rows.allSatisfy { $0.price.isEmpty })
+    }
+}
+
+// MARK: - OpenRouter and NVIDIA presets
+
+@Suite("OpenRouter and NVIDIA presets")
+struct OpenRouterNVIDIAPresetTests {
+
+    @Test func presetsRouteToTheirAdapters() {
+        #expect(WhereProviderPresentation.liveCatalogSource(for: .openRouter) == .openRouter)
+        #expect(WhereProviderPresentation.liveCatalogSource(for: .nvidia) == .nvidia)
+        #expect(EndpointModelCatalog.Source.resolve(host: "openrouter.ai") == .openRouter)
+        #expect(EndpointModelCatalog.Source.resolve(host: "integrate.api.nvidia.com") == .nvidia)
+        // A first-party vendor host is still the generic probe (plus the snapshot).
+        #expect(EndpointModelCatalog.Source.resolve(host: "api.openai.com") == .generic)
+    }
+
+    /// A stored key the host rejects must not blank a PUBLIC catalogue. The
+    /// key screen is where a wrong key is reported; the picker still lists.
+    @Test func aRejectedKeyDoesNotBlankAPublicCatalogue() async throws {
+        StubOpenRouterAPI.reset()
+        let body = try fixture("openrouter_models.json")
+        StubOpenRouterAPI.handler = { request in
+            let keyed = request.value(forHTTPHeaderField: "Authorization") != nil
+            return keyed ? (401, Data("{\"error\":\"invalid key\"}".utf8)) : (200, body)
+        }
+        defer { StubOpenRouterAPI.handler = nil }
+        let result = await ModelCatalog.liveCatalog(
+            for: .openRouter, baseURL: URL(string: "https://openrouter.ai/api/v1")!,
+            apiKey: "sk-wrong", session: stubSession(StubOpenRouterAPI.self))
+        guard case .connected(let models) = result else {
+            Issue.record("a public list must still list, got \(result)"); return
+        }
+        #expect(models.count == 10)
+        #expect(StubOpenRouterAPI.requestCount == 2, "asked once with the key, once without")
+    }
+
+    /// Both lists are public: neither preset needs a key to browse, and the
+    /// saved copy of each is stored unscoped because there is no account in it.
+    @Test func bothListsArePublic() {
+        #expect(LiveCatalogStore.listIsPublic(.openRouter))
+        #expect(LiveCatalogStore.listIsPublic(.nvidia))
+        #expect(!Provider.modelListRequiresKeyHosts.contains("openrouter.ai"))
+        #expect(!Provider.modelListRequiresKeyHosts.contains("integrate.api.nvidia.com"))
+        // A keyed list is one account's view and is never stored as everyone's.
+        #expect(!LiveCatalogStore.listIsPublic(.fireworks))
+        #expect(!LiveCatalogStore.listIsPublic(.xAI))
+    }
+
+    /// Six presets, near.ai first — the trust story leads the list — and the
+    /// preset's pinned model is the head of its own default shortlist, so the
+    /// offline pick and the live pick agree.
+    @Test func presetOrderAndDefaultsAgree() throws {
+        #expect(Provider.presets.count == 6)
+        #expect(Provider.presets.first?.id == Provider.nearAI.id)
+        #expect(Provider.presets.last?.id == Provider.braveAnswers.id)
+        for preset in [Provider.openRouter, Provider.nvidia] {
+            // Open-weight hosts default by the rule, not a shortlist to keep.
+            #expect(preset.defaultModelRule == .strongestOpenWeight)
+            #expect(preset.supportsModelBrowsing)
+            #expect(preset.signupURL?.hasPrefix("https://") == true)
+        }
+    }
+
+private final class StubNearAIAPI: StubCatalogAPI {
+    nonisolated(unsafe) static let sharedBox = RouteBox()
+    override class var box: RouteBox { sharedBox }
+}
+
+/// near.ai has no adapter, but it has the same contract: a miss is a failure
+/// the caller keeps its saved copy through — never a second, bare probe whose
+/// rows (no host, no price, no tier) would replace the good list for a day.
+@Suite("near.ai catalogue — a miss is a failure", .serialized)
+struct NearAICatalogueMissTests {
+    @Test func aFailedListNeverFallsBackToBareRows() async {
+        StubNearAIAPI.reset()
+        StubNearAIAPI.routes = ["/models": (500, Data("{}".utf8))]
+        let result = await ModelCatalog.liveCatalog(
+            for: .nearAI, baseURL: URL(string: "https://cloud-api.near.ai/v1")!,
+            apiKey: "", session: stubSession(StubNearAIAPI.self))
+        #expect(result == .failed(.offline))
+        // One round trip, not a second generic GET /models.
+        #expect(StubNearAIAPI.requestCount == 1)
+    }
+}
 }

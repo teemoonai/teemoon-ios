@@ -176,4 +176,41 @@ struct AddEditProviderModelRequiredKeyTests {
         #expect(form.save())
         #expect(store.credential(forEndpoint: box.endpoint) == nil)
     }
+
+    /// Testing a second key in the editor used to write the probe's answer
+    /// under that key's hash and prune the saved account's list — so a
+    /// test-then-cancel destroyed it. The probe only fills the form; the
+    /// store is written on save, under the key that was saved.
+    @Test func aProbeDoesNotTouchTheSavedCatalogueUntilSave() async {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("editor-catalog-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = LiveCatalogStore(directory: dir)
+        let saved = KnownModel(id: "accounts/a/models/saved", displayName: "saved", vendor: "a", price: "")
+        store.record([saved], for: .fireworks, apiKey: "key-one")
+
+        let form = AddEditProviderModel(mode: .edit(.fireworks))
+        form.scheme = .https
+        form.endpointHost = String(Provider.fireworks.endpoint.dropFirst("https://".count))
+        form.catalogStore = store
+        form.apiKey = "key-two"
+        let probed = KnownModel(id: "accounts/b/models/probed", displayName: "probed", vendor: "b", price: "")
+        form.probeCatalog = EndpointProbe.Catalog(
+            detectKind: { _ in .unknown },
+            listOllama: { _ in .failed(.offline) },
+            listLMStudio: { _ in .failed(.offline) },
+            liveCatalog: { (_: String?, _: URL, _: String, _: String?) async -> EndpointModelCatalog.ProbeResult in
+                .connected([probed])
+            },
+            loadedOllama: { _ in [] },
+            loadedLMStudio: { _ in [] },
+            validateKey: { _, _ in .otherFailure }
+        )
+
+        await form.probe(userInitiated: true)
+
+        #expect(form.fetchedModels.map(\.id) == ["accounts/b/models/probed"])
+        #expect(store.count(for: .fireworks, apiKey: "key-one") == 1)    // untouched
+        #expect(store.count(for: .fireworks, apiKey: "key-two") == nil)  // not written
+    }
 }

@@ -71,7 +71,7 @@ struct WhereGetSection<Header: View>: View {
             //    the row below it is the generic invitation to go find one. This
             //    section reads by what an option costs, and both are free — so
             //    within that tier the concrete row goes first, the same way
-            //    "browse near.ai" precedes the generic "add a cloud key" at the
+            //    "near.ai" precedes the generic "add a cloud key" at the
             //    bottom.
             pullRows
 
@@ -217,9 +217,9 @@ struct WhereGetSection<Header: View>: View {
     /// on this provider — a row that names brave answers has to land on brave
     /// answers, or it asks the user to choose the thing they just tapped.
     ///
-    /// The count comes from the curated offline catalog, so the list costs
-    /// nothing to draw: probing four providers to populate a `get` list would
-    /// spend four round trips on a number.
+    /// The count is the policy's — the length of the list this server last
+    /// answered with. Never compute one here: two numbers for one row is how
+    /// they come to disagree.
     @ViewBuilder
     private func presetRow(_ preset: Provider) -> some View {
         // The user's own provider for this endpoint, if they have one — that is
@@ -260,8 +260,11 @@ struct WhereGetSection<Header: View>: View {
                     idsBeforeAdd = Set(providerStore.providers.map(\.id))
                     addingPreset = preset
                 } label: {
+                    // Settings' row — same glyph, caption and two lines —
+                    // with where's trailing state. The two-key warning this
+                    // row used to carry is the key form's footer now.
                     WhereRow(
-                        glyph: "sparkle.magnifyingglass",
+                        glyph: WhereLocality.cloud.systemImage,
                         glyphTint: Color.accentColor,
                         title: preset.name.lowercased(),
                         // "add key" is wrong when there IS one — the tap
@@ -269,14 +272,8 @@ struct WhereGetSection<Header: View>: View {
                         // something the user already gave is how grok's row
                         // read before this was fixed.
                         trailingText: keyed ? "set up" : "add key",
-                        // Its own preset description says it needs "a different
-                        // key than brave llm grounding api", and using the wrong
-                        // one fails with OPTION_NOT_IN_PLAN — a message that
-                        // sends you hunting for a plan problem you don't have.
-                        // The add row is the last cheap moment to say so.
-                        caption: "live web search · needs its own key, not the grounding one",
-                        // Two lines. At one it truncated to "…not the groundin…",
-                        // cutting the clause the sentence exists for.
+                        trailingGlyph: "chevron.right",
+                        caption: WhereProviderPresentation.presetCaption(for: preset),
                         captionLineLimit: 2
                     )
                 }
@@ -284,7 +281,8 @@ struct WhereGetSection<Header: View>: View {
                 // A row in `get` names a service you might pay for — its page is
                 // where "what am I buying" gets answered, before the key.
                 .contextMenu {
-                    if let known = KnownModel.models(for: preset.id).first {
+                    if preset.isFixedAnswerService {
+                        let known = KnownModel.braveAnswersModel
                         Button {
                             detailTarget = ModelDetailTarget(provider: preset, model: known)
                         } label: {
@@ -294,7 +292,6 @@ struct WhereGetSection<Header: View>: View {
                 }
             }
         } else {
-            let count = WhereProviderPresentation.browseModels(for: provider).count
             Button {
                 if keyed {
                     openBrowse(provider)
@@ -303,13 +300,18 @@ struct WhereGetSection<Header: View>: View {
                     addingPreset = preset
                 }
             } label: {
+                // Settings' add-cloud-key row, with where's trailing state:
+                // the model count once keyed, "add key" before. Same glyph,
+                // name and caption, so the two screens read as one list.
                 WhereRow(
-                    glyph: "magnifyingglass",
+                    glyph: WhereLocality.cloud.systemImage,
                     glyphTint: Color.accentColor,
-                    title: "browse \(preset.name.lowercased())",
+                    title: preset.name.lowercased(),
                     showsE2EETag: preset.capabilities.contains(.endToEndEncryption),
-                    trailingText: keyed ? (count > 0 ? "\(count)" : nil) : "add key",
-                    trailingGlyph: "chevron.right"
+                    trailingText: policy.presetTrailingText(for: provider, keyed: keyed),
+                    trailingGlyph: "chevron.right",
+                    caption: WhereProviderPresentation.presetCaption(for: preset),
+                    captionLineLimit: 2
                 )
             }
             .buttonStyle(.plain)

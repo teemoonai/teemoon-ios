@@ -91,6 +91,27 @@ final class ChatViewModel {
     /// would run with a nil codec and send PLAINTEXT under that promise
     /// Pure so the regression tests can pin the decision.
     /// Non-attested providers (peer legitimately absent) are unaffected.
+    /// The gate, re-read AFTER `prepareTurn` settled the refresh it may have
+    /// started. The composer's check ran on the state before that refresh; a
+    /// verdict that changed underneath it must not ride the earlier answer.
+    /// `acceptedDegrade` is the user having chosen "send anyway" on the soft
+    /// alert, which a `.confirm` after settling may honour; a `.block` never
+    /// is. Returns the refusal to show, or nil to proceed.
+    static func postPrepareRefusal(policy: TrustSendPolicy, acceptedDegrade: Bool,
+                                   verdictsPending: Bool) -> String? {
+        switch policy {
+        case .block:
+            return "Verification failed while preparing this message, so nothing was sent. Re-verify from the lock icon."
+        case .confirm where !acceptedDegrade:
+            return "Verification changed while preparing this message, so nothing was sent. Send again to review it."
+        case .confirm, .allow:
+            if verdictsPending {
+                return "Verification is still running, so nothing was sent. Try again in a moment."
+            }
+            return nil
+        }
+    }
+
     static func mustRefuseUnsealedSend(provider: Provider, teeContext: TEEContext?) -> Bool {
         provider.capabilities.contains(.attestation) && teeContext?.e2eePeer == nil
     }
@@ -123,7 +144,8 @@ final class ChatViewModel {
         settings: AppSettings,
         providers: ProviderStore,
         session: ConfidentialSession,
-        llm: ChatGeneration
+        llm: ChatGeneration,
+        acceptedDegrade: Bool = false
     ) {
         guard !isPromptEmpty else { return }
         if currentThread == nil {
@@ -140,7 +162,8 @@ final class ChatViewModel {
         sendMessage(Message(role: .user, content: message, thread: thread,
                             isE2EE: session.canSeal), modelContext: modelContext)
         Task {
-            await generateResponse(in: thread, settings: settings, providers: providers, session: session, llm: llm, modelContext: modelContext)
+            await generateResponse(in: thread, settings: settings, providers: providers, session: session,
+                                   llm: llm, modelContext: modelContext, acceptedDegrade: acceptedDegrade)
             generatingThreadID = nil
         }
     }
@@ -168,7 +191,8 @@ final class ChatViewModel {
         settings: AppSettings,
         providers: ProviderStore,
         session: ConfidentialSession,
-        llm: ChatGeneration
+        llm: ChatGeneration,
+        acceptedDegrade: Bool = false
     ) {
         guard let thread = message.thread ?? currentThread else { return }
 
@@ -202,7 +226,8 @@ final class ChatViewModel {
         Task {
             await llm.waitUntilStopped(timeout: .seconds(1))
             onPlayHaptic?()
-            await generateResponse(in: thread, settings: settings, providers: providers, session: session, llm: llm, modelContext: modelContext)
+            await generateResponse(in: thread, settings: settings, providers: providers, session: session,
+                                   llm: llm, modelContext: modelContext, acceptedDegrade: acceptedDegrade)
             generatingThreadID = nil
         }
     }
@@ -213,7 +238,8 @@ final class ChatViewModel {
         providers: ProviderStore,
         session: ConfidentialSession,
         llm: ChatGeneration,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        acceptedDegrade: Bool
     ) async {
         guard let provider = providers.activeProvider else { return }
         let groundingKey = provider.capabilities.contains(.builtInGrounding)
@@ -228,13 +254,27 @@ final class ChatViewModel {
             llm.output = ""
             llm.lastError = Self.missingKeyError(for: provider)
             llm.lastErrorThreadID = thread.id
-            session.beginRequest(expectingE2EE: false)
-            session.finishTurn(debugInfo: nil, error: llm.lastError)
+            session.abandonTurn(reason: llm.lastError?.userMessage)
             llm.scrollToBottomToken += 1
             return
         }
 
         let teeContext = await session.prepareTurn()
+        if let refusal = Self.postPrepareRefusal(policy: session.sendPolicy, acceptedDegrade: acceptedDegrade,
+                                                 verdictsPending: session.verdictsPending) {
+            logger.warning("[E2EE] gate refused after prepareTurn — \(refusal, privacy: .public)")
+            llm.output = ""
+            llm.lastError = LLMError(
+                source: .provider(name: provider.name), userMessage: refusal,
+                httpStatus: nil, url: provider.openAIBaseURL, requestHeaders: nil,
+                requestBodyJSON: nil, messageHistory: nil, responseBody: nil,
+                underlyingError: E2EEError.encryptionFailed
+            )
+            llm.lastErrorThreadID = thread.id
+            session.abandonTurn(reason: refusal)
+            llm.scrollToBottomToken += 1
+            return
+        }
         if Self.mustRefuseUnsealedSend(provider: provider, teeContext: teeContext) {
             // FAIL CLOSED. This used to log a warning and
             // proceed — an attested provider with no E2EE peer reached the
@@ -252,7 +292,7 @@ final class ChatViewModel {
                 underlyingError: E2EEError.encryptionFailed
             )
             llm.lastErrorThreadID = thread.id
-            session.finishTurn(debugInfo: nil, error: llm.lastError)
+            session.abandonTurn(reason: llm.lastError?.userMessage)
             llm.scrollToBottomToken += 1
             return
         }

@@ -1061,6 +1061,16 @@ final class TranscriptViewController: UIViewController {
 
     private var streamingHost: UIHostingController<AnyView>?
     private var streamingHeight: CGFloat = 0
+    /// The developer-mode card or the failure card, after the reply. NOT A
+    /// CELL, for the reason the stream is not one: its collapsible sections
+    /// change height by design, and a self-sizing tail cell invalidating the
+    /// layout re-estimates the reply row above it for a pass — the card
+    /// jumped up and down as sections toggled (recorded 2026-09-17). A
+    /// subview costs one frame assignment and one scalar inset per change,
+    /// and SwiftUI animates it the way the old scroll view did.
+    private var cardHost: UIHostingController<AnyView>?
+    private var cardHeight: CGFloat = 0
+    private var cardKey: String?
     /// Survives `setStreaming(nil)` zeroing `streamingHeight`. The hand-off
     /// apply can run after that zero; without this the seed is an unfitted
     /// ~400pt first measure and contentH drops by the whole reply
@@ -1150,7 +1160,7 @@ final class TranscriptViewController: UIViewController {
             host.removeFromParent()
             streamingHost = nil
             streamingHeight = 0
-            collectionView.supplementalAccessibilityViews = []
+            refreshSupplementalAccessibility()
             // Do NOT zero `contentInset.bottom`. That inset is also the
             // composer chrome; dropping it to 0 for a frame is the flash
             // between the overlay leaving and the persisted row taking over.
@@ -1188,7 +1198,7 @@ final class TranscriptViewController: UIViewController {
         collectionView.addSubview(host.view)
         host.didMove(toParent: self)
         streamingHost = host
-        collectionView.supplementalAccessibilityViews = [host.view]
+        refreshSupplementalAccessibility()
         collectionView.setNeedsLayout()
         #if DEBUG
         // The turn-end dump cannot see a gap that only exists while the model
@@ -1201,6 +1211,65 @@ final class TranscriptViewController: UIViewController {
             }
         }
         #endif
+    }
+
+    private func refreshSupplementalAccessibility() {
+        collectionView.supplementalAccessibilityViews =
+            [streamingHost?.view, cardHost?.view].compactMap { $0 }
+    }
+
+    /// Mounted once per identity (`key`): a new turn's card is a new view,
+    /// and a card whose sections the user opened is not re-pushed under
+    /// them on every SwiftUI update. Fades in — the reveal the animated
+    /// tail insert used to give it.
+    func setTailCard(_ content: AnyView?, key: String?) {
+        guard let content, let key else {
+            guard let host = cardHost else { return }
+            host.willMove(toParent: nil)
+            host.view.removeFromSuperview()
+            host.removeFromParent()
+            cardHost = nil
+            cardHeight = 0
+            cardKey = nil
+            refreshSupplementalAccessibility()
+            collectionView.setNeedsLayout()
+            return
+        }
+        if cardHost != nil, key == cardKey { return }
+        if cardHost != nil { setTailCard(nil, key: nil) }
+        let host = UIHostingController(rootView: AnyView(
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // The trigger, not the truth — as for the stream: the
+                // layout pass measures, this only says the height moved.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { [weak self] height in
+                    guard let self, abs(self.cardHeight - height) > 0.5 else { return }
+                    self.collectionView.setNeedsLayout()
+                }
+        ))
+        host.view.backgroundColor = .clear
+        host.view.clipsToBounds = false
+        host.view.alpha = 0
+        addChild(host)
+        collectionView.addSubview(host.view)
+        host.didMove(toParent: self)
+        cardHost = host
+        cardKey = key
+        refreshSupplementalAccessibility()
+        collectionView.setNeedsLayout()
+        UIView.animate(withDuration: 0.25) { host.view.alpha = 1 }
+    }
+
+    /// Below the cells and below the stream, measured on the pass that
+    /// places it. Returns the height reserved under the content.
+    private func layoutCard(after y: CGFloat, width: CGFloat) -> CGFloat {
+        guard let host = cardHost, width > 0 else { cardHeight = 0; return 0 }
+        let fitted = host.sizeThatFits(in: CGSize(width: width,
+                                                  height: UIView.layoutFittingExpandedSize.height))
+        cardHeight = fitted.height
+        let frame = CGRect(x: 0, y: y, width: width, height: fitted.height)
+        if host.view.frame != frame { host.view.frame = frame }
+        return fitted.height
     }
 
     private func layoutStreamingView() {
@@ -1216,7 +1285,11 @@ final class TranscriptViewController: UIViewController {
             // clamp it avoided self-corrects in a frame. The anchor's slack
             // is a different quantity — capped at one viewport minus the
             // prompt, under the cell that just replaced the stream.
-            let bottom = chrome + (anchorGeometry()?.placeholder ?? 0)
+            // The card is ink, like the stream: drawn past `contentSize`,
+            // so its height is reserved, unlike the gap above.
+            let card = layoutCard(after: collectionView.contentSize.height,
+                                  width: collectionView.bounds.width)
+            let bottom = card + chrome + (anchorGeometry()?.placeholder ?? 0)
             if abs(collectionView.contentInset.bottom - bottom) > 0.5 {
                 collectionView.contentInset.bottom = bottom
             }
@@ -1245,6 +1318,7 @@ final class TranscriptViewController: UIViewController {
         let frame = CGRect(x: 0, y: collectionView.contentSize.height,
                            width: width, height: fitted.height)
         if host.view.frame != frame { host.view.frame = frame }
+        let card = layoutCard(after: frame.maxY, width: width)
         // SLACK, AND WHY IT IS NOT A BLANK BAND. `placeholder` is what the
         // reply has not grown into yet; reserving it is what lets the prompt
         // sit near the top instead of being slammed against the composer, and
@@ -1255,7 +1329,7 @@ final class TranscriptViewController: UIViewController {
         // geometry describes this pass and not the last one. It is zero the
         // moment the streaming host is gone — see `anchorGeometry`.
         let placeholder = anchorGeometry()?.placeholder ?? 0
-        let bottom = fitted.height + chrome + placeholder
+        let bottom = fitted.height + card + chrome + placeholder
         if abs(collectionView.contentInset.bottom - bottom) > 0.5 {
             collectionView.contentInset.bottom = bottom
         }
@@ -1292,7 +1366,7 @@ final class TranscriptViewController: UIViewController {
             // Ink, not intent: the stream lives past `contentSize`, the cell
             // that replaces it inside. Adding both is what keeps the reserve
             // still at `[DONE]` instead of clamping the prompt back down.
-            inkBelow: streamingHeight
+            inkBelow: streamingHeight + cardHeight
                 + max(0, collectionView.contentSize.height - frame.maxY))
     }
 
@@ -1604,6 +1678,9 @@ final class TranscriptViewController: UIViewController {
             lines.append(String(format: "[column]   stream y=%.1f h=%.1f gapAbove=%.1f",
                                 stream.minY, stream.height, stream.minY - (previousMaxY ?? 0)))
         }
+        if let card = cardHost?.view.frame {
+            lines.append(String(format: "[column]   card y=%.1f h=%.1f", card.minY, card.height))
+        }
         let end = previousMaxY ?? 0
         lines.append(String(format: "[column]   contentH=%.1f afterLastRow=%.1f inset=%.1f "
                             + "chrome=%.1f home=%.1f offset=%.1f visible=%.1f",
@@ -1664,7 +1741,7 @@ final class TranscriptViewController: UIViewController {
         // by — reporting raw `contentSize` made a healthy follow read as
         // 31,805 against 24,664.
         let geometry = (collectionView.contentOffset.y,
-                        collectionView.contentSize.height + streamingHeight,
+                        collectionView.contentSize.height + streamingHeight + cardHeight,
                         collectionView.bounds.height)
         if let last = lastTracedGeometry, last == geometry { return }
         lastTracedGeometry = geometry
@@ -1878,6 +1955,10 @@ struct TranscriptView: UIViewControllerRepresentable {
     /// rather than as an item id: it is mounted as a trailing subview of the
     /// scroll view, not as a cell — see `TranscriptSection`.
     let streamingContent: AnyView?
+    /// The developer-mode or failure card, hosted after the reply — see
+    /// `TranscriptViewController.setTailCard`. `tailCardKey` is its identity.
+    var tailCard: AnyView? = nil
+    var tailCardKey: String? = nil
     /// The last user message, for phase A of the follow. Identity only —
     /// `TranscriptItem` has no role, and working one out is the host's job.
     /// Nil means there is nothing to anchor to, and the follow is the old
@@ -1941,6 +2022,10 @@ struct TranscriptView: UIViewControllerRepresentable {
             controller.apply(transcript: transcript, tail: tail,
                              threadChanged: threadChanged)
         }
+
+        // After the apply and the hand-off, so the card lands under the
+        // persisted row and never under the overlay.
+        controller.setTailCard(tailCard, key: tailCardKey)
 
         if context.coordinator.volatileItems != volatileItems {
             let touched = volatileItems.union(context.coordinator.volatileItems)

@@ -2,9 +2,13 @@
 //  SharedURLCacheTests.swift
 //  teemoonTests
 //
-//  Pins the fix for the audits runtime-pass MEDIUM on 1.0.2: an authenticated
-//  request made through the production HTTP seam must never be archived into
-//  the shared URL cache, even when the server says it may be cached.
+//  Pins the fix for the teemoonai/audits runtime-pass MEDIUM on 1.0.2
+//  (client/teemoon-ios/v1.0.2-21d534e.md): the near.ai key was readable nine
+//  times from Library/Caches/ai.teemoon.app/Cache.db after one session, because
+//  every authenticated fetch outside the chat request ran on the shared session
+//  with its default disk cache. The app itself must disable that cache — these
+//  tests never call `SharedURLCache.disable()`; the hosted `TeemoonApp.init`
+//  already did, or the tripwire below stores a bearer token and fails.
 //
 
 import Foundation
@@ -31,19 +35,16 @@ private final class CacheableStubProtocol: URLProtocol {
 @Suite("Shared URL cache holds no authenticated request")
 struct SharedURLCacheTests {
 
-    @Test("the shared cache is zero-capacity once the app has launched")
-    func sharedCacheIsDisabled() {
-        SharedURLCache.disable()
+    @Test("the app launched with a zero-capacity shared cache")
+    func sharedCacheIsDisabledByTheApp() {
         #expect(URLCache.shared.diskCapacity == 0)
         #expect(URLCache.shared.memoryCapacity == 0)
-        // The session every authenticated fetch defaults to must be using it.
         let inUse = URLSession.shared.configuration.urlCache
-        #expect(inUse == nil || inUse!.diskCapacity == 0)
+        #expect(inUse?.diskCapacity == 0)
     }
 
     @Test("a cacheable authenticated response is not stored")
     func authenticatedResponseIsNotCached() async throws {
-        SharedURLCache.disable()
         URLProtocol.registerClass(CacheableStubProtocol.self)
         defer { URLProtocol.unregisterClass(CacheableStubProtocol.self) }
 
@@ -56,5 +57,14 @@ struct SharedURLCacheTests {
 
         #expect(URLCache.shared.cachedResponse(for: request) == nil)
         #expect(URLSession.shared.configuration.urlCache?.cachedResponse(for: request) == nil)
+    }
+
+    @Test("the default cache store is not on disk after launch")
+    func defaultStoreIsGone() {
+        // `disable()` removes the files earlier builds wrote and must not
+        // create them again by opening the default cache to empty it.
+        for url in SharedURLCache.defaultStoreFiles {
+            #expect(!FileManager.default.fileExists(atPath: url.path), "\(url.lastPathComponent) exists")
+        }
     }
 }

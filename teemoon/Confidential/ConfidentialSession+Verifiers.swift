@@ -21,10 +21,13 @@ extension ConfidentialSession {
     func verifyImageProvenance(for record: AttestationRecord) {
         if freezeAttestationFixtures { return }
         provenanceTask?.cancel()
+        // A transient pass keeps this; only evidence replaces it.
+        let previous = imageProvenance
         imageProvenance = nil
         modelLayerVerification = nil
         modelLayerManifest = nil
         modelArtifact = nil
+        provenanceSettled = true
         // Both attested container sets: the gateway CVM's manifest and the
         // model node's own manifest (the enclave that reads plaintext).
         let manifests: [(host: String, manifest: String)] = [
@@ -33,7 +36,11 @@ extension ConfidentialSession {
         ].filter { !$0.manifest.isEmpty }
         guard !manifests.isEmpty || record.modelComposeCommit != nil else { return }
         let service = provenanceService
+        provenanceSettled = false
+        let run = UUID()
+        provenanceRun = run
         provenanceTask = Task { [weak self] in
+            defer { if self?.provenanceRun == run { self?.provenanceSettled = true } }
             var all = manifests
             var layerVerification: ModelLayerVerification? = nil
             // The inference layer: fetch the model YAML at the attested
@@ -109,8 +116,8 @@ extension ConfidentialSession {
                 // Rate limit / network trouble only — no negative evidence.
                 // Leave provenance pending instead of degrading the session;
                 // the next attestation refresh retries.
-                logger.warning("[provenance] inconclusive (transient fetch errors only) — leaving pending")
-                self?.imageProvenance = nil
+                logger.warning("[provenance] inconclusive (transient fetch errors only) — keeping the last verdict")
+                self?.imageProvenance = previous
                 return
             }
             self?.imageProvenance = result

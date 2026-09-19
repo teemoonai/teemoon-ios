@@ -130,6 +130,10 @@ actor LocalGenerationGate {
     private var busy = false
     private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
 
+    /// A generation holds the lock. Read by the warm-up, which stands down
+    /// rather than race a turn that is loading the same engine.
+    var isBusy: Bool { busy }
+
     /// Waits for the lock, and HONOURS CANCELLATION while waiting.
     ///
     /// `withCheckedContinuation` is not cancellation-aware: a task cancelled

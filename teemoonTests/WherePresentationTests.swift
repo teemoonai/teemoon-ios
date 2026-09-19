@@ -58,9 +58,10 @@ struct WherePresentationTests {
 
     /// A phone model has nothing to browse — there is no remote catalog behind
     /// it, and offering "browse" would open an empty list.
-    @Test func onDeviceHasNothingToBrowse() {
+    @Test @MainActor func onDeviceHasNothingToBrowse() {
         let p = Provider.local(LocalModelCatalog.all[0])
         #expect(!p.supportsModelBrowsing)
+        #expect(WhereProviderPresentation.liveCatalogSource(for: p) == nil)
         #expect(WhereProviderPresentation.browseModels(for: p).isEmpty)
     }
 
@@ -78,10 +79,12 @@ struct WherePresentationTests {
         #expect(LocalMemory.weightsHeadroomLabel(availableMB: 0) == nil)
     }
 
-    @Test func nearAIIsCloud() {
+    @Test @MainActor func nearAIIsCloud() {
         #expect(WhereLocality.of(.nearAI) == .cloud)
         #expect(WhereProviderPresentation.showsConfidentialityTags(for: .nearAI))
-        #expect(!WhereProviderPresentation.browseModels(for: .nearAI).isEmpty)
+        // There is a live catalogue to ask. Rows arrive from it, not from the
+        // binary, so an app that has never fetched shows none.
+        #expect(WhereProviderPresentation.liveCatalogSource(for: .nearAI) == .nearAI)
     }
 
     @Test func modelLabelPrefersCatalog() {
@@ -798,3 +801,43 @@ struct PresetCaptionTests {
     }
 }
 
+
+/// One value per setup, built in one place. Every screen that opens a browser
+/// hands it this rather than assembling the same arguments by hand.
+@Suite("ModelBrowserDoor")
+@MainActor
+struct ModelBrowserDoorTests {
+
+    @Test func nearAIIsTieredAndRefusesTypedIDs() {
+        let door = ModelBrowserDoor.browsing(.nearAI, apiKey: "", homeKind: nil)
+        #expect(door.showsConfidentialityTags)
+        #expect(!door.allowsCustomID)          // an unknown id would claim e2ee
+        #expect(door.offersLoader == nil)       // near.ai publishes no routes
+        #expect(door.liveLoader != nil)
+    }
+
+    @Test func openRouterPublishesOffersAndTakesTypedIDs() {
+        let door = ModelBrowserDoor.browsing(.openRouter, apiKey: "", homeKind: nil)
+        #expect(door.offersLoader != nil)
+        #expect(door.allowsCustomID)
+        #expect(!door.showsConfidentialityTags)
+    }
+
+    @Test func onDeviceHasNothingLiveBehindIt() {
+        let phone = Provider.local(LocalModelCatalog.all[0])
+        let door = ModelBrowserDoor.browsing(phone, apiKey: "", homeKind: nil)
+        #expect(door.models.isEmpty)
+        #expect(door.liveLoader == nil)
+        #expect(door.offersLoader == nil)
+    }
+
+    @Test func theEncryptedPickerIsANearAIDoorWithNoTypedIDs() {
+        let near = Provider.nearAI.equipping("z-ai/glm-5.3-flash")
+        let door = ModelBrowserDoor.encryptedPicker(for: near, apiKey: "")
+        #expect(door.showsConfidentialityTags)
+        #expect(!door.allowsCustomID)
+        #expect(door.liveLoader != nil)
+        // Only what teemoon can seal: nothing without a host, nothing proxied.
+        #expect(door.models.allSatisfy { NearAIModelCatalog.confidentiality(forID: $0.id) == .teeOwn })
+    }
+}

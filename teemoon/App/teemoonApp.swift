@@ -36,8 +36,7 @@ struct TeemoonApp: App {
     }
 
     init() {
-        // First, before any URLSession exists: authenticated requests must not
-        // be archived to disk with their headers. See SharedURLCache.
+        // First: the shared URL cache stores nothing, ever. See SharedURLCache.
         SharedURLCache.disable()
         Self.captureNativeLogIfAsked()
         #if DEBUG
@@ -58,6 +57,13 @@ struct TeemoonApp: App {
            ProcessInfo.processInfo.environment["UITEST_DEVELOPER_MODE"] == "1" {
             UserDefaults.standard.set(true, forKey: "developerModeEnabled")
         }
+        // A device launch that has to look like a first install. Deleting the
+        // app clears its container, but iOS keeps its keychain, so the keys
+        // would survive and every preset row would read as already set up.
+        // DEBUG-only: the store build cannot take this flag.
+        if ProcessInfo.processInfo.arguments.contains("--fresh-install") {
+            try? Keychain.deleteAll()
+        }
         #endif
         let settings = AppSettings()
         // A UI TEST MUST NOT TOUCH REAL PROVIDERS EITHER: test seeding calls
@@ -73,8 +79,9 @@ struct TeemoonApp: App {
             // Picking a model is the earliest honest signal that it is about to be
             // used, and a cold self-hosted model costs ~11s to load. Start that now
             // so it overlaps with the user typing their message instead of landing
-            // on the first token. No-op for cloud and on-device providers.
+            // on the first token. Each warm-up is a no-op for the others' kind.
             OllamaAdapter.warmUp(for: provider)
+            LiteRTTransport.warmUp(for: provider)
         }
         // "Recently used" means used — stamped when a model first produces
         // output, not when it is picked in the Where sheet. Same shape as the
@@ -92,8 +99,15 @@ struct TeemoonApp: App {
         // the model appears under `ready now` when it lands.
         LocalModelDownloader.shared.onInstalled = { [weak store] model in
             guard let store else { return }
-            guard !store.providers.contains(where: { $0.localModelID == model.id }) else { return }
-            store.addProvider(.local(model))
+            if !store.providers.contains(where: { $0.localModelID == model.id }) {
+                store.addProvider(.local(model))
+            }
+            // THE BYTES JUST LANDED FOR A MODEL THAT MAY ALREADY BE ACTIVE:
+            // first run selects the model before it downloads, so selection
+            // has fired already, against a file that was not there. Warm
+            // now; the policy checks the active provider is this model and
+            // the bundle is on disk (reported 2026-09-18, E4B).
+            LiteRTTransport.warmUp(for: store.activeProvider)
         }
         #if DEBUG
         // A UI test that needs a blank slate — no weights, no landed file, no
@@ -327,6 +341,14 @@ struct TeemoonApp: App {
         // started over once a scene is on screen — see `scenePhaseChanged`.
         .onChange(of: scenePhase, initial: true) { _, phase in
             LocalModelDownloader.shared.scenePhaseChanged(isActive: phase == .active)
+            // Launch (`initial: true`) and every return: backgrounding evicts
+            // the engine (`LocalMemoryPressure`), so coming back with the same
+            // on-device provider is a cold engine again. Warm it now, not on
+            // the first message — LiteRT-LM's "create the engine once, early".
+            // Idempotent when resident; stands down behind a resuming turn.
+            if phase == .active {
+                LiteRTTransport.warmUp(for: providerStore.activeProvider)
+            }
         }
         #if os(visionOS)
         .windowResizability(.contentSize)

@@ -57,6 +57,17 @@ struct NearAIModelCatalogTests {
         #expect(NearAIModelCatalog.confidentiality(forID: id) == .teeThirdParty)
     }
 
+    /// near.ai proxies whole vendor namespaces it does not host: the ids
+    /// that arrived 2026-09-12 fell through every rule to "own fleet", and
+    /// the catalog tool refused to write a list the app would mislabel.
+    @Test func proxiedVendorNamespacesAreNotOwnFleet() {
+        #expect(NearAIModelCatalog.classify("x-ai/grok-4.6") == .proxied)
+        #expect(NearAIModelCatalog.classify("deepseek/deepseek-v4.1-flash") == .proxied)
+        // The own-fleet DeepSeek node keeps its namespace.
+        #expect(NearAIModelCatalog.classify("deepseek-ai/DeepSeek-V4-Flash") == .teeOwn)
+        #expect(NearAIModelCatalog.classify("z-ai/glm-5.3-flash") == .teeOwn)
+    }
+
 
     // MARK: reused-node vendor mismatch (DeepSeek-host-shows-Qwen bug)
 
@@ -94,38 +105,54 @@ struct NearAIModelCatalogTests {
         #expect(NearAIModelCatalog.differentVendor("QuantTrio/GLM-5.1-AWQ", "zai-org/GLM-5.1-FP8"))
     }
 
-    @Test func curatedMetadataIsPreserved() {
-        let rows = NearAIModelCatalog.merge(liveIDs: ["zai-org/GLM-5.1-FP8"], directHosts: [:])
-        let glm = try? #require(rows.first { $0.id == "zai-org/GLM-5.1-FP8" })
-        #expect(glm?.displayName == "GLM 5.1")
-        #expect(glm?.price == "$1.40/$4.40")   // 2026-07-18 catalog snapshot
-        #expect(glm?.directBaseURL == "https://glm-5-1.completions.near.ai/v1")
+    /// The live row is the whole row: teemoon keeps no metadata of its own to
+    /// merge in, so what near.ai says is what shows.
+    @Test func liveMetadataIsTheRow() async {
+        let json = """
+        {"data":[{"id":"z-ai/glm-5.3-flash","owned_by":"nearai","name":"GLM 5.3 Flash",
+                  "created":1788000000,"pricing":{"input":0.15,"output":0.5},
+                  "context_length":1000000,"supported_features":["tools"]}]}
+        """
+        let list = try! JSONDecoder().decode(NearAIModelCatalog.ModelsResponse.self, from: Data(json.utf8))
+        let rows = await NearAIModelCatalog.buildModels(from: list.data)
+        let glm = rows.first { $0.id == "z-ai/glm-5.3-flash" }
+        #expect(glm?.displayName == "GLM 5.3 Flash")
+        #expect(glm?.price == "$0.15/$0.50")
+        #expect(glm?.contextWindow == "1M")
+        #expect(glm?.created != nil)
     }
 
-    @Test func uncuratedModelIsSynthesizedWithDirectHost() {
-        // An id NOT in the curated snapshot (glm-5.2-long exists only in
-        // /endpoints, not /v1/models) must be synthesized from the live data.
-        let rows = NearAIModelCatalog.merge(
-            liveIDs: ["z-ai/glm-5.2-long"],
-            directHosts: ["z-ai/glm-5.2-long": "https://glm-5-2-long.completions.near.ai/v1"])
-        let glm = try? #require(rows.first { $0.id == "z-ai/glm-5.2-long" })
+    /// A row near.ai names only by id still reads as a product.
+    @Test func anUnnamedModelIsStillReadable() async {
+        let json = """
+        {"data":[{"id":"z-ai/glm-5.2-long","owned_by":"nearai","created":1788000000}]}
+        """
+        let list = try! JSONDecoder().decode(NearAIModelCatalog.ModelsResponse.self, from: Data(json.utf8))
+        let rows = await NearAIModelCatalog.buildModels(from: list.data)
+        let glm = rows.first { $0.id == "z-ai/glm-5.2-long" }
         #expect(glm?.vendor == "Z.ai")
         #expect(glm?.displayName == "glm-5.2-long")
-        #expect(glm?.price == "")  // unknown price → blank in the row
-        #expect(glm?.directBaseURL == "https://glm-5-2-long.completions.near.ai/v1")
+        #expect(glm?.price == "")
     }
 
-    @Test func nonChatModelsAreFiltered() {
+    @Test func nonChatModelsAreFiltered() async {
         let ids = ["Qwen/Qwen3-Embedding-0.6B", "Qwen/Qwen3-Reranker-0.6B",
                    "openai/whisper-large-v3", "openai/privacy-filter",
                    "black-forest-labs/FLUX.2-klein-4B", "zai-org/GLM-5.1-FP8"]
-        let rows = NearAIModelCatalog.merge(liveIDs: ids, directHosts: [:])
+        let json = "{\"data\":[" + ids.map { "{\"id\":\"\($0)\",\"owned_by\":\"nearai\"}" }
+            .joined(separator: ",") + "]}"
+        let list = try! JSONDecoder().decode(NearAIModelCatalog.ModelsResponse.self, from: Data(json.utf8))
+        let rows = await NearAIModelCatalog.buildModels(from: list.data)
         #expect(rows.map(\.id) == ["zai-org/GLM-5.1-FP8"])
     }
 
-    @Test func duplicatesCollapse() {
-        let rows = NearAIModelCatalog.merge(
-            liveIDs: ["openai/gpt-oss-120b", "openai/gpt-oss-120b"], directHosts: [:])
+    @Test func duplicatesCollapse() async {
+        let json = """
+        {"data":[{"id":"openai/gpt-oss-120b","owned_by":"nearai"},
+                 {"id":"openai/gpt-oss-120b","owned_by":"nearai"}]}
+        """
+        let list = try! JSONDecoder().decode(NearAIModelCatalog.ModelsResponse.self, from: Data(json.utf8))
+        let rows = await NearAIModelCatalog.buildModels(from: list.data)
         #expect(rows.filter { $0.id == "openai/gpt-oss-120b" }.count == 1)
     }
 
@@ -136,13 +163,10 @@ struct NearAIModelCatalogTests {
         #expect(NearAIModelCatalog.vendorLabel(forID: "mystery/model") == "Mystery")
     }
 
-    @Test func curatedListHasNoRetiredModels() {
-        // Regression for the prune: the retired ids must be gone.
-        let ids = Set(KnownModel.nearAIModels.map(\.id))
-        for retired in ["deepseek-ai/DeepSeek-V3.1", "google/gemini-3-pro",
-                        "Qwen/Qwen3-30B-A3B-Instruct-2507", "zai-org/GLM-5-FP8"] {
-            #expect(!ids.contains(retired), "\(retired) is retired and must not be curated")
-        }
+    /// teemoon ships no near.ai model list at all: a retired model can only
+    /// reach a screen by being in what near.ai served.
+    @Test func noModelListShips() {
+        #expect(KnownModel.braveAnswersModel.id == Provider.braveAnswers.model)
     }
 
     // MARK: - Confidentiality tier / attestation gate
@@ -193,22 +217,36 @@ struct NearAIModelCatalogTests {
     }
 }
 
-// appended by the recency-ordering fix — kept outside the main suite body
-// so the file's existing structure is untouched.
-@Suite("NearAIModelCatalog.merge — ordering")
+@Suite("NearAIModelCatalog ordering")
 struct NearAIModelCatalogOrderingTests {
 
-    /// The live merge must preserve the curated ordering (families by newest,
-    /// recency within family), not re-sort alphabetically — and uncurated live
-    /// ids join at the HEAD of their family (they're the newest releases).
-    @Test func mergePreservesCuratedRecencyOrder() {
-        let rows = NearAIModelCatalog.merge(
-            liveIDs: ["openai/gpt-oss-120b", "z-ai/glm-5.3-preview", "zai-org/GLM-5.1-FP8", "z-ai/glm-5.2"],
-            directHosts: [:])
-        let ids = rows.map(\.id)
-        // Z.ai family leads (its newest curated model tops the curated list),
-        // with the uncurated glm-5.3-preview at the family head.
-        #expect(ids == ["z-ai/glm-5.3-preview", "z-ai/glm-5.2", "zai-org/GLM-5.1-FP8", "openai/gpt-oss-120b"])
+    private func row(_ id: String, _ created: TimeInterval?) -> KnownModel {
+        KnownModel(id: id, displayName: id, vendor: NearAIModelCatalog.vendorLabel(forID: id),
+                   price: "", created: created.map { Date(timeIntervalSince1970: $0) })
+    }
+
+    /// What teemoon can seal comes first, then attested third-party hardware,
+    /// then the plain proxies — newest first inside each tier. The tier order
+    /// is the point: a cheap proxied model must not head a list titled by
+    /// what near.ai runs itself.
+    @Test func tiersLeadAndRecencyOrdersWithinThem() {
+        let rows = NearAIModelCatalog.ordered([
+            row("anthropic/claude-sonnet-5", 1_788_000_000),   // proxied, newest overall
+            row("moonshotai/kimi-k3", 1_787_000_000),          // attested 3p
+            row("z-ai/glm-5.3-flash", 1_780_000_000),          // own fleet, oldest
+            row("Qwen/Qwen3.8-27B", 1_786_000_000),            // own fleet, newer
+        ])
+        #expect(rows.map(\.id) == ["Qwen/Qwen3.8-27B", "z-ai/glm-5.3-flash",
+                                   "moonshotai/kimi-k3", "anthropic/claude-sonnet-5"])
+    }
+
+    /// A row near.ai gives no date keeps the server's own position rather than
+    /// sorting to the top or the bottom by accident.
+    @Test func undatedRowsKeepTheServersOrder() {
+        let rows = NearAIModelCatalog.ordered([
+            row("Qwen/QwenA", nil), row("Qwen/QwenB", nil), row("Qwen/QwenC", 1_780_000_000),
+        ])
+        #expect(rows.map(\.id) == ["Qwen/QwenC", "Qwen/QwenA", "Qwen/QwenB"])
     }
 }
 
@@ -286,10 +324,14 @@ struct NearAIRecencyTests {
         }
     }
 
-    /// And the snapshot can no longer carry one at all: the curated rows are the
-    /// OFFLINE fallback, where teemoon has no date to judge by, so a badge there
-    /// would be a claim it cannot support.
-    @Test func theCuratedSnapshotNoLongerBadgesAnything() {
-        #expect(KnownModel.nearAIModels.allSatisfy { !$0.isNew })
+    /// The rows carry near.ai's own `created`, so a saved list can re-age its
+    /// badges instead of freezing them.
+    @Test func rowsCarryTheirCreationDate() async {
+        let json = """
+        {"data":[{"id":"z-ai/glm-5.3-flash","owned_by":"nearai","created":1788000000}]}
+        """
+        let list = try! JSONDecoder().decode(NearAIModelCatalog.ModelsResponse.self, from: Data(json.utf8))
+        let rows = await NearAIModelCatalog.buildModels(from: list.data)
+        #expect(rows.first?.created == Date(timeIntervalSince1970: 1788000000))
     }
 }

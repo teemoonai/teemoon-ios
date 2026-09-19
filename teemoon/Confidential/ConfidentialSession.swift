@@ -51,6 +51,10 @@ final class ConfidentialSession {
 
     /// Set to `true` when the attestation fetch fails, so the UI can stop showing a spinner.
     var attestationFetchFailed = false
+    /// The server answered; near.ai's directory just lists no confidential
+    /// host for this model. Distinct from unreachable, and retried.
+    var directHostMissing = false
+    var attestationAttemptedAt: Date?
 
     /// `true` when the active model is classified attestable but near.ai serves
     /// no confidential endpoint for it (absent from the `/endpoints` directory —
@@ -135,6 +139,14 @@ final class ConfidentialSession {
 
     @ObservationIgnored
     var provenanceTask: Task<Void, Never>?
+    /// False from the moment a provenance pass starts until it has written
+    /// its result (or given up as inconclusive). While false with a task
+    /// alive, a session that is otherwise sealed reads `.verifying`, not
+    /// `.ok` — so the header never goes green and then orange.
+    var provenanceSettled = true
+    /// Identifies the pass that owns `provenanceSettled`: a cancelled pass
+    /// finishing late must not mark a newer one settled.
+    var provenanceRun = UUID()
 
     @ObservationIgnored
     var dcapTask: Task<Void, Never>?
@@ -196,10 +208,65 @@ final class ConfidentialSession {
         refreshAttestationIfStale()
         if providers.activeProvider?.capabilities.contains(.attestation) == true {
             _ = await e2eeKey(waitingUpTo: .seconds(15))
+            // A verdict still in flight reads as neutral in `attestationState`,
+            // so a send in that window went out on an unsettled gate — on the
+            // phone, every other message to a host whose TLS check fails
+            // (2026-09-09). Settle first; the caller re-reads `sendPolicy`.
+            await settleVerifiers(waitingUpTo: Self.verifierSettleTimeout)
         }
         let context = currentTEEContext()
         beginRequest(expectingE2EE: context?.e2eePeer != nil)
         return context
+    }
+
+    /// How long `prepareTurn` holds a send for the DCAP, GPU and TLS verdicts
+    /// of a refresh that is still running. Tests shorten it.
+    static var verifierSettleTimeout: Duration = .seconds(15)
+
+    /// The first record has not arrived: the only state in which a silent
+    /// verifier is news. Once a record is in, `.verifying` is the provenance
+    /// sweep, and a slow sweep is not an unreachable verifier.
+    var awaitsFirstRecord: Bool { attestationState == .verifying && attestation == nil }
+
+    /// What it means when near.ai publishes no direct host for the model.
+    ///
+    /// `.ordinary` is honest only for a tier that claims no encryption. An
+    /// own-fleet model with no host is unexplained — cold directory, failed
+    /// fetch, or a gap in the published map — and all three are "couldn't
+    /// check", which must not read as "nothing to encrypt".
+    enum MissingHostOutcome { case degraded, ordinary }
+
+    nonisolated static func outcome(whenNoDirectHostFor model: String) -> MissingHostOutcome {
+        NearAIModelCatalog.confidentiality(forID: model) == .teeOwn ? .degraded : .ordinary
+    }
+
+    /// A hard-block-capable verdict has been asked for and has not answered:
+    /// DCAP, GPU (NRAS) or TLS. Provenance is not counted — its failures are
+    /// soft, and it is neutral while in flight by design.
+    var verdictsPending: Bool {
+        // Only an attested send has verdicts to wait for; a handle left by a
+        // previous session must never count for a plain-TLS provider.
+        guard providers.activeProvider?.capabilities.contains(.attestation) == true else { return false }
+        return (dcapTask != nil && dcapVerification == nil)
+            || (nrasTask != nil && gpuAttestation == nil)
+            || (tlsTask != nil && tlsAttestation == nil)
+    }
+
+    /// Waits until no hard-block-capable verdict is pending, or `timeout`.
+    func settleVerifiers(waitingUpTo timeout: Duration) async {
+        let deadline = ContinuousClock.now + timeout
+        while verdictsPending, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// Nothing was sent: a refusal before the wire. Must not read as an
+    /// unsealed request — `beginRequest(expectingE2EE: false)` followed by
+    /// `finishTurn` did, and once the key arrived `degradeIsHardFailure` called
+    /// it plaintext-went-out, a hard block only a provider switch cleared.
+    func abandonTurn(reason: String?) {
+        lastRequestUsedE2EE = nil
+        lastE2EEFailReason = reason
     }
 
     /// Close the turn. Outcome and (optional) signature check are
@@ -315,6 +382,9 @@ final class ConfidentialSession {
         /// state for the finding-4.1 fail-closed test: `sendPolicy == .allow`
         /// with `currentTEEContext()?.e2eePeer == nil`.
         var suppressLiveAttestation: Bool = false
+        /// When true, a TLS verifier handle that never answers is planted on
+        /// the session's first refresh — the state a provider switch must clear.
+        var plantsPendingVerifier: Bool = false
     }
 
     static var seededState: SeededAttestation? {
@@ -332,6 +402,11 @@ final class ConfidentialSession {
         // window the fail-closed gate covers (gate allows, peer nil → refusal).
         case "e2eeUnavailable":
             return SeededAttestation(state: .ok, hardFailure: false, suppressLiveAttestation: true)
+        // Verifying, with a verifier that never answers: the switch-then-send
+        // product test starts here.
+        case "verifyingPending":
+            return SeededAttestation(state: .verifying, hardFailure: false,
+                                     suppressLiveAttestation: true, plantsPendingVerifier: true)
         default:            return nil
         }
     }
@@ -344,6 +419,7 @@ final class ConfidentialSession {
 
     /// Maximum age before the Ed25519 key is considered stale and refetched.
     static let attestationMaxAge: TimeInterval = 600 // 10 minutes
+    static let attestationRetryInterval: TimeInterval = 60
 
     /// True inside an Xcode Preview render — used to keep previews offline.
     nonisolated static var isRunningInPreview: Bool {

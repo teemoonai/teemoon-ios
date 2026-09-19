@@ -261,7 +261,7 @@ struct WhereChip: View {
             // Answers' "fast built-in search, single turn q&a" is a capability
             // warning rather than a guarantee, and nothing above repeats it.
             if provider.capabilities.contains(.endToEndEncryption)
-                || provider.endpoint.contains("near.ai") {
+                || provider.isNearAI {
                 return WhereProviderPresentation.canonicalName(for: provider)
             }
             return WhereProviderPresentation.placeCaption(for: provider)

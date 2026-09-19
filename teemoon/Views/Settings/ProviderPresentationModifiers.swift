@@ -25,9 +25,10 @@ struct ProviderSheets: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: $showModelBrowser) {
-                ModelBrowserView(selectedModel: $selectedModel, models: models,
-                                 onSelect: onSelectModel,
-                                 showsConfidentialityTags: showsConfidentialityTags)
+                ModelBrowserView(selectedModel: $selectedModel,
+                                 door: ModelBrowserDoor(models: models,
+                                                        showsConfidentialityTags: showsConfidentialityTags),
+                                 onSelect: onSelectModel)
                 #if os(macOS)
                 .frame(minWidth: 400, minHeight: 450)
                 #endif

@@ -291,10 +291,12 @@ struct EnclaveGrouping {
     static func unverifiedEntry(_ f: ProvenanceService.Failure) -> ImageEntry {
         let why = f.reason.failureReason ?? "could not be traced to a published near.ai build"
         var links = [RunLink(title: "sigstore", url: "https://search.sigstore.dev/?hash=\(f.ref.digest)")]
-        if let repo = ProvenanceService.githubRepo(forImage: f.ref.image) {
+        // One link per repo the app asked, so the reader can see the same
+        // answers it saw.
+        for (i, repo) in ProvenanceService.githubRepos(forImage: f.ref.image).enumerated() {
             links.insert(RunLink(
-                title: "attestation api",
-                url: "https://api.github.com/repos/\(repo)/attestations/sha256:\(f.ref.digest)"), at: 0)
+                title: "attestation api · \(repo)",
+                url: "https://api.github.com/repos/\(repo)/attestations/sha256:\(f.ref.digest)"), at: i)
         }
         return ImageEntry(
             id: "unv·\(f.ref.image)·\(f.ref.digest.prefix(8))", name: f.ref.image, kind: .unverified,

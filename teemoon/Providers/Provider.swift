@@ -12,7 +12,11 @@ struct Provider: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
     var endpoint: String
-    var model: String
+    var model: String {
+        // `modelCapabilities` describes THIS model. Every door that moves the
+        // model must not carry the previous one's bits into the tools gate.
+        didSet { if model != oldValue { modelCapabilities = nil } }
+    }
     /// nil → "Authorization: Bearer <key>"; set → use as-is, e.g. "X-Subscription-Token"
     var authHeaderName: String?
 
@@ -41,6 +45,9 @@ struct Provider: Codable, Identifiable, Equatable {
     /// optional.
     static func presetMatchKey(_ endpoint: String) -> String {
         var s = endpoint.trimmingCharacters(in: .whitespaces).lowercased()
+        // Trailing slashes come off FIRST: ".../chat/completions/" has to lose
+        // the suffix too, or one spelling of a preset stops matching itself.
+        while s.hasSuffix("/") { s = String(s.dropLast()) }
         if s.hasSuffix("/chat/completions") {
             s = String(s.dropLast("/chat/completions".count))
         }
@@ -275,8 +282,7 @@ struct Provider: Codable, Identifiable, Equatable {
         // own stack runs TDX with per-instance keys — the limitation is the
         // routing, not the hardware.) Claiming either capability here would
         // still be an overclaim.
-        if endpoint.contains("near.ai"),
-           NearAIModelCatalog.confidentiality(forID: model) == .teeOwn {
+        if isNearAI, NearAIModelCatalog.confidentiality(forID: model) == .teeOwn {
             caps.insert([.attestation, .endToEndEncryption])
         }
         if hasBuiltInGrounding { caps.insert(.builtInGrounding) }
@@ -352,7 +358,7 @@ struct Provider: Codable, Identifiable, Equatable {
 
 // MARK: - Known models (struct; data lives in Provider+Presets.swift)
 
-struct KnownModel: Identifiable, Equatable, Hashable {
+struct KnownModel: Identifiable, Equatable, Hashable, Codable {
     let id: String          // exact API identifier
     let displayName: String
     let vendor: String      // used for section grouping
@@ -372,6 +378,11 @@ struct KnownModel: Identifiable, Equatable, Hashable {
     var contextWindow: String = ""
     /// Show a "New" badge in the model browser
     var isNew: Bool = false
+    /// When the catalogue says the model appeared. Kept so a saved list can
+    /// re-age its own "new" badges and sort by recency without another fetch;
+    /// nil where the source publishes no date (NVIDIA stamps its whole list
+    /// with one).
+    var created: Date? = nil
     /// Base URL for NEAR AI direct completions mode.
     /// When set, inference connects straight to the model's TEE, bypassing the gateway.
     /// nil means the model is only accessible via the gateway (e.g. third-party models).
@@ -411,6 +422,44 @@ struct KnownModel: Identifiable, Equatable, Hashable {
     var githubURL: String? = nil
     /// The vendor's own model page.
     var modelPageURL: String? = nil
+    /// What the catalogue charges besides the two text rates: cache reads,
+    /// image or audio tokens, a per-search fee, a long-context tier. Amounts
+    /// are numbers, formatted where they are drawn.
+    var extraCosts: [ExtraCost] = []
+    /// The model this id redirects to, when the catalogue says it is an alias
+    /// ("~openai/gpt-sol-latest" → "openai/gpt-5.6-sol"). Questions about how
+    /// it is served have to be asked of the target: an alias has no providers
+    /// of its own.
+    var aliasOf: String? = nil
+    /// Where the model's training data ends, as the provider states it.
+    var knowledgeCutoff: String? = nil
+    /// Reasoning effort names the model accepts ("high", "low"). Empty when it
+    /// does not reason, or the catalogue does not say.
+    var reasoningEfforts: [String] = []
+
+    /// One priced dimension besides prompt and completion. Exactly one of the
+    /// two rates is set: per-million for tokens, per-call for a search or a
+    /// request.
+    struct ExtraCost: Codable, Equatable, Hashable {
+        let label: String
+        var perMillion: Double? = nil
+        /// Set when the cost has an output rate of its own (a long-context
+        /// tier); printed like the headline, never summed with the input.
+        var perMillionOutput: Double? = nil
+        var perCall: Double? = nil
+
+        /// "$0.25 / 1M tokens", "$5.00/$22.50 / 1M tokens" or "$0.01 / search".
+        /// Sub-cent rates keep the digits that make them different from zero.
+        var amount: String {
+            if let perMillion, let perMillionOutput {
+                return ModelCatalog.rateLabel(perMillion) + "/" + ModelCatalog.rateLabel(perMillionOutput) + " / 1M tokens"
+            }
+            if let perMillion { return ModelCatalog.rateLabel(perMillion) + " / 1M tokens" }
+            guard let perCall else { return "" }
+            return ModelCatalog.rateLabel(perCall)
+        }
+    }
+
     /// Set when the provider has announced a retirement date.
     ///
     /// FIREWORKS ONLY, as of today. near.ai's `/v1/models` carries no such
@@ -498,6 +547,16 @@ struct KnownModel: Identifiable, Equatable, Hashable {
     /// tier. A view that picked between them on `vendor == "on this device"`
     /// was coupling two layers with a magic string.
     var confidentialityNote: String? = nil
+    /// The provider serves this model at no per-token charge — a free tier
+    /// (NVIDIA's hosted catalogue) or a `:free` OpenRouter variant. `price` is
+    /// empty for these, and this flag is what lets a row say "free" instead of
+    /// showing the same blank a model with an UNPUBLISHED price shows. Set by
+    /// the source that knows; never inferred from an empty price.
+    var isFree: Bool = false
+    /// true when the weights are published (the catalog names a Hugging Face
+    /// repo, or the host serves only open models), false when the model is
+    /// closed, nil when the catalog does not say.
+    var openWeights: Bool? = nil
 
     /// Identity is the id — it is the exact API identifier and already unique
     /// within a catalogue. Synthesised conformance would drag in every field
@@ -513,7 +572,7 @@ struct KnownModel: Identifiable, Equatable, Hashable {
     /// only the parts that exist — a local model has no price, and rendering it
     /// as "\(price) · \(context)" put a leading "· " on every free model.
     var metaLabel: String {
-        [price, contextWindow.lowercased()]
+        [price.isEmpty && isFree ? "free" : price, contextWindow.lowercased()]
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
     }

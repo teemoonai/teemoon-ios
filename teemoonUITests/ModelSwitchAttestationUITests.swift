@@ -20,7 +20,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
     func testSwitchingModelNeverShowsOldAttestation() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--uitesting"]
-        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "z-ai/glm-5.2"
+        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "z-ai/glm-5.3-flash"
         app.launch()
 
         // 1. Open the attestation sheet via the title chip and wait until the
@@ -31,7 +31,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         let sheetTitle = app.staticTexts["who can read this?"]
         XCTAssertTrue(sheetTitle.waitForExistence(timeout: 5), "attestation sheet did not open")
         let heroMentions52 = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "glm-5.2")).firstMatch
+            NSPredicate(format: "label CONTAINS[c] %@", "glm-5.3")).firstMatch
         XCTAssertTrue(heroMentions52.waitForExistence(timeout: 25),
                       "attestation for GLM-5.2 never loaded (network?)")
         takeShot(app, name: "1-sheet-52-loaded")
@@ -39,7 +39,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         XCTAssertTrue(closeSheet.waitForExistence(timeout: 5), "close button missing")
         closeSheet.tap()
 
-        // 2. Switch the model to GLM-5.1 through the real Settings flow.
+        // 2. Switch the model to DeepSeek V4 Flash through the real Settings flow.
         let gear = app.buttons["chat.settings"].firstMatch
         XCTAssertTrue(gear.waitForExistence(timeout: 5), "settings gear missing")
         gear.tap()
@@ -49,8 +49,8 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         XCTAssertTrue(providersRow.waitForExistence(timeout: 5), "settings: providers row missing")
         providersRow.tap()
         // Rows are labeled by MODEL display name; editing is a leading swipe.
-        let nearRow = app.staticTexts["near.ai GLM 5.2"].firstMatch
-        XCTAssertTrue(nearRow.waitForExistence(timeout: 5), "providers: near.ai GLM 5.2 row missing")
+        let nearRow = app.staticTexts["near.ai GLM 5.3 Flash"].firstMatch
+        XCTAssertTrue(nearRow.waitForExistence(timeout: 5), "providers: near.ai GLM 5.3 Flash row missing")
         nearRow.swipeRight()
         let editButton = app.buttons["edit"].firstMatch
         XCTAssertTrue(editButton.waitForExistence(timeout: 5), "edit swipe action missing")
@@ -61,7 +61,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         // Clear the field, then type the new id.
         let current = (modelField.value as? String) ?? ""
         modelField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 5))
-        modelField.typeText("zai-org/GLM-5.1-FP8")
+        modelField.typeText("deepseek-ai/DeepSeek-V4-Flash")
         takeShot(app, name: "2-model-field-51")
         let save = app.buttons["save"].firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 5), "save button missing")
@@ -79,7 +79,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         if app.buttons["done"].firstMatch.exists { app.buttons["done"].firstMatch.tap() }
         app.swipeDown(velocity: .fast)   // dismiss settings sheet if still up
 
-        // 3. Reopen the attestation sheet: it must speak about GLM-5.1 and
+        // 3. Reopen the attestation sheet: it must speak about DeepSeek V4 Flash and
         //    must NEVER mention GLM-5.2 again — poll for 12 s, because the
         //    reported bug shows the old model immediately or races back in.
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "title chip missing after switch")
@@ -87,9 +87,9 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         XCTAssertTrue(sheetTitle.waitForExistence(timeout: 5), "sheet did not reopen")
         takeShot(app, name: "3-sheet-after-switch")
         let mentions52 = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "glm-5.2"))
+            NSPredicate(format: "label CONTAINS[c] %@", "glm-5.3"))
         let mentions51 = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "glm-5.1"))
+            NSPredicate(format: "label CONTAINS[c] %@", "deepseek"))
         let deadline = Date().addingTimeInterval(12)
         var sawOldModel = false
         while Date() < deadline {
@@ -101,9 +101,9 @@ final class ModelSwitchAttestationUITests: XCTestCase {
             _ = mentions51.firstMatch.waitForExistence(timeout: 1)
         }
         XCTAssertFalse(sawOldModel,
-            "STALE ATTESTATION: sheet mentioned GLM-5.2 after switching to GLM-5.1")
+            "STALE ATTESTATION: sheet mentioned GLM-5.3 after switching to DeepSeek V4 Flash")
         XCTAssertTrue(mentions51.firstMatch.exists,
-            "sheet never started speaking about GLM-5.1")
+            "sheet never started speaking about DeepSeek V4 Flash")
         takeShot(app, name: "4-final")
     }
 
@@ -112,7 +112,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
     func testEverydayLadderOpensAndNamesTheModel() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--uitesting"]
-        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "z-ai/glm-5.2"
+        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "z-ai/glm-5.3-flash"
         app.launch()
 
         let chip = ProductE2E.titleBlock(app)
@@ -121,7 +121,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["who can read this?"].waitForExistence(timeout: 5),
                       "everyday sheet did not open")
         let hero = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "glm-5.2")).firstMatch
+            NSPredicate(format: "label CONTAINS[c] %@", "glm-5.3")).firstMatch
         XCTAssertTrue(hero.waitForExistence(timeout: 40),
                       "everyday hero never named GLM-5.2 (network?)")
         takeShot(app, name: "everyday-names-52")
@@ -135,7 +135,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--uitesting"]
         app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] =
-            ProcessInfo.processInfo.environment["TIER_SEED_MODEL"] ?? "zai-org/GLM-5.1-FP8"
+            ProcessInfo.processInfo.environment["TIER_SEED_MODEL"] ?? "z-ai/glm-5.3-flash"
         app.launch()
 
         let chip = ProductE2E.titleBlock(app)
@@ -309,7 +309,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
     func testCaptureGLM51EngineRow() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--uitesting"]
-        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "zai-org/GLM-5.1-FP8"
+        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "z-ai/glm-5.3-flash"
         app.launch()
         let chip = ProductE2E.titleBlock(app)
         XCTAssertTrue(chip.waitForExistence(timeout: 15), "title chip not found")

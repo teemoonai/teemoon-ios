@@ -21,6 +21,9 @@ struct WhereGetPolicy {
     var home: [UUID: HomeInfo]
     var credentialFor: (Provider) -> String
     var credentialForEndpoint: (String) -> String
+    /// How many models this server last answered with. Injected so the policy
+    /// stays testable and there is one number: the saved live list's length.
+    var catalogCount: (Provider) -> Int? = { _ in nil }
     var catalog: [LocalModel] = LocalModelCatalog.all
 
     var filteredProviders: [Provider] {
@@ -56,6 +59,14 @@ struct WhereGetPolicy {
         filteredProviders.filter(canBrowse)
     }
 
+    /// The trailing text on a `get` row: "add key" until there is one, then
+    /// the model count. Nothing at all when the server has not answered yet —
+    /// a made-up number is worse than no number.
+    func presetTrailingText(for provider: Provider, keyed: Bool) -> String? {
+        guard keyed else { return "add key" }
+        return catalogCount(provider).map(String.init)
+    }
+
     func canDeleteFromServer(_ provider: Provider) -> Bool {
         WhereLocality.of(provider) == .home && home[provider.id]?.kind == .ollama
     }
@@ -73,9 +84,11 @@ struct WhereGetPolicy {
         guard WhereLocality.of(provider) != .home else { return false }
         guard !provider.isFixedAnswerService else { return false }
         guard hasKey(provider) else { return false }
-        return provider.supportsModelBrowsing
-            || provider.prefersSearchFirstBrowse
-            || !WhereProviderPresentation.browseModels(for: provider).isEmpty
+        // A known catalogue is browsable; a custom endpoint only when its
+        // setup says so, since its `/models` may not exist and a 401 there
+        // reads as a bad key.
+        let source = WhereProviderPresentation.liveCatalogSource(for: provider)
+        return provider.supportsModelBrowsing || (source != nil && source != .generic)
     }
 
     var addProviderLabel: String {
@@ -111,8 +124,8 @@ struct WhereGetPolicy {
         if let count = home[provider.id]?.modelCount {
             return count == 1 ? "1 model on this server" : "\(count) models on this server"
         }
-        if provider.prefersSearchFirstBrowse {
-            return "search-first · large catalog"
+        if let count = catalogCount(provider) {
+            return count == 1 ? "1 model on this setup" : "\(count) models on this setup"
         }
         return "equip another model on this setup"
     }
@@ -232,7 +245,7 @@ struct WhereGetPolicy {
 
     /// Orange caption: a near.ai model that is proxied, not enclave.
     func warnsUnencryptedNear(_ provider: Provider) -> Bool {
-        provider.endpoint.contains("near.ai")
+        provider.isNearAI
             && !provider.capabilities.contains(.endToEndEncryption)
     }
 }

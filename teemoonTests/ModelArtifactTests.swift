@@ -142,6 +142,53 @@ struct ModelArtifactTests {
         #expect(glm?.servedName == "zai-org/GLM-5.1-FP8")
     }
 
+    /// near.ai's GLM-5.3 flash compose (prod/GLM-5.3-Flash-SGL-TP4.yaml at
+    /// 01356c5d) points sglang at the local Hugging Face cache, so the last
+    /// path component is the snapshot hash — which the trust ladder then
+    /// printed as the model's name: "encrypted to 84c6a6aa9497…1033".
+    @Test func hfCachePathNamesTheRepoNotTheSnapshot() {
+        let yaml = """
+        command: >
+          python3 -m sglang.launch_server
+          --model-path /root/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/84c6a6aa9497188e15a635ba793b0f95a79b1033
+          --revision 84c6a6aa9497188e15a635ba793b0f95a79b1033
+          --served-model-name z-ai/glm-5.3-flash
+        """
+        let a = ModelArtifact.parse(fromComposeYAML: yaml)
+        #expect(a?.modelPath == "zai-org/GLM-5.3-Flash")
+        #expect(a?.baseModelName == "GLM-5.3-Flash")
+        #expect(a?.revision == "84c6a6aa9497188e15a635ba793b0f95a79b1033")
+        #expect(a?.servedName == "z-ai/glm-5.3-flash")
+        #expect(a?.quantDrift == false)
+        // The same shape through the multi-server path, and a snapshot with no
+        // explicit --revision becomes the revision.
+        let bare = ModelArtifact.parseAll(fromComposeYAML: """
+        command: >
+          vllm serve /models/hub/models--org--Some-Model-FP8/snapshots/abc123
+          --served-model-name org/Some-Model
+        """)
+        #expect(bare.first?.modelPath == "org/Some-Model-FP8")
+        #expect(bare.first?.revision == "abc123")
+        #expect(bare.first?.quant == "FP8")
+    }
+
+    /// The real document, end to end: near.ai's GLM-5.3 flash compose (1,228
+    /// lines, a combined node) scoped to the requested model the way the
+    /// verifier does, then parsed. The hand-written excerpt above passed while
+    /// the phone still showed the hash (2026-09-09).
+    @Test func realGLM53FlashComposeNamesTheModel() throws {
+        // Both composes the host's nodes were running on 2026-09-09: the TP4
+        // file (commit 01356c5d) and the Canary file (aea5fbfd).
+        for name in ["glm53flash_compose.yaml", "glm53flash_canary_compose.yaml"] {
+            let raw = String(decoding: try TestFixture.data(name), as: UTF8.self)
+            let scoped = PlaintextExposure.scoped(raw, toModel: "z-ai/glm-5.3-flash")
+            let all = ModelArtifact.parseAll(fromComposeYAML: scoped)
+            let picked = ModelArtifact.parse(fromComposeYAML: scoped, servingModel: "z-ai/glm-5.3-flash")
+            #expect(picked?.baseModelName == "GLM-5.3-Flash",
+                    "\(name): got \(picked?.modelPath ?? "nil") served=\(picked?.servedName ?? "nil") among \(all.map { "\($0.modelPath)|\($0.servedName ?? "-")" })")
+        }
+    }
+
     @Test func detectsPositionalVllmServeForm() {
         // Newer vLLM: `vllm serve <repo>` positional (gemma-4 uses this), no
         // --model-path. The block-scalar / multi-line shape from the real compose.

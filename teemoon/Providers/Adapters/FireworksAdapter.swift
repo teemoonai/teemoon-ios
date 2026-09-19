@@ -123,6 +123,7 @@ enum FireworksAdapter {
                 price: price(forID: r.name),
                 contextWindow: ModelCatalog.contextLabel(r.contextLength),
                 isNew: ModelCatalog.isNew(created: ModelCatalog.parseISO8601(r.createTime), now: now),
+                created: ModelCatalog.parseISO8601(r.createTime),
                 capabilities: caps,
                 summary: r.description?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank,
                 huggingFaceURL: r.huggingFaceUrl?.nilIfBlank,
@@ -133,7 +134,8 @@ enum FireworksAdapter {
                     + ModelCatalog.displayName(forID: r.name),
                 // Parsed HERE, at the wire, not re-parsed by every reader of the
                 // model. Fireworks is the only provider that publishes this.
-                deprecationDate: KnownModel.deprecationDate(fromProvider: r.deprecationDate))
+                deprecationDate: KnownModel.deprecationDate(fromProvider: r.deprecationDate),
+                openWeights: true)
         }
         return sortByVendorThenRecency(models, records: records)
     }
@@ -147,20 +149,12 @@ enum FireworksAdapter {
         let key = ModelCatalog.slug(id)
         if let bySlug = KnownModel.fireworksPrices.first(
             where: { ModelCatalog.slug($0.key) == key })?.value { return bySlug }
-        // A DATED SNAPSHOT is the same model at the same tier.
-        //
-        // Fireworks republishes a family under a release date —
-        // `deepseek-v4-flash-0731` — and that id matches neither the table's key
-        // nor its slug, because `ModelCatalog.slug` peels precision and quant
-        // markers and nothing else. The row then quoted no price at all, which
-        // is what surfaced in the Where chip.
-        //
-        // Verified rather than assumed before generalising: Fireworks lists
-        // deepseek-v4-flash-0731 at $0.14/$0.28, the same as the undated entry
-        // already in the table.
-        //
-        // Exact match is tried FIRST, above, so if a future snapshot is ever
-        // priced differently, adding its full id to the table overrides this.
+        // A DATED SNAPSHOT (`glm-5p2-0731`) inherits its undated family's rate,
+        // because `ModelCatalog.slug` peels precision and quant markers and
+        // nothing else. This is a fallback, not a substitute for a table entry:
+        // it needs the UNDATED key to exist, and the table keys some families by
+        // their dated id only. Exact match is tried FIRST, above, so a full id
+        // in the table always wins over this.
         let undated = droppingDateSuffix(key)
         guard undated != key else { return "" }
         return KnownModel.fireworksPrices.first {

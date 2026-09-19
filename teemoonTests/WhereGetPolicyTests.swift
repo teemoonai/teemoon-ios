@@ -122,14 +122,33 @@ struct WhereGetPolicyTests {
         #expect(policy(filter: nil, providers: empty).addProviderGlyph == "plus")
     }
 
-    @Test func openRouterPrefersSearchFirstBrowse() {
+    /// Every cloud catalogue opens the same browser now, whatever its size —
+    /// OpenRouter's 400-odd models are a search field, not a second screen.
+    @Test @MainActor func everyCloudCatalogueIsBrowsable() {
         let router = Provider(
             name: "openrouter",
             endpoint: "https://openrouter.ai/api/v1/chat/completions",
             model: "x"
         )
-        #expect(router.prefersSearchFirstBrowse)
-        #expect(!Provider.grok.prefersSearchFirstBrowse)
+        #expect(WhereProviderPresentation.liveCatalogSource(for: router) == .openRouter)
+        #expect(WhereProviderPresentation.liveCatalogSource(for: .grok) == .xAI)
+    }
+
+    /// The trailing text on a `get` row: nothing invented, ever. "add key"
+    /// until there is one, then the count this server actually answered with.
+    @Test func presetTrailingTextSaysOnlyWhatIsKnown() {
+        let counted = WhereGetPolicy(
+            filter: .cloud, providers: [], networkSatisfied: true, home: [:],
+            credentialFor: { _ in "" }, credentialForEndpoint: { _ in "" },
+            catalogCount: { _ in 412 })
+        #expect(counted.presetTrailingText(for: .openRouter, keyed: false) == "add key")
+        #expect(counted.presetTrailingText(for: .openRouter, keyed: true) == "412")
+
+        let unknown = WhereGetPolicy(
+            filter: .cloud, providers: [], networkSatisfied: true, home: [:],
+            credentialFor: { _ in "" }, credentialForEndpoint: { _ in "" },
+            catalogCount: { _ in nil })
+        #expect(unknown.presetTrailingText(for: .openRouter, keyed: true) == nil)
     }
 
     @Test func browseNamePrefersServerKindOverNickname() {
@@ -319,5 +338,15 @@ struct WhereGetPolicyTests {
         )
         #expect(policy(providers: [proxied]).warnsUnencryptedNear(proxied))
         #expect(!policy(providers: [Provider.grok]).warnsUnencryptedNear(Provider.grok))
+    }
+
+    /// A key does not make a custom endpoint browsable: its `/models` may not
+    /// exist, and a 401 there would read as a wrong key. Known catalogues are.
+    @Test func aCustomEndpointIsNotBrowsableJustBecauseItHasAKey() {
+        let custom = Provider(name: "mine", endpoint: "https://llm.example.com/v1/chat/completions", model: "m")
+        let keyed = policy(providers: [custom], byEndpoint: [custom.endpoint: "sk"])
+        #expect(!keyed.canBrowse(custom))
+        let openRouter = Provider.openRouter
+        #expect(policy(providers: [openRouter], byEndpoint: [openRouter.endpoint: "sk"]).canBrowse(openRouter))
     }
 }

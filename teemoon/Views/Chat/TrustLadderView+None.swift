@@ -209,59 +209,56 @@ extension TrustLadderView {
                 }
             }
 
-            // Constructive, low-key path forward: opens the model browser
-            // filtered to attestable (confidential) models; picking one switches
-            // the session onto it and re-verifies. Hidden when no near.ai
-            // provider is configured — there'd be nothing actionable to offer.
-            if nearAIProvider != nil {
-                Button { showEncryptedModelPicker = true } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.shield.fill")
-                        Text("choose an end-to-end encrypted model")
-                        Spacer(minLength: 0)
-                        Image(systemName: "arrow.right")
+            // The way out, named honestly: whose models, whose key, and that
+            // the chat leaves this provider. One gate — the credential lookup
+            // the send gate uses — so a keyless near.ai setup (legacy, or a
+            // lost key) reads as "add a key", never as a picker that dies at send.
+            let cta = EncryptedModelCTA.resolve(nearAI: nearAIProvider, hasKey: nearAIHasKey)
+            Button {
+                if cta.opensPicker { showEncryptedModelPicker = true } else { showNearAIKeyForm = true }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: cta.opensPicker ? "checkmark.shield.fill" : "shield")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(cta.title)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(cta.opensPicker ? AnyShapeStyle(teeVerified) : AnyShapeStyle(.primary))
+                        Text(cta.detail)
+                            .font(.footnote)
+                            .foregroundStyle(cta.opensPicker ? AnyShapeStyle(teeVerified.opacity(0.8)) : AnyShapeStyle(.secondary))
                     }
-                    .font(.callout.weight(.medium))
-                    .padding(14)
-                    .frame(maxWidth: .infinity)
-                    .background(teeVerifiedSoft, in: RoundedRectangle(cornerRadius: 12))
-                    .foregroundStyle(teeVerified)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.right")
                 }
-                .buttonStyle(.plain)
-                .sheet(isPresented: $showEncryptedModelPicker) {
+                .padding(14)
+                .frame(maxWidth: .infinity)
+                .background(cta.opensPicker ? AnyShapeStyle(teeVerifiedSoft) : AnyShapeStyle(Color(.tertiarySystemFill)),
+                            in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(cta.opensPicker ? AnyShapeStyle(teeVerified) : AnyShapeStyle(.secondary))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(cta.opensPicker ? "trust.switchToNearAI" : "trust.addNearAIKey")
+            .sheet(isPresented: $showEncryptedModelPicker) {
+                if let p = nearAIProvider {
                     ModelBrowserView(selectedModel: $pickedEncryptedModel,
-                                     models: encryptedModelChoices,
-                                     onSelect: selectEncryptedModel,
-                                     showsConfidentialityTags: true)
+                                     door: .encryptedPicker(for: p, apiKey: providerStore.browseCredential(for: p)),
+                                     onSelect: selectEncryptedModel)
+                }
+            }
+            .sheet(isPresented: $showNearAIKeyForm) {
+                if case .addNearAIKey(let existing) = cta, let existing {
+                    AddEditProviderView(mode: .edit(existing))
+                } else {
+                    AddEditProviderView(mode: .add, initialPreset: .nearAI)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The near.ai provider the "choose an encrypted model" pick applies to:
-    /// the active one if it's near.ai, else the first configured near.ai
-    /// provider. nil when none exists (CTA hidden — nothing actionable).
-    var nearAIProvider: Provider? {
-        if let p = providerStore.activeProvider, p.endpoint.contains("near.ai") { return p }
-        return providerStore.providers.first { $0.endpoint.contains("near.ai") }
-    }
-
-    /// E2EE-capable choices only. `isAttestable` is NOT sufficient here:
-    /// near.ai's `attested 3p` tier (Chutes hardware — deepseek-v3.2, kimi,
-    /// minimax…) passes it, but near.ai exposes no confidential endpoint for
-    /// them — no E2EE path via near.ai — so offering them under "choose an end-to-end encrypted
-    /// model" would be the exact overclaim this screen exists to avoid. The
-    /// hard requirement is a direct TEE host (`directBaseURL`) — that host is
-    /// where the Ed25519 key binding comes from, so it is precisely "E2EE
-    /// works." Anonymous-proxy and attested-3p tiers can never satisfy it.
-    var encryptedModelChoices: [KnownModel] {
-        KnownModel.nearAIModels.filter {
-            $0.directBaseURL != nil
-                && NearAIModelCatalog.isAttestable($0.id)
-                && !NearAIModelCatalog.isNonChat($0.id)
-        }
-    }
+    /// nil hides the CTA — nothing actionable.
+    var nearAIProvider: Provider? { providerStore.nearAIProvider }
 
     /// Applies the pick: point the near.ai provider at the chosen model,
     /// make it active, and re-verify — the sheet re-renders into the live

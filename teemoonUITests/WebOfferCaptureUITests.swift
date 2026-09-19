@@ -37,7 +37,7 @@ final class WebOfferCaptureUITests: XCTestCase {
     /// app, because they name the one they want. If the dev build is not
     /// installed the launch fails loudly, which is the correct outcome — far
     /// better than a silent skip that looks like a pass.
-    private static let devBundleID = "ai.teemoon.dev"
+    private static let devBundleID = "ai.teemoon.app.dev"  // the dev app; see deploy-phone
     /// A THIRD install, `ai.teemoon.fresh`, kept permanently empty so first run
     /// can be looked at without destroying the dev app's state — its 2.5 GB
     /// gemma download, four pasted API keys, and dev conversations all live in

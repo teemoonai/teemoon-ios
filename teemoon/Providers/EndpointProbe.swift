@@ -149,6 +149,22 @@ enum EndpointProbe {
             kind = .unknown
         }
 
+        // A host whose /models answers 200 to any bearer (OpenRouter) cannot
+        // vouch for the key by listing; when it has a real key endpoint, ask
+        // that first and let a rejection stand.
+        if kind == .unknown, let validation = request.keyValidationEndpoint {
+            let key = request.apiKey.trimmingCharacters(in: .whitespaces)
+            if !key.isEmpty {
+                switch await catalog.validateKey(key, validation) {
+                case .unauthorized:
+                    return interpretFailure(.unauthorized, kind: kind, loaded: [], request: request)
+                case .paymentRequired:
+                    return interpretFailure(.paymentRequired, kind: kind, loaded: [], request: request)
+                case .success, .rateLimited, .otherFailure:
+                    break   // the list decides; a transient check is not a verdict
+                }
+            }
+        }
         let listed: EndpointModelCatalog.ProbeResult
         switch kind {
         case .ollama:

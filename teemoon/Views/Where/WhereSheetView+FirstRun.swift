@@ -37,11 +37,14 @@ extension WhereSheetView {
 
             Section {
                 // The two alternatives, as rows rather than heroes. Nobody
-                // picks Fireworks on their first screen, so the four cloud
-                // vendors collapse into one destination.
-                // `AddTarget` already distinguishes these two destinations —
-                // the same one the `get` list uses — so first run lands on the
-                // identical screen rather than a parallel entry point.
+                // picks Fireworks on their first screen, so the cloud vendors
+                // collapse into one destination.
+                // Both rows PUSH, like settings' places & keys. The cloud row
+                // lands on settings' provider picker: `get`'s generic key row
+                // opens the custom-endpoint form, which is right there (every
+                // preset has its own row in `get`) and wrong here (first run
+                // has none, so "near.ai" in the subtitle led to typing
+                // near.ai's endpoint by hand).
                 // `.plain`, so only the ICON carries the tint. A Button inside a
                 // List tints its whole label by default, which turned the
                 // subtitles blue — and a caption in accent colour reads as a
@@ -51,13 +54,20 @@ extension WhereSheetView {
                     title: "connect a computer",
                     subtitle: "ollama, lmstudio, llama.cpp or any llm engine",
                     glyph: WhereLocality.home.systemImage
-                ) { addTarget = .selfHosted }
+                ) {
+                    idsBeforeAdd = Set(providerStore.providers.map(\.id))
+                    firstRunPush = .computer
+                }
 
                 firstRunPlaceRow(
                     title: "use a cloud api",
-                    subtitle: "your key · near.ai, grok, fireworks, custom",
+                    // One line at phone width — "your key ·" pushed it to two.
+                    subtitle: "near.ai, grok, fireworks, openrouter, nvidia, brave",
                     glyph: WhereLocality.cloud.systemImage
-                ) { addTarget = .cloudKey }
+                ) {
+                    idsBeforeAdd = Set(providerStore.providers.map(\.id))
+                    firstRunPush = .cloudKey
+                }
             } header: {
                 Text("other places")
                     .textCase(.lowercase)
@@ -83,6 +93,11 @@ extension WhereSheetView {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        // One line, always: the cloud list of six names is a
+                        // few points too wide at phone width, so it shrinks a
+                        // little instead of wrapping "brave" onto its own line.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
@@ -125,18 +140,10 @@ extension WhereSheetView {
             // (an emptied provider list, or a reinstall over an existing
             // container) must be offered the model, not offered to fetch it
             // again. `startAndSelect` equips first and the download is a no-op.
-            // Contrast is explicit, NOT `.borderedProminent`.
-            //
-            // That style fills with the app tint and picks a label colour
-            // itself — and teemoon lets the user choose the tint
-            // (`settings.appTintColor`, applied app-wide in ContentView). On a
-            // fresh install the default resolved to white, so the button
-            // rendered as a white capsule with a white label: a blank pill, the
-            // primary control on the first screen, invisible. The Xcode preview
-            // uses the stock blue accent and showed nothing wrong.
-            //
-            // `systemBackground` as the foreground inverts against whatever the
-            // tint is, so the label stays legible for all thirteen choices.
+            // The where chip's rule, one tap back: the fixed onboarding orange
+            // with a white label. Not the user's tint with a label that
+            // inverts — that gave black on orange in dark mode, on the button
+            // the chip had just pointed at in white.
             Button {
                 startAndSelect(model)
             } label: {
@@ -145,11 +152,11 @@ extension WhereSheetView {
                       : "download · \(model.sizeMB / 1000).\((model.sizeMB % 1000) / 100) gb",
                       systemImage: alreadyHere ? "checkmark.circle" : "arrow.down.circle")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(PlatformColors.background)
+                    .foregroundStyle(Color.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .textCase(.lowercase)
-                    .background(Capsule(style: .continuous).fill(Color.accentColor))
+                    .background(Capsule(style: .continuous).fill(ML.accent))
             }
             .buttonStyle(.plain)
             .padding(.top, 16)

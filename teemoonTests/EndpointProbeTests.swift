@@ -51,6 +51,31 @@ struct EndpointProbeTests {
         )
     }
 
+    /// OpenRouter's /models answers 200 to any bearer, so listing cannot vouch
+    /// for a key; a preset with a real key endpoint asks it first, and a
+    /// rejection stands even though the list would have "connected".
+    @Test func aRejectedKeyIsNotRescuedByAModelListThatIgnoresKeys() async {
+        let result = await EndpointProbe.run(
+            request(apiKey: "sk-or-v1-bad", userInitiated: true, validation: .openRouter),
+            catalog: catalog(listed: .connected([KnownModel(id: "moonshotai/kimi-k3", displayName: "Kimi K3",
+                                                             vendor: "Moonshot", price: "")]),
+                             validate: .unauthorized)
+        )
+        #expect(result.outcome == .failed(.unauthorized))
+    }
+
+    /// A key endpoint that cannot answer (rate limited, offline) is not a
+    /// verdict: the list decides, as it did before.
+    @Test func aTransientKeyCheckLetsTheListDecide() async {
+        let result = await EndpointProbe.run(
+            request(apiKey: "sk-or-v1-good", userInitiated: true, validation: .openRouter),
+            catalog: catalog(listed: .connected([KnownModel(id: "moonshotai/kimi-k3", displayName: "Kimi K3",
+                                                             vendor: "Moonshot", price: "")]),
+                             validate: .rateLimited)
+        )
+        #expect(result.outcome == .connected)
+    }
+
     @Test func unauthorizedWithoutKeyOnAutomaticProbeIsIdle() async {
         let result = await EndpointProbe.run(
             request(),

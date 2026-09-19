@@ -83,10 +83,11 @@ struct ModelArtifact: Equatable, Sendable {
     /// is present (nothing to pin to).
     static func parse(fromComposeYAML yaml: String) -> ModelArtifact? {
         let tokens = flatten(yaml)
-        guard let modelPath = value(of: "--model-path", in: tokens) else { return nil }
+        guard let declared = value(of: "--model-path", in: tokens) else { return nil }
+        let (modelPath, snapshot) = canonicalRepo(declared)
         return ModelArtifact(
             modelPath: modelPath,
-            revision: value(of: "--revision", in: tokens),
+            revision: value(of: "--revision", in: tokens) ?? snapshot,
             servedName: value(of: "--served-model-name", in: tokens),
             quant: quantTag(in: modelPath))
     }
@@ -119,11 +120,12 @@ struct ModelArtifact: Equatable, Sendable {
         return decls.enumerated().map { k, decl in
             let end = k + 1 < decls.count ? decls[k + 1].start : tokens.count
             let slice = Array(tokens[decl.start..<end])
+            let (modelPath, snapshot) = canonicalRepo(decl.path)
             return ModelArtifact(
-                modelPath: decl.path,
-                revision: value(of: "--revision", in: slice),
+                modelPath: modelPath,
+                revision: value(of: "--revision", in: slice) ?? snapshot,
                 servedName: value(of: "--served-model-name", in: slice),
-                quant: quantTag(in: decl.path))
+                quant: quantTag(in: modelPath))
         }
     }
 
@@ -149,6 +151,22 @@ struct ModelArtifact: Equatable, Sendable {
     /// list marker (`- `) from each line, then splits on whitespace and trims
     /// surrounding quotes/commas. Handles both the list form (flag and value on
     /// separate items) and an inline command string.
+    /// A model server may be pointed at a local Hugging Face cache instead of
+    /// a repo id: `…/hub/models--zai-org--GLM-5.3-Flash/snapshots/84c6a6aa…`.
+    /// The repo is the `models--<org>--<name>` component and the snapshot is
+    /// its revision; the last path component is a commit hash, which is what
+    /// the trust ladder named the model by (GLM-5.3 flash, 2026-09-09).
+    static func canonicalRepo(_ path: String) -> (repo: String, snapshot: String?) {
+        let parts = path.split(separator: "/").map(String.init)
+        guard let i = parts.firstIndex(where: { $0.hasPrefix("models--") }) else { return (path, nil) }
+        let idParts = parts[i].dropFirst("models--".count).components(separatedBy: "--")
+        guard idParts.count >= 2 else { return (path, nil) }
+        let repo = idParts[0] + "/" + idParts[1...].joined(separator: "--")
+        var snapshot: String?
+        if let s = parts.firstIndex(of: "snapshots"), s + 1 < parts.count { snapshot = parts[s + 1] }
+        return (repo, snapshot)
+    }
+
     private static func flatten(_ yaml: String) -> [String] {
         var tokens: [String] = []
         for rawLine in yaml.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {

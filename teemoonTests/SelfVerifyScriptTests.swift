@@ -202,6 +202,9 @@ struct SelfVerifyScriptTests {
         #expect(script.contains("include_tls_fingerprint=true"))
         // inference layer: model YAML fetched at attested commit, hash-checked
         #expect(script.contains("cvm-compose-files"))
+        // The script restates the app's fallback repos; the two must not drift.
+        let fallbacks = ProvenanceService.fallbackRepos.map { "\"\($0)\"" }.joined(separator: ", ")
+        #expect(script.contains("FALLBACK_REPOS = [\(fallbacks)]"))
         #expect(script.contains("compose_up"))
         #expect(script.contains("nearai-cloud-verifier"))
         for verifier in ["model_verifier.py", "tls_verifier.py", "chat_verifier.py",

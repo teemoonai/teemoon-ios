@@ -83,6 +83,18 @@ struct SendPrepTests {
 @MainActor
 struct MissingKeySendGateTests {
 
+    /// The gate re-read after `prepareTurn`: a hard block never proceeds; a
+    /// soft degrade proceeds only if the user already chose "send anyway";
+    /// a verdict still pending is not a pass.
+    @Test func postPrepareRefusalHonoursTheSettledGate() {
+        #expect(ChatViewModel.postPrepareRefusal(policy: .allow, acceptedDegrade: false, verdictsPending: false) == nil)
+        #expect(ChatViewModel.postPrepareRefusal(policy: .block, acceptedDegrade: true, verdictsPending: false) != nil)
+        #expect(ChatViewModel.postPrepareRefusal(policy: .confirm, acceptedDegrade: false, verdictsPending: false) != nil)
+        #expect(ChatViewModel.postPrepareRefusal(policy: .confirm, acceptedDegrade: true, verdictsPending: false) == nil)
+        #expect(ChatViewModel.postPrepareRefusal(policy: .allow, acceptedDegrade: false, verdictsPending: true) != nil)
+        #expect(ChatViewModel.postPrepareRefusal(policy: .confirm, acceptedDegrade: true, verdictsPending: true) != nil)
+    }
+
     @Test func keyedProviderWithNoStoredKeyIsRefused() {
         #expect(ChatViewModel.mustRefuseMissingKey(provider: .nearAI, credential: ""))
         #expect(ChatViewModel.mustRefuseMissingKey(provider: .nearAI, credential: "   "),

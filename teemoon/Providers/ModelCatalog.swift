@@ -134,7 +134,10 @@ enum ModelCatalog {
     /// families an adapter can identify precisely (xAI's `grok-imagine-*`, which
     /// carries no text-token price) are filtered there, not by keyword here.
     private static let nonChatKeywords = [
-        "embedding", "reranker", "whisper", "privacy-filter", "flux",
+        "embedding", "embed", "reranker", "rerank", "retriever", "whisper",
+        "privacy-filter", "flux", "reward", "guard", "safety", "safeguard",
+        "topic-control", "content-safety", "detector", "translate", "nvclip",
+        "deplot", "kosmos", "neva", "vila", "fuyu", "calibration", "diffusion",
     ]
 
     static func isNonChat(_ id: String) -> Bool {
@@ -150,8 +153,9 @@ enum ModelCatalog {
         "deepseek-ai": "DeepSeek", "deepseek": "DeepSeek",
         "qwen": "Qwen", "openai": "OpenAI", "anthropic": "Anthropic",
         "google": "Google", "moonshotai": "Moonshot", "minimax": "MiniMax",
-        "meta-llama": "Meta", "mistralai": "Mistral", "nvidia": "NVIDIA",
-        "black-forest-labs": "Black Forest Labs", "xai": "xAI",
+        "meta-llama": "Meta", "meta": "Meta", "mistralai": "Mistral",
+        "nv-mistralai": "Mistral", "nvidia": "NVIDIA",
+        "black-forest-labs": "Black Forest Labs", "xai": "xAI", "x-ai": "xAI",
     ]
 
     /// Family keyword → vendor, for ids whose namespace can't name a vendor:
@@ -200,7 +204,11 @@ enum ModelCatalog {
     /// so a family keyword must never collapse two distinct namespaces.
     static func vendorLabel(forID id: String) -> String {
         guard id.contains("/") else { return familyVendor(forID: id) ?? "Other" }
-        let namespace = (id.split(separator: "/").first.map(String.init) ?? "").lowercased()
+        // OpenRouter marks an alias id with a leading "~" ("~openai/gpt-sol-latest").
+        // That is a marker, not part of the vendor's name, and it sorted a
+        // second "~openai" section under the real one.
+        let namespace = (id.split(separator: "/").first.map(String.init) ?? "")
+            .lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "~"))
         if let mapped = namespaceVendors[namespace] { return mapped }
         if namespace.isEmpty { return "Other" }
         return namespace.prefix(1).uppercased() + namespace.dropFirst()
@@ -252,12 +260,23 @@ enum ModelCatalog {
 
     // MARK: - Row formatting
 
+    /// One rate, at the precision it needs: "$2.50", and "$0.0014" rather than
+    /// a rounded "$0.00" — a sub-cent fee is still a fee.
+    static func rateLabel(_ value: Double) -> String {
+        let cents = (value * 100).rounded() / 100
+        if abs(value - cents) < 0.000_000_1 { return String(format: "$%.2f", cents) }
+        var text = String(format: "$%.4f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        return text
+    }
+
     /// "$1/$5" (whole) or "$1.40/$4.40" from per-1M-token input/output prices.
     static func priceLabel(inputPerMillion: Double?, outputPerMillion: Double?) -> String {
         guard let i = inputPerMillion, let o = outputPerMillion else { return "" }
-        func fmt(_ v: Double) -> String {
-            v == v.rounded() ? String(format: "$%.0f", v) : String(format: "$%.2f", v)
-        }
+        // Always two decimals: the generated snapshots and the curated
+        // catalog print "$2.00/$6.00", and one model must read the same
+        // everywhere it appears.
+        func fmt(_ v: Double) -> String { String(format: "$%.2f", v) }
         return "\(fmt(i))/\(fmt(o))"
     }
 
@@ -311,40 +330,6 @@ enum ModelCatalog {
 
     // MARK: - Ordering
 
-    /// Order a live list the way its curated snapshot reads: vendor families in
-    /// curated order (each led by its newest model), curated models keeping their
-    /// curated (recency) order, uncurated live models at the HEAD of their family.
-    /// Vendors absent from the curated list sort after, alphabetically.
-    static func sortByVendorFamily(_ models: [KnownModel], curated: [KnownModel]) -> [KnownModel] {
-        let curatedIndex = Dictionary(
-            curated.enumerated().map { ($1.id.lowercased(), $0) },
-            uniquingKeysWith: { first, _ in first })
-        let curatedSlugIndex = Dictionary(
-            curated.enumerated().map { (slug($1.id), $0) },
-            uniquingKeysWith: { first, _ in first })
-        var vendorRank: [String: Int] = [:]
-        for m in curated where vendorRank[m.vendor] == nil {
-            vendorRank[m.vendor] = vendorRank.count
-        }
-        func rank(_ m: KnownModel) -> (Int, String, Int, String) {
-            (vendorRank[m.vendor] ?? Int.max,
-             vendorRank[m.vendor] != nil ? "" : m.vendor,   // unknown vendors alphabetical
-             curatedIndex[m.id.lowercased()] ?? curatedSlugIndex[slug(m.id)] ?? -1,  // uncurated → family head
-             m.id)
-        }
-        return models.sorted { rank($0) < rank($1) }
-    }
-
-    /// Curated metadata for a live id — exact id first, then slug, so a
-    /// namespace or quant-suffix change upstream still carries price/name over.
-    static func curatedMatch(for id: String, in curated: [KnownModel]) -> KnownModel? {
-        if let exact = curated.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) {
-            return exact
-        }
-        let key = slug(id)
-        return curated.first { slug($0.id) == key }
-    }
-
     // MARK: - Live catalogue routing
 
     /// Endpoint → its richest catalogue. **The only routing table**, because there
@@ -362,7 +347,7 @@ enum ModelCatalog {
     /// one, and both doors now call it.
     ///
     /// `.generic` belongs here too. A custom cloud endpoint has no curated
-    /// snapshot, so routing it through the probe is the difference between live
+    /// list, so routing it through the probe is the difference between live
     /// bare ids and an empty browse sheet.
     ///
     /// Returns the same `ProbeResult` as every adapter — a failure is a failure,
@@ -385,21 +370,43 @@ enum ModelCatalog {
         }
         switch source {
         case .nearAI:
-            // near.ai's fetch carries the curated merge and records confidentiality
-            // tiers as a side effect, which is why it isn't an adapter. An EMPTY
-            // list counts as a failure: nil is a decode failure and `[]` is a key
-            // with nothing entitled, and both mean "show the fallback".
+            // near.ai's fetch records confidentiality tiers as a side effect,
+            // which is why it isn't an adapter. A miss is a FAILURE, never the
+            // generic probe: bare OpenAI-shaped rows carry no hosts, prices or
+            // tiers, and recording them would replace the last good list.
             if let live = await NearAIModelCatalog.fetchLive(apiKey: apiKey, session: session),
                !live.isEmpty {
                 return .connected(live)
             }
-            return await genericProbe()
+            return .failed(.offline)
         case .xAI:
             return await XAIAdapter.listModels(baseURL: baseURL, apiKey: apiKey, session: session)
         case .fireworks:
             return await FireworksAdapter.listModels(baseURL: baseURL, apiKey: apiKey, session: session)
+        case .openRouter:
+            return await publicList(apiKey: apiKey) {
+                await OpenRouterAdapter.listModels(baseURL: baseURL, apiKey: $0, session: session)
+            }
+        case .nvidia:
+            return await publicList(apiKey: apiKey) {
+                await NVIDIAAdapter.listModels(baseURL: baseURL, apiKey: $0, session: session)
+            }
         case .generic:
             return await genericProbe()
         }
     }
+
+    /// OpenRouter and NVIDIA list without a credential. A stored key that the
+    /// host rejects must not blank the picker: retry once without it, so a
+    /// wrong key costs the user their key screen, not their catalogue.
+    private static func publicList(
+        apiKey: String,
+        _ list: (String) async -> EndpointModelCatalog.ProbeResult
+    ) async -> EndpointModelCatalog.ProbeResult {
+        let result = await list(apiKey)
+        guard case .failed(.unauthorized) = result,
+              !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else { return result }
+        return await list("")
+    }
+
 }

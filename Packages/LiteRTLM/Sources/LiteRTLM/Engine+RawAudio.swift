@@ -217,6 +217,6 @@ extension Engine {
     /// Turns the runtime's own logging all the way up. Goes to os_log, so read it
     /// in Console.app — it does not appear in xcodebuild output.
     public static func enableVerboseLogging() {
-        litert_lm_set_min_log_level(0)
+        litert_lm_set_min_log_level(kLiteRtLmLogSeverityVerbose)  // v0.17: an enum, was an Int
     }
 }

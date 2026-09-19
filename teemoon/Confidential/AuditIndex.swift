@@ -152,7 +152,9 @@ final class AuditIndex {
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     private static let persistKey = "ai.teemoon.auditIndex.json"
     private static let persistDateKey = "ai.teemoon.auditIndex.fetchedAt"
+    private static let persistETagKey = "ai.teemoon.auditIndex.etag"
     private let ttl: TimeInterval = 3600
+    @ObservationIgnored private let defaults: UserDefaults
 
     /// Decode + validate. `schema` is a compatibility promise: this reader
     /// implements schema 1, and the repo evolves it only by ADDITIVE optional
@@ -165,8 +167,10 @@ final class AuditIndex {
         return idx
     }
 
-    /// Test seam: inject a fixed index (skips network + persistence).
-    init(fixedIndex: Index? = nil) {
+    /// Test seam: inject a fixed index (skips network + persistence), or a
+    /// private `UserDefaults` so a test's snapshot and ETag stay its own.
+    init(fixedIndex: Index? = nil, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         if let fixedIndex {
             index = fixedIndex
             lastLoad = .distantFuture
@@ -179,28 +183,58 @@ final class AuditIndex {
         if ConfidentialSession.isRunningInPreview { return }
         if let last = lastLoad, Date().timeIntervalSince(last) < ttl, index != nil { return }
         if index == nil,
-           let saved = UserDefaults.standard.data(forKey: Self.persistKey),
+           let saved = defaults.data(forKey: Self.persistKey),
            let parsed = Self.decodeIndex(saved) {
             index = parsed
-            loadedAt = UserDefaults.standard.object(forKey: Self.persistDateKey) as? Date
+            loadedAt = defaults.object(forKey: Self.persistDateKey) as? Date
+            // A snapshot younger than the TTL is this launch's index; without
+            // this, every cold launch refetched the whole file.
+            lastLoad = loadedAt
+            if let last = lastLoad, Date().timeIntervalSince(last) < ttl { return }
         }
         guard loadTask == nil else { return }
         loadTask = Task { [weak self] in
             defer { self?.loadTask = nil }
-            guard let (data, response) = try? await URLSession.shared.data(from: Self.indexURL),
-                  (response as? HTTPURLResponse)?.statusCode == 200,
-                  let parsed = Self.decodeIndex(data) else {
-                logger.info("[audits] index unavailable — links stay \(self?.index == nil ? "hidden" : "cached", privacy: .public)")
-                return
-            }
-            let now = Date()
-            self?.index = parsed
-            self?.lastLoad = now
-            self?.loadedAt = now
-            UserDefaults.standard.set(data, forKey: Self.persistKey)
-            UserDefaults.standard.set(now, forKey: Self.persistDateKey)
-            logger.info("[audits] index loaded — \(parsed.images.count) image ref(s), \(parsed.manifests.count) manifest(s)")
+            await self?.refresh()
         }
+    }
+
+    /// One fetch. The shared URL cache stores nothing (`SharedURLCache`), so
+    /// revalidation is done here: the ETag is kept beside the snapshot and a
+    /// 304 costs no body.
+    func refresh() async {
+        var request = URLRequest(url: Self.indexURL)
+        if index != nil, let etag = defaults.string(forKey: Self.persistETagKey) {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else {
+            logger.info("[audits] index unavailable — links stay \(self.index == nil ? "hidden" : "cached", privacy: .public)")
+            return
+        }
+        let now = Date()
+        if http.statusCode == 304, index != nil {
+            lastLoad = now
+            loadedAt = now
+            defaults.set(now, forKey: Self.persistDateKey)
+            logger.info("[audits] index unchanged (304)")
+            return
+        }
+        guard http.statusCode == 200, let parsed = Self.decodeIndex(data) else {
+            logger.info("[audits] index unavailable (\(http.statusCode)) — links stay \(self.index == nil ? "hidden" : "cached", privacy: .public)")
+            return
+        }
+        index = parsed
+        lastLoad = now
+        loadedAt = now
+        defaults.set(data, forKey: Self.persistKey)
+        defaults.set(now, forKey: Self.persistDateKey)
+        if let etag = http.value(forHTTPHeaderField: "ETag") {
+            defaults.set(etag, forKey: Self.persistETagKey)
+        } else {
+            defaults.removeObject(forKey: Self.persistETagKey)
+        }
+        logger.info("[audits] index loaded — \(parsed.images.count) image ref(s), \(parsed.manifests.count) manifest(s)")
     }
 
     // MARK: gated link accessors (nil = not assessed → no link, never overclaim)

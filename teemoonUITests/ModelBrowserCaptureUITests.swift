@@ -42,19 +42,19 @@ final class ModelBrowserCaptureUITests: XCTestCase {
         chip.tap()
         Thread.sleep(forTimeInterval: 1.6)
 
-        // The browse row carries no accessibility identifier, so match its
-        // label. "browse near.ai" is the e2ee tier — the one whose badge the
-        // site's table cannot represent.
+        // The `get` row carries no accessibility identifier, so match its
+        // label: the name with settings' caption under it. near.ai is the
+        // e2ee tier — the one whose badge the site's table cannot represent.
         let browse = app.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS[c] %@", "browse near.ai"))
+            .matching(NSPredicate(format: "label ==[c] %@", "near.ai"))
             .firstMatch
         guard browse.waitForExistence(timeout: 8) else {
-            throw XCTSkip("no 'browse near.ai' row — the sheet is in some other state")
+            throw XCTSkip("no near.ai row in get — the sheet is in some other state")
         }
         browse.tap()
         Thread.sleep(forTimeInterval: 2.5)
 
-        // "browse near.ai" opens the PROVIDER screen, not the catalogue — the
+        // The near.ai row opens the PROVIDER screen, not the catalogue — the
         // door to the browser is the "all N models" row under the recommended
         // one. N varies with the live catalogue, so match the prefix.
         let allModels = app.staticTexts

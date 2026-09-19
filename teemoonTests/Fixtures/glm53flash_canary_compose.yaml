@@ -1,0 +1,1103 @@
+# GLM-5.3 Flash two-replica deployment: run qualified fc91d24 on both replicas.
+# Promote r1 independently while r2 remains available; refresh OTel labels separately.
+# Never apply the mixed-model GLM-5.3-Flash-SGL-TP4.yaml to this topology.
+x-logging-conf: &logging-conf
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "10"
+    labels: "com.datadoghq.ad.logs,com.docker.compose.service"
+
+# Production GLM-5.3-Flash on two independent H200 TP4/EP4 replicas. Each
+# replica stays within one four-GPU NVLink island; one inference-proxy uses its native
+# least-connections backend pool for health-aware balancing and failover.
+#
+# The engine source is pinned to PierreLeGuen/sglang-upstream commit fc91d24,
+# derived from official SGLang main plus the official GLM-5.3 branch. It contains
+# upstream disconnect cleanup (#35255), the final-prefill abort fix (#34153),
+# the strict thinking-budget adapter, and two narrow DSA import-cycle fixes. The
+# official CUDA 13 SGLang image is the pinned build base. The serving envelope
+# is intentionally conservative: BF16 KV, 0.80 static memory,
+# 32 running requests, a bounded 32-request queue, 4096-token prefill chunks,
+# decode graphs capped at batch 32, TileLang DSA, DeepGEMM, and adaptive EAGLE
+# 5/1/6. This retains the full 1,048,576-token model context while avoiding the
+# late K-pool workspace exhaustion observed with larger prefill chunks.
+#
+# A small fail-closed adapter patch maps the public thinking_token_budget field
+# to SGLang strict-thinking's custom_params.thinking_budget. Omitted values
+# default to 8192; explicit null remains an opt-out; an explicit native
+# custom_params.thinking_budget wins. Request/response payload logging is off.
+#
+# The vLLM GLM-5.3-Flash path is not used: its Hopper NVFP4/MLA path produced
+# non-finite logits and repetitive output. This pack also retires the previous
+# co-resident DeepSeek arm so both four-GPU islands serve GLM-5.3-Flash.
+
+x-nvidia: &nvidia
+  runtime: nvidia
+  ipc: host
+  ulimits:
+    memlock: -1
+    nofile:
+      soft: 65535
+      hard: 65535
+
+x-vllm-proxy-common: &vllm-proxy-common
+  image: nearaidev/vllm-proxy-rs@sha256:27265f5a10abcacc3fe80604a00ed2ba32c6e082895115e4b652b40525cb554d
+  user: root
+  privileged: true
+  <<: *nvidia
+  extra_hosts:
+    - "compose-manager:host-gateway"
+  volumes:
+    - /var/run/dstack.sock:/var/run/dstack.sock
+    - certs:/etc/letsencrypt:ro
+  restart: unless-stopped
+  logging: *logging-conf
+
+x-glm53-build: &glm53-build
+  context: .
+  dockerfile_inline: |
+    FROM lmsysorg/sglang@sha256:eb090e39434085f713d39421cb2e5b6d342424aa95c3d9ecdfe8cadd4289e99b
+    ADD https://github.com/PierreLeGuen/sglang-upstream/archive/fc91d2403cc210a86bd5fc715c6609f58c932e5a.tar.gz /tmp/sglang.tar.gz
+    RUN printf '%s  %s\n' \
+          '1e4340ed7e476696f36f4094e027f2c7648bcca98934f0df3220b307bdcd1673' \
+          '/tmp/sglang.tar.gz' \
+        | sha256sum -c -
+    RUN rm -rf /sgl-workspace/sglang \
+        && mkdir -p /sgl-workspace/sglang \
+        && tar -xzf /tmp/sglang.tar.gz --strip-components=1 -C /sgl-workspace/sglang \
+        && rm /tmp/sglang.tar.gz
+    WORKDIR /sgl-workspace/sglang
+    RUN python3 -m pip install setuptools-rust==1.13.0 setuptools-scm==10.2.3 pytest-asyncio==1.4.0
+    RUN --mount=type=cache,target=/sgl-workspace/sglang/rust/target \
+        --mount=type=cache,target=/sgl-workspace/sglang/rust/sglang-radix-tree/target \
+        CARGO_BUILD_JOBS=8 SETUPTOOLS_SCM_PRETEND_VERSION=0.5.16.dev20260904 \
+        python3 -m pip install --no-deps --no-build-isolation -e python
+    LABEL org.opencontainers.image.source="https://github.com/PierreLeGuen/sglang-upstream" \
+          org.opencontainers.image.revision="fc91d2403cc210a86bd5fc715c6609f58c932e5a"
+    RUN python3 -c "import sglang; from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest; print(sglang.__file__)"
+
+x-sg-glm53-flash-common: &sg-glm53-flash-common
+  <<: *nvidia
+  init: true
+  image: nearai/glm53-sglang-upstream-fc91d24:local
+  build: *glm53-build
+  command: >
+      sglang serve
+      --model-path /root/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/84c6a6aa9497188e15a635ba793b0f95a79b1033
+      --revision 84c6a6aa9497188e15a635ba793b0f95a79b1033
+      --served-model-name z-ai/glm-5.3-flash
+      --tp-size 4
+      --ep-size 4
+      --mem-fraction-static 0.80
+      --max-running-requests 32
+      --max-queued-requests 32
+      --chunked-prefill-size 4096
+      --cuda-graph-max-bs-decode 32
+      --dsa-prefill-backend tilelang
+      --dsa-decode-backend tilelang
+      --kv-cache-dtype bfloat16
+      --moe-runner-backend deep_gemm
+      --speculative-algorithm EAGLE
+      --speculative-num-steps 5
+      --speculative-eagle-topk 1
+      --speculative-num-draft-tokens 6
+      --speculative-adaptive
+      --reasoning-parser glm45
+      --enable-strict-thinking
+      --grammar-backend xgrammar
+      --tool-call-parser glm47
+      --chat-template /root/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/3f1971b7b5f7a528c9c4ef6212c8785298a8c24a/chat_template.jinja
+      --context-length 1048576
+      --dist-init-addr 127.0.0.1:29510
+      --watchdog-timeout 1800
+      --host 0.0.0.0
+      --port 8000
+      --enable-metrics
+      --enable-cache-report
+      --log-requests-level 0
+      --disable-fast-image-processor
+      --limit-mm-data-per-request '{"image": 64}'
+  volumes:
+    - kernel_cache:/root/.cache
+    - huggingface_cache:/root/.cache/huggingface
+  environment:
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    # Local snapshot path; nothing is fetched at engine start.
+    - HF_HUB_OFFLINE=1
+    - TRANSFORMERS_OFFLINE=1
+    - HF_HUB_DISABLE_TELEMETRY=1
+    - DO_NOT_TRACK=1
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    - OPENBLAS_L2_SIZE=2097152
+    - NCCL_DEBUG=WARN
+    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
+    - TRITON_CACHE_DIR=/root/.cache/triton
+    - SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE=1
+  restart: unless-stopped
+  stop_grace_period: 5m
+  logging: *logging-conf
+
+x-dcgm-common: &dcgm-common
+  image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.2-4.8.1-distroless
+  runtime: nvidia
+  cap_add:
+    - SYS_ADMIN
+  restart: unless-stopped
+  logging: *logging-conf
+
+services:
+  model-downloader:
+    image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim@sha256:4f5d923c9dcea037f57bda425dd209f3ec643da2f0b74227f68d09dab0b3bb36
+    container_name: model-downloader
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Downloading zai-org/GLM-5.3-Flash..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download zai-org/GLM-5.3-Flash --revision 84c6a6aa9497188e15a635ba793b0f95a79b1033
+        echo "Downloading corrected GLM-5.3-Flash chat template..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download zai-org/GLM-5.3-Flash chat_template.jinja --revision 3f1971b7b5f7a528c9c4ef6212c8785298a8c24a
+        echo "Download complete."
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-downloader","service":"model-downloader","tags":["model:zai-org/GLM-5.3-Flash","served_model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # Dormant during normal deploys. Target this service explicitly with the
+  # maintenance profile when one model's shared HF cache must be evicted.
+  # Inlined copy of the root cleanup-hf-model.yaml service: compose-manager's
+  # compose/up fetches only the requested file, so cross-file `extends:` /
+  # `include:` must not be used here (they fail at config load).
+  hf-cleanup:
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    container_name: hf-cleanup
+    profiles: ["maintenance"]
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        : "$${MODEL_NAME:?MODEL_NAME env var is required (e.g. zai-org/GLM-5-FP8)}"
+
+        echo "=== Disk usage ==="
+        df -h /root/.cache 2>/dev/null || df -h /
+
+        echo ""
+        echo "=== Cached model weights ==="
+        HUB=/root/.cache/huggingface/hub
+        if ls "$$HUB"/models--* >/dev/null 2>&1; then
+          du -sh "$$HUB"/models--* | sort -rh
+        else
+          echo "(none)"
+        fi
+        echo ""
+        echo "Total HF cache: $$(du -sh $$HUB 2>/dev/null | cut -f1)"
+
+        echo ""
+        echo "=== Cleanup ==="
+        SAFE=$$(printf '%s' "$$MODEL_NAME" | sed 's|/|--|g')
+        TARGET="$$HUB/models--$$SAFE"
+        echo "MODEL_NAME=$$MODEL_NAME"
+        echo "TARGET=$$TARGET"
+        if [ ! -d "$$TARGET" ]; then
+          echo "Not found — nothing to remove."
+          exit 0
+        fi
+        echo "Removing $$(du -sh "$$TARGET" | cut -f1) ..."
+        rm -rf "$$TARGET"
+        echo "Removed $$TARGET"
+        echo "Disk after: $$(df -h /root/.cache 2>/dev/null | tail -1 || df -h / | tail -1)"
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - MODEL_NAME=${MODEL_NAME}
+    # Verbatim from cleanup-hf-model.yaml (not the file-wide *logging-conf) so the
+    # rendered service is unchanged from the previous `extends` result.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.datadoghq.ad.logs"
+
+  nginx:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: nginx
+    depends_on:
+      - proxy-glm53
+    command: /bin/sh -c 'while :; do sleep 6h; nginx -s reload; done & nginx -g "daemon off;"'
+    ports:
+      - "8000:8000"
+      - "8444:443"
+    volumes:
+      - certs:/etc/letsencrypt:ro
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+        mode: 0644
+    restart: unless-stopped
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nginx","service":"nginx","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000"]}]'
+
+  model-proxy-registrar:
+    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+    container_name: model-proxy-registrar
+    entrypoint: ["sh", "/register.sh"]
+    restart: unless-stopped
+    healthcheck:
+      # Unhealthy if the registration loop hasn't ticked in 3m (e.g. wedged
+      # before the loop, or the loop died). Surfaces silent registrar failures
+      # in `docker ps` / Datadog. See cvm-compose-files#57.
+      test: ["CMD-SHELL", "[ $$(( $$(date +%s) - $$(cat /tmp/registrar_alive 2>/dev/null || echo 0) )) -lt 180 ]"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1200s
+    environment:
+      - HOST_IP=${HOST_IP}
+      - HTTP_PORT=${HTTP_PORT:-8000}
+      - TLS_PORT=${TLS_PORT:-8444}
+      - MODEL_PROXY_TOKEN=${MODEL_PROXY_TOKEN}
+      - PROXY_TOKEN=${PROXY_TOKEN}
+    configs:
+      - source: registrar_script
+        target: /register.sh
+        mode: 0755
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-proxy-registrar","service":"model-proxy-registrar","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # --- GLM-5.3-Flash proxy ---
+  proxy-glm53:
+    <<: *vllm-proxy-common
+    container_name: proxy-glm53
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=z-ai/glm-5.3-flash
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BACKEND_URLS=http://model-sg-glm53-fp8-tp4-r1:8000,http://model-sg-glm53-fp8-tp4-r2:8000
+      # Keep append-only conversations on the replica that already holds their prefix cache
+      # (inference-proxy #227); new conversations still balance by least-connections.
+      - VLLM_BACKEND_CONVERSATION_AFFINITY=1
+      - VLLM_PROXY_MAX_REQUEST_SIZE=104857600
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-glm53"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "z-ai/glm-5.3-flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # --- GLM-5.3-Flash engine replica 1 (SGLang TP4, GPUs 0-3) ---
+  model-sg-glm53-fp8-tp4-r1:
+    <<: *sg-glm53-flash-common
+    container_name: model-sg-glm53-fp8-tp4-r1
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0","1","2","3"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sglang","service":"sglang","tags":["model:z-ai/glm-5.3-flash","model_path:zai-org/GLM-5.3-Flash","served_model:z-ai/glm-5.3-flash","precision:fp8-weights-bf16-kv","deployment:glm53-flash-sgl-tp4","config_variant:official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192","request_logging:disabled","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000","instance:1"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "sglang"
+      nearai.otel.service: "sglang"
+      nearai.otel.source: "sglang"
+      nearai.otel.container_name: "model-sg-glm53-fp8-tp4-r1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "z-ai/glm-5.3-flash"
+      nearai.otel.model_path: "zai-org/GLM-5.3-Flash"
+      nearai.otel.served_model: "z-ai/glm-5.3-flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.config_variant: "official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192"
+      nearai.otel.thinking_budget_policy: "default8192-public-to-native"
+      nearai.otel.request_logging: "disabled"
+      nearai.otel.instance: "1"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # --- GLM-5.3-Flash engine replica 2 (SGLang TP4, GPUs 4-7) ---
+  model-sg-glm53-fp8-tp4-r2:
+    <<: *sg-glm53-flash-common
+    container_name: model-sg-glm53-fp8-tp4-r2
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["4","5","6","7"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sglang","service":"sglang","tags":["model:z-ai/glm-5.3-flash","model_path:zai-org/GLM-5.3-Flash","served_model:z-ai/glm-5.3-flash","precision:fp8-weights-bf16-kv","deployment:glm53-flash-sgl-tp4","config_variant:official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192","request_logging:disabled","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000","instance:2"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "sglang"
+      nearai.otel.service: "sglang"
+      nearai.otel.source: "sglang"
+      nearai.otel.container_name: "model-sg-glm53-fp8-tp4-r2"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "z-ai/glm-5.3-flash"
+      nearai.otel.model_path: "zai-org/GLM-5.3-Flash"
+      nearai.otel.served_model: "z-ai/glm-5.3-flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.config_variant: "official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192"
+      nearai.otel.thinking_budget_policy: "default8192-public-to-native"
+      nearai.otel.request_logging: "disabled"
+      nearai.otel.instance: "2"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # Explicit operator-only semantic check; never starts with a normal stack apply.
+  # Runs the candidate's synthetic fixture gate against each replica at concurrency 1.
+  # No GPU allocation, host mounts, Docker socket, credentials, or published ports.
+  glm53-perception-check:
+    image: nearai/glm53-sglang-upstream-fc91d24:local
+    # Reuse the in-CVM build staged for r2; this tag is not a registry artifact.
+    pull_policy: never
+    container_name: glm53-perception-check
+    profiles: ["verification"]
+    runtime: runc
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    mem_limit: 512m
+    cpus: 1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=void
+      - PYTHONDONTWRITEBYTECODE=1
+    entrypoint: ["/usr/bin/python3", "-u", "-c"]
+    command:
+      - |
+        import json, runpy, shutil, sys, urllib.request
+        print(json.dumps({"event": "disk", "free_bytes": shutil.disk_usage("/").free}), flush=True)
+        failed = False
+        for replica in (1, 2):
+            base = f"http://model-sg-glm53-fp8-tp4-r{replica}:8000"
+            print(json.dumps({"event": "replica", "replica": replica}), flush=True)
+            for path in ("/health", "/v1/models"):
+                with urllib.request.urlopen(base + path, timeout=30) as response:
+                    assert response.status == 200
+                    if path == "/v1/models":
+                        assert "z-ai/glm-5.3-flash" in [row["id"] for row in json.load(response)["data"]]
+            sys.argv = ["perception", "--base-url", base, "--size", "512", "--concurrency", "1", "--timeout", "300"]
+            try:
+                runpy.run_path("/sgl-workspace/sglang/test/manual/test_glm5_next_perception.py", run_name="__main__")
+            except SystemExit as result:
+                failed = failed or bool(result.code)
+        print(json.dumps({"event": "qualification_finished", "ok": not failed}), flush=True)
+        raise SystemExit(1 if failed else 0)
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"glm53-perception-check","service":"glm53-perception-check","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # Explicit operator-only TLS access to each replica for paired qualification.
+  # Never registered with the customer router; no model/proxy dependencies.
+  glm53-soak-relay:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: glm53-soak-relay
+    profiles: ["verification"]
+    runtime: runc
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    mem_limit: 256m
+    cpus: 1
+    stop_grace_period: 5m
+    ports:
+      - "8008:8008"
+      - "8009:8009"
+    volumes:
+      - certs:/etc/letsencrypt:ro
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=4m
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    configs:
+      - source: glm53_soak_nginx_conf
+        target: /etc/nginx/nginx.conf
+        mode: 0600
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nginx","service":"nginx","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # --- Full-host GPU telemetry ---
+
+  dcgm-glm53:
+    <<: *dcgm-common
+    container_name: dcgm-glm53
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0","1","2","3","4","5","6","7"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"dcgm-exporter","service":"dcgm-exporter","tags":["model:z-ai/glm-5.3-flash","model_path:zai-org/GLM-5.3-Flash","served_model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "dcgm"
+      nearai.otel.service: "dcgm-exporter"
+      nearai.otel.source: "dcgm-exporter"
+      nearai.otel.container_name: "dcgm-glm53"
+      nearai.otel.port: "9400"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "z-ai/glm-5.3-flash"
+      nearai.otel.model_path: "zai-org/GLM-5.3-Flash"
+      nearai.otel.served_model: "z-ai/glm-5.3-flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  otelcol-contrib:
+    image: otel/opentelemetry-collector-contrib@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917
+    container_name: otelcol-contrib
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    user: "0:0"
+    mem_limit: "768m"
+    environment:
+      - MONITORING_INGEST_TOKEN=${MONITORING_INGEST_TOKEN:-}
+      - CVM_NAME=${CVM_NAME:-unknown}
+      - CVM_HOST=${CVM_HOST:-unknown}
+      - DD_HOSTNAME=${DD_HOSTNAME:-unknown}
+      - ENV=${ENV:-unknown}
+      - HOST_IP=${HOST_IP:-unknown}
+    expose:
+      - "4317"
+      - "4318"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - otelcol_app_storage:/var/lib/otelcol-contrib
+    configs:
+      - source: otelcol_app_config
+        target: /etc/otelcol-contrib/config.yaml
+        mode: 0444
+    restart: unless-stopped
+    logging:
+      driver: "local"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"otelcol-contrib","service":"otelcol-contrib","tags":["deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+networks:
+  default:
+    external: true
+    name: dstack_default
+
+volumes:
+  otelcol_app_storage:
+  huggingface_cache:
+  kernel_cache:
+  certs:
+    external: true
+    name: certs
+
+configs:
+  glm53_soak_nginx_conf:
+    content: |
+      user nginx;
+      worker_processes 1;
+      pid /var/run/nginx.pid;
+      error_log /dev/null;
+      events { worker_connections 64; }
+      http {
+        # No request/response logging or disk buffering of qualification traffic.
+        access_log off;
+        client_max_body_size 100m;
+        client_body_timeout 3600s;
+        send_timeout 3600s;
+        resolver 127.0.0.11 valid=5s ipv6=off;
+        map_hash_bucket_size 256;
+        map $$http_authorization $$soak_authorized {
+          default 0;
+          "Bearer ${PROXY_TOKEN:?PROXY_TOKEN required for authenticated soak access}" 1;
+        }
+        ssl_certificate /etc/letsencrypt/live/completions.near.ai/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/completions.near.ai/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_max_temp_file_size 0;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_set_header Authorization "";
+        proxy_set_header Connection "";
+        proxy_next_upstream off;
+        server {
+          listen 8008 ssl;
+          server_name _;
+          if ($$soak_authorized = 0) { return 401; }
+          set $$backend http://model-sg-glm53-fp8-tp4-r1:8000;
+          location ~ ^/(health|metrics|v1/models|v1/chat/completions|v1/completions|v1/responses)$$ {
+            limit_except GET POST { deny all; }
+            proxy_pass $$backend$$request_uri;
+          }
+          location / { return 404; }
+        }
+        server {
+          listen 8009 ssl;
+          server_name _;
+          if ($$soak_authorized = 0) { return 401; }
+          set $$backend http://model-sg-glm53-fp8-tp4-r2:8000;
+          location ~ ^/(health|metrics|v1/models|v1/chat/completions|v1/completions|v1/responses)$$ {
+            limit_except GET POST { deny all; }
+            proxy_pass $$backend$$request_uri;
+          }
+          location / { return 404; }
+        }
+      }
+
+  otelcol_app_config:
+    content: |
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+
+        filelog/docker_containers:
+          include: [/var/lib/docker/containers/*/*-json.log]
+          start_at: end
+          storage: file_storage
+          include_file_path: true
+          operators:
+            - type: json_parser
+              parse_from: body
+              parse_to: attributes
+              timestamp:
+                parse_from: attributes.time
+                layout_type: gotime
+                layout: '2006-01-02T15:04:05.999999999Z07:00'
+              on_error: send_quiet
+            - type: move
+              from: attributes.log
+              to: body
+              if: 'attributes.log != nil'
+            - type: move
+              from: attributes.stream
+              to: attributes["log.iostream"]
+              if: 'attributes.stream != nil'
+            - type: remove
+              field: attributes.time
+              if: 'attributes.time != nil'
+            - type: regex_parser
+              parse_from: attributes["log.file.path"]
+              regex: '/var/lib/docker/containers/(?P<container_id>[a-f0-9]{12})[a-f0-9]*/'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'model:(?P<model>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'served_model:(?P<served_model>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'model_path:(?P<model_path>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'precision:(?P<precision>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'deployment:(?P<deployment>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'ip:(?P<ip>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'port:(?P<port>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'env:(?P<env>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'host:(?P<host>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'instance:(?P<instance>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'replica:(?P<replica>[^",\]]+)'
+              on_error: send_quiet
+            - type: add
+              field: attributes["service.name"]
+              value: cvm-docker
+
+        prometheus/apps:
+          config:
+            scrape_configs:
+              - job_name: sglang-model-sg-glm53-fp8-tp4-r1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-sg-glm53-fp8-tp4-r1:8000']
+                    labels:
+                      service: "sglang"
+                      source: "sglang"
+                      container_name: "model-sg-glm53-fp8-tp4-r1"
+                      model: "z-ai/glm-5.3-flash"
+                      model_path: "zai-org/GLM-5.3-Flash"
+                      served_model: "z-ai/glm-5.3-flash"
+                      precision: "fp8-weights-bf16-kv"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+                      instance: "1"
+                      config_variant: "official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192"
+                      thinking_budget_policy: "default8192-public-to-native"
+                      request_logging: "disabled"
+              - job_name: sglang-model-sg-glm53-fp8-tp4-r2
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-sg-glm53-fp8-tp4-r2:8000']
+                    labels:
+                      service: "sglang"
+                      source: "sglang"
+                      container_name: "model-sg-glm53-fp8-tp4-r2"
+                      model: "z-ai/glm-5.3-flash"
+                      model_path: "zai-org/GLM-5.3-Flash"
+                      served_model: "z-ai/glm-5.3-flash"
+                      precision: "fp8-weights-bf16-kv"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+                      instance: "2"
+                      config_variant: "official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192"
+                      thinking_budget_policy: "default8192-public-to-native"
+                      request_logging: "disabled"
+              - job_name: dcgm-dcgm-glm53
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['dcgm-glm53:9400']
+                    labels:
+                      service: "dcgm-exporter"
+                      source: "dcgm-exporter"
+                      container_name: "dcgm-glm53"
+                      model: "z-ai/glm-5.3-flash"
+                      model_path: "zai-org/GLM-5.3-Flash"
+                      served_model: "z-ai/glm-5.3-flash"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "9400"
+              - job_name: inference-proxy-proxy-glm53
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-glm53:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-glm53"
+                      model: "z-ai/glm-5.3-flash"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+        prometheus/self:
+          config:
+            scrape_configs:
+              - job_name: otelcol-app
+                scrape_interval: 30s
+                static_configs:
+                  - targets: ['localhost:8888']
+
+      processors:
+        memory_limiter:
+          check_interval: 1s
+          limit_mib: 512
+          spike_limit_mib: 128
+
+        resource:
+          attributes:
+            - key: host.name
+              value: $${env:DD_HOSTNAME}
+              action: upsert
+            - key: cvm.name
+              value: $${env:CVM_NAME}
+              action: upsert
+            - key: host.machine
+              value: $${env:CVM_HOST}
+              action: insert
+            - key: deployment.environment
+              value: $${env:ENV}
+              action: upsert
+            - key: service.namespace
+              value: near-ai
+              action: insert
+
+        transform/docker_metadata:
+          error_mode: ignore
+          log_statements:
+            - context: log
+              statements:
+                - set(attributes["service.name"], attributes["attrs"]["com.docker.compose.service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil
+                - set(attributes["service.name"], ParseJSON(attributes["attrs"]["com.datadoghq.ad.logs"])[0]["service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil
+                - set(attributes["log.source"], ParseJSON(attributes["attrs"]["com.datadoghq.ad.logs"])[0]["source"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil
+                - set(attributes["service"], attributes["service.name"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil and attributes["service.name"] != nil
+                - set(attributes["source"], attributes["log.source"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil and attributes["log.source"] != nil
+                - set(attributes["container.name"], attributes["attrs"]["com.docker.compose.service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil
+
+        filter/app_logs:
+          error_mode: ignore
+          logs:
+            log_record:
+              - 'attributes["model"] == nil and attributes["deployment"] == nil'
+              - 'attributes["service.name"] == "compose-manager"'
+              - 'attributes["service.name"] == "compose-manager-launcher"'
+              - 'attributes["service.name"] == "otelcol-management"'
+              - 'attributes["service.name"] == "otelcol-contrib"'
+              - 'attributes["service.name"] == "datadog-agent"'
+
+        groupbyattrs/docker_service:
+          keys:
+            - service.name
+            - service
+            - container.name
+            - log.source
+            - source
+            - log.iostream
+            - model
+            - served_model
+            - model_path
+            - precision
+            - deployment
+            - env
+            - host
+            - ip
+            - port
+            - instance
+            - replica
+
+        batch:
+          send_batch_size: 1024
+          send_batch_max_size: 2048
+          timeout: 5s
+
+      exporters:
+        otlphttp/gateway:
+          endpoint: https://telemetry.infra.near.ai
+          headers:
+            Authorization: "Bearer $${env:MONITORING_INGEST_TOKEN}"
+          sending_queue:
+            num_consumers: 1
+            queue_size: 128
+            storage: file_storage
+
+      extensions:
+        file_storage:
+          directory: /var/lib/otelcol-contrib/storage
+          create_directory: true
+
+      service:
+        extensions: [file_storage]
+        pipelines:
+          logs/app:
+            receivers: [filelog/docker_containers]
+            processors: [memory_limiter, resource, transform/docker_metadata, filter/app_logs, groupbyattrs/docker_service, batch]
+            exporters: [otlphttp/gateway]
+          metrics/app:
+            receivers: [prometheus/apps]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          metrics/otlp:
+            receivers: [otlp]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          metrics/self:
+            receivers: [prometheus/self]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+        telemetry:
+          metrics:
+            address: localhost:8888
+          logs:
+            level: info
+
+  registrar_script:
+    content: |
+      #!/bin/sh
+      PROXY_URL="https://completions.near.ai"
+      TOKEN="$${MODEL_PROXY_TOKEN}"
+      INFERENCE_TOKEN="$${PROXY_TOKEN}"
+
+      if [ -z "$$TOKEN" ] || [ -z "$$INFERENCE_TOKEN" ]; then
+        echo "ERROR: MODEL_PROXY_TOKEN and PROXY_TOKEN are required for model-proxy registration"
+        exit 1
+      fi
+
+      ENDPOINT="$${HOST_IP}:$${HTTP_PORT}"
+      REGISTERED=false
+      FAILURE_COUNT=0
+      MAX_RETRIES=3
+
+      register_endpoint() {
+        echo "Registering endpoint $$1 with routing port $$2"
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\",\"routing_port\":$$2}"
+      }
+
+      unregister_endpoint() {
+        echo "Unregistering endpoint $$1"
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/unregister/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\"}"
+      }
+
+      register_model() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/model" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$1\",\"domain\":\"$$2\"}"
+      }
+
+      cleanup() {
+        echo "SIGTERM received, unregistering $$ENDPOINT"
+        unregister_endpoint "$$ENDPOINT"
+        REGISTERED=false
+        exit 0
+      }
+      trap cleanup TERM INT
+
+      mark_registered() {
+        register_endpoint "$$ENDPOINT" "$${TLS_PORT}"
+        register_model "z-ai/glm-5.3-flash" "glm-5-3-flash.completions.near.ai"
+        if [ "$$REGISTERED" = false ]; then
+          echo "[GLM-5.3-Flash-SGL-TP4] Registered z-ai/glm-5.3-flash (2x TP4/EP4) at $$ENDPOINT"
+        fi
+        REGISTERED=true
+      }
+
+      # Probe the host-published nginx port. The inference-proxy health-manages
+      # both internal replicas, so registration represents the pooled endpoint.
+      check_inference() {
+        status=$$(curl -sS --connect-timeout 10 --max-time 45 -o /dev/null -w "%{http_code}" \
+          -X POST "http://$${HOST_IP}:$${HTTP_PORT}/v1/chat/completions" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"model":"z-ai/glm-5.3-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":1}')
+        curl_status=$$?
+
+        if [ "$$curl_status" -ne 0 ]; then
+          case "$$curl_status" in
+            52|56)
+              echo "[GLM-5.3-Flash-SGL-TP4] Health probe hit connection-level backpressure (curl $$curl_status); treating as alive but saturated"
+              return 2
+              ;;
+          esac
+          echo "[GLM-5.3-Flash-SGL-TP4] Health probe curl failed with status $$curl_status"
+          return 1
+        fi
+
+        case "$$status" in
+          2*)
+            return 0
+            ;;
+          503)
+            echo "[GLM-5.3-Flash-SGL-TP4] Backend returned 503; treating as alive but saturated"
+            return 2
+            ;;
+          *)
+            echo "[GLM-5.3-Flash-SGL-TP4] Backend returned HTTP $$status"
+            return 1
+            ;;
+        esac
+      }
+
+      READY_URL="http://$${HOST_IP}:$${HTTP_PORT}/v1/models"
+      echo "Waiting for model to be ready (probing $$READY_URL)..."
+      ready_attempts=0
+      until curl --connect-timeout 5 --max-time 10 -sf \
+        -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+        "$$READY_URL" > /dev/null 2>&1; do
+        ready_attempts=$$((ready_attempts + 1))
+        if [ "$$ready_attempts" -ge 30 ]; then
+          echo "WARN: model not reachable at $$READY_URL after $$ready_attempts attempts (~20m); entering registration loop anyway"
+          break
+        fi
+        echo "Model not ready yet (attempt $$ready_attempts/30), retrying in 30s..."
+        sleep 30
+      done
+      echo "Model ready, starting registration loop"
+
+      while true; do
+        date +%s > /tmp/registrar_alive
+        check_inference
+        health_status=$$?
+        case "$$health_status" in
+          0)
+            FAILURE_COUNT=0
+            mark_registered
+            ;;
+          2)
+            FAILURE_COUNT=0
+            echo "[GLM-5.3-Flash-SGL-TP4] Keeping $$ENDPOINT registered while backend is saturated"
+            mark_registered
+            ;;
+          *)
+            FAILURE_COUNT=$$((FAILURE_COUNT + 1))
+            echo "[GLM-5.3-Flash-SGL-TP4] Health check failed ($$FAILURE_COUNT/$$MAX_RETRIES)"
+            if [ "$$REGISTERED" = true ] && [ "$$FAILURE_COUNT" -ge "$$MAX_RETRIES" ]; then
+              echo "[GLM-5.3-Flash-SGL-TP4] Retry limit reached, unregistering $$ENDPOINT"
+              unregister_endpoint "$$ENDPOINT"
+              REGISTERED=false
+              echo "[GLM-5.3-Flash-SGL-TP4] Exiting to refresh DNS (container will auto-restart)"
+              exit 1
+            fi
+            ;;
+        esac
+        sleep 60
+      done
+  nginx_conf:
+    content: |
+      log_format json_combined escape=json
+        '{'  '"time":"$$time_iso8601"'
+        ',"request_id":"$$http_x_request_id"'
+        ',"org_id":"$$http_x_org_id"'
+        ',"workspace_id":"$$http_x_workspace_id"'
+        ',"http_host":"$$host"'
+        ',"method":"$$request_method"'
+        ',"uri":"$$uri"'
+        ',"status":$$status'
+        ',"request_length":$$request_length'
+        ',"bytes_sent":$$bytes_sent'
+        ',"request_time":$$request_time'
+        ',"upstream_addr":"$$upstream_addr"'
+        '}';
+
+      access_log /var/log/nginx/access.log json_combined;
+
+      proxy_http_version 1.1;
+      proxy_set_header Host $$host;
+      proxy_set_header X-Real-IP $$remote_addr;
+      proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $$scheme;
+      proxy_set_header Connection '';
+      proxy_buffering off;
+      proxy_cache off;
+      proxy_read_timeout 3600s;
+      client_max_body_size 100m;
+      client_body_buffer_size 1m;
+
+      # Resolve proxy-glm53 through Docker's embedded DNS at request time
+      # (proxy_pass with a variable) instead of once at startup, so a recreated
+      # proxy container with a new IP is picked up immediately rather than at
+      # the next 6-hourly reload. Same pattern as the soak relay above.
+      resolver 127.0.0.11 valid=5s ipv6=off;
+
+      # :8000 - GLM-5.3-Flash
+      server {
+        listen 8000;
+        location / {
+          set $$proxy_glm53 http://proxy-glm53:8000;
+          proxy_pass $$proxy_glm53;
+        }
+      }
+
+      ssl_certificate /etc/letsencrypt/live/completions.near.ai/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/completions.near.ai/privkey.pem;
+      ssl_protocols TLSv1.2 TLSv1.3;
+
+      server {
+        listen 443 ssl http2;
+        server_name glm-5-3-flash.completions.near.ai
+                    glm-5-3-flash.completions-stg.near.ai
+                    ~^glm-5-3-flash-i\d+\.completions(-stg)?\.near\.ai$$;
+        # Keep H2 connections from cloud-api alive across long idle gaps so the
+        # bucket-pinned TCP connection survives between chats. Without this,
+        # nginx defaults (75s idle, 1000 req/conn) close the connection and the
+        # next request opens a new TCP via model-proxy's L4 LB → may land on a
+        # different backend → signature 404. Pairs with cloud-api H2 keepalive
+        # PINGs (http2_keep_alive_while_idle).
+        keepalive_timeout 1h;
+        keepalive_requests 1000000;
+        location / {
+          set $$proxy_glm53 http://proxy-glm53:8000;
+          proxy_pass $$proxy_glm53;
+        }
+      }

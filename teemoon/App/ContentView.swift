@@ -12,6 +12,7 @@ import os
 struct ContentView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(ProviderStore.self) private var providerStore
+    @Environment(ConfidentialSession.self) private var confidentialSession
     @Environment(\.modelContext) var modelContext
     @Environment(ChatGeneration.self) var llm
     @State var showSettings = false
@@ -37,25 +38,17 @@ struct ContentView: View {
     /// Once-per-process guard for UI-test seeding — see the .task below.
     @MainActor static var didSeedForUITests = false
 
+    private static let seedPresets: [String: Provider] = [
+        "nearai": .nearAI, "near.ai": .nearAI, "near": .nearAI,
+        "grok": .grok, "xai": .grok, "fireworks": .fireworks,
+        "openrouter": .openRouter, "nvidia": .nvidia,
+        "brave": .braveAnswers, "braveanswers": .braveAnswers,
+    ]
+
     static func seededCloudProvider(preset: String, env: [String: String]) -> Provider? {
-        var seeded: Provider
-        switch preset.lowercased() {
-        case "nearai", "near.ai", "near":
-            seeded = .nearAI
-            if let model = env["UITEST_SEED_MODEL"] ?? env["UITEST_SEED_NEARAI_MODEL"] {
-                seeded.model = model
-            }
-        case "grok", "xai":
-            seeded = .grok
-            if let model = env["UITEST_SEED_MODEL"] { seeded.model = model }
-        case "fireworks":
-            seeded = .fireworks
-            if let model = env["UITEST_SEED_MODEL"] { seeded.model = model }
-        case "brave", "braveanswers":
-            seeded = .braveAnswers
-        default:
-            return nil
-        }
+        guard var seeded = seedPresets[preset.lowercased()] else { return nil }
+        let override = env["UITEST_SEED_MODEL"] ?? (seeded.isNearAI ? env["UITEST_SEED_NEARAI_MODEL"] : nil)
+        if let override, !seeded.isFixedAnswerService { seeded.model = override }
         return seeded
     }
     #endif
@@ -94,6 +87,19 @@ struct ContentView: View {
             Text("your chat history is still on this device — nothing was deleted — "
                 + "but this build couldn't open it, so it is running without "
                 + "history. error: \(TeemoonApp.storeOpenFailure ?? "unknown")")
+        }
+        .task {
+            // Tiers FIRST, and synchronously cheap: what a near.ai model is
+            // decides whether the row claims encryption, and the id guess
+            // answers "own fleet" for anything it has not seen.
+            LiveCatalogStore.shared.seedNearAITiers()
+            // A saved near.ai setup can outlive its model (GLM-5.2, 2026-09-11):
+            // move it to what near.ai serves, then re-verify if it was active.
+            guard !ProcessInfo.processInfo.arguments.contains("--uitesting") else { return }
+            let moved = await providerStore.healRetiredNearAIModelsFromLive()
+            if moved.contains(where: { $0.id.uuidString == providerStore.currentProviderID }) {
+                confidentialSession.refreshAttestation()
+            }
         }
         .task {
             let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
@@ -187,6 +193,15 @@ struct ContentView: View {
             // the machine glyph, "on your own machine", the trust sheet that
             // replaces the ladder — can be driven without hand-entering an
             // endpoint. Keyless and non-attested, exactly as a user's would be.
+            // A second, NOT active local setup beside the cloud seed — for the
+            // switch-then-send tests. The plain seed below stays one-provider.
+            if isUITesting, Self.didSeedForUITests,
+               let endpoint = ProcessInfo.processInfo.environment["UITEST_SEED_ALSO_LOCAL_ENDPOINT"],
+               !providerStore.providers.contains(where: { $0.endpoint == endpoint }) {
+                let model = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MODEL"] ?? "local-model"
+                providerStore.addProvider(Provider(name: "local", endpoint: endpoint, model: model,
+                                                   requiresAPIKey: false))
+            }
             if isUITesting,
                !Self.didSeedForUITests,
                let endpoint = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_ENDPOINT"] {

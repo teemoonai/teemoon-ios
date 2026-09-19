@@ -479,16 +479,36 @@ struct AutoLabelHealingTests {
         #expect(store.providers[0].name == "ringzero")
     }
 
-    /// And the cloud half, which surfaced next.
-    @Test func aCloudKeyIsRenamedToItsProvider() {
+    /// And the cloud half, which surfaced next. The words come from what the
+    /// server itself listed — teemoon ships no catalogue to recognise them by.
+    @Test @MainActor func aCloudKeyIsRenamedToItsProvider() {
         let store = ProviderStore(inMemory: true)
         var fireworks = Provider.fireworks
-        fireworks.name = "fireworks Kimi K2.6"     // a curated display name
+        fireworks.name = "fireworks Kimi K2.6"     // a name from its own list
         fireworks.model = "accounts/fireworks/models/deepseek-v4-flash"
         fireworks.equippedModels = ["accounts/fireworks/models/deepseek-v4-flash"]
         store.providers = [fireworks]
+        LiveCatalogStore.shared.record(
+            [KnownModel(id: "accounts/fireworks/models/kimi-k2p6", displayName: "Kimi K2.6",
+                        vendor: "Moonshot", price: "")],
+            for: fireworks, apiKey: "")
+        defer { LiveCatalogStore.shared.forget(endpoint: fireworks.endpoint) }
         store.healAutoLabelsForTesting()
         #expect(store.providers[0].name == "fireworks")
+    }
+
+    /// And when nothing has listed that server, the label is LEFT ALONE. A
+    /// suffix teemoon cannot prove is a model name might be the user's word.
+    @Test @MainActor func anUnprovenCloudLabelIsKept() {
+        let store = ProviderStore(inMemory: true)
+        var fireworks = Provider.fireworks
+        fireworks.name = "fireworks Kimi K2.6"
+        fireworks.model = "accounts/fireworks/models/deepseek-v4-flash"
+        fireworks.equippedModels = ["accounts/fireworks/models/deepseek-v4-flash"]
+        store.providers = [fireworks]
+        LiveCatalogStore.shared.forget(endpoint: fireworks.endpoint)
+        store.healAutoLabelsForTesting()
+        #expect(store.providers[0].name == "fireworks Kimi K2.6")
     }
 
     /// A name teemoon can't prove it wrote is LEFT ALONE. This is the whole risk of

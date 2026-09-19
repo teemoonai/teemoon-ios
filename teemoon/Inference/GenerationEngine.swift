@@ -455,9 +455,9 @@ struct GenerationEngine: Sendable {
             if let str = output as? String { return str }
             return output.promptRepresentation.description
         } catch let error as LLMError {
-            if let status = error.httpStatus, status == 401 || status == 402 || status == 403 {
-                throw error
-            }
+            // A refused key ends the turn: rephrasing cannot fix it, and Brave
+            // says "invalid token" with a 422, not a 401.
+            if error.isKeyRejection { throw error }
             return "[web_search error: \(error.userMessage) Try rephrasing the query or omitting the freshness filter.]"
         } catch {
             return "[Tool call failed: \(error)]"

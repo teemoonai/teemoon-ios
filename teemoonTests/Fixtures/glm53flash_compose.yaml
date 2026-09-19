@@ -1,0 +1,1228 @@
+x-logging-conf: &logging-conf
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "10"
+    labels: "com.datadoghq.ad.logs,com.docker.compose.service"
+
+# Production GLM-5.3-Flash on two independent H200 TP4/EP4 replicas. Each
+# replica stays within one four-GPU NVLink island; one inference-proxy uses its native
+# least-connections backend pool for health-aware balancing and failover.
+#
+# The engine source is pinned to PierreLeGuen/sglang-upstream commit fc91d24,
+# derived from official SGLang main plus the official GLM-5.3 branch. It contains
+# upstream disconnect cleanup (#35255), the final-prefill abort fix (#34153),
+# the strict thinking-budget adapter, and two narrow DSA import-cycle fixes. The
+# official CUDA 13 SGLang image is the pinned build base. The
+# serving envelope is intentionally conservative: BF16 KV, 0.80 static memory,
+# 32 running requests, a bounded 32-request queue, 4096-token prefill chunks,
+# decode graphs capped at batch 32, TileLang DSA, DeepGEMM, and adaptive EAGLE
+# 5/1/6. This retains the full 1,048,576-token model context while avoiding the
+# late K-pool workspace exhaustion observed with larger prefill chunks.
+#
+# A small fail-closed adapter patch maps the public thinking_token_budget field
+# to SGLang strict-thinking's custom_params.thinking_budget. Omitted values
+# default to 8192; explicit null remains an opt-out; an explicit native
+# custom_params.thinking_budget wins. Request/response payload logging is off.
+#
+# The vLLM GLM-5.3-Flash path is not used: its Hopper NVFP4/MLA path produced
+# non-finite logits and repetitive output. Replica 2 is replaced by DeepSeek-V4-Flash for the mixed-root E2EE affinity test.
+#
+# GPU telemetry uses one full-host DCGM exporter with a checked-in H200
+# operational collector. The collector keeps utilization, power and profiling
+# signals while enabling the reliability families that NVIDIA ships commented
+# out by default (XID totals, ECC, retired pages, GPU health and NVLink faults).
+# This service can be recreated independently; changing it must not restart the
+# SGLang workers, proxy, registrar or nginx.
+
+x-nvidia: &nvidia
+  runtime: nvidia
+  ipc: host
+  ulimits:
+    memlock: -1
+    nofile:
+      soft: 65535
+      hard: 65535
+
+x-vllm-proxy-common: &vllm-proxy-common
+  image: nearaidev/vllm-proxy-rs@sha256:b183677a5d32267539b9b21ec45327a4f3be0a013afeb608c68c4d76e9472e36
+  user: root
+  privileged: true
+  <<: *nvidia
+  extra_hosts:
+    - "compose-manager:host-gateway"
+  volumes:
+    - /var/run/dstack.sock:/var/run/dstack.sock
+    - certs:/etc/letsencrypt:ro
+  restart: unless-stopped
+  logging: *logging-conf
+
+x-glm53-build: &glm53-build
+  context: .
+  dockerfile_inline: |
+    FROM lmsysorg/sglang@sha256:eb090e39434085f713d39421cb2e5b6d342424aa95c3d9ecdfe8cadd4289e99b
+    ADD https://github.com/PierreLeGuen/sglang-upstream/archive/fc91d2403cc210a86bd5fc715c6609f58c932e5a.tar.gz /tmp/sglang.tar.gz
+    RUN printf '%s  %s\n' \
+          '1e4340ed7e476696f36f4094e027f2c7648bcca98934f0df3220b307bdcd1673' \
+          '/tmp/sglang.tar.gz' \
+        | sha256sum -c -
+    RUN rm -rf /sgl-workspace/sglang \
+        && mkdir -p /sgl-workspace/sglang \
+        && tar -xzf /tmp/sglang.tar.gz --strip-components=1 -C /sgl-workspace/sglang \
+        && rm /tmp/sglang.tar.gz
+    WORKDIR /sgl-workspace/sglang
+    RUN python3 -m pip install setuptools-rust==1.13.0 setuptools-scm==10.2.3 pytest-asyncio==1.4.0
+    RUN --mount=type=cache,target=/sgl-workspace/sglang/rust/target \
+        --mount=type=cache,target=/sgl-workspace/sglang/rust/sglang-radix-tree/target \
+        CARGO_BUILD_JOBS=8 SETUPTOOLS_SCM_PRETEND_VERSION=0.5.16.dev20260904 \
+        python3 -m pip install --no-deps --no-build-isolation -e python
+    LABEL org.opencontainers.image.source="https://github.com/PierreLeGuen/sglang-upstream" \
+          org.opencontainers.image.revision="fc91d2403cc210a86bd5fc715c6609f58c932e5a"
+    RUN python3 -c "import sglang; from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest; print(sglang.__file__)"
+
+x-sg-glm53-flash-common: &sg-glm53-flash-common
+  <<: *nvidia
+  init: true
+  image: nearai/glm53-sglang-upstream-fc91d24:local
+  build: *glm53-build
+  command: >
+      sglang serve
+      --model-path /root/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/84c6a6aa9497188e15a635ba793b0f95a79b1033
+      --revision 84c6a6aa9497188e15a635ba793b0f95a79b1033
+      --served-model-name z-ai/glm-5.3-flash
+      --tp-size 4
+      --ep-size 4
+      --mem-fraction-static 0.80
+      --max-running-requests 32
+      --max-queued-requests 32
+      --chunked-prefill-size 4096
+      --cuda-graph-max-bs-decode 32
+      --dsa-prefill-backend tilelang
+      --dsa-decode-backend tilelang
+      --kv-cache-dtype bfloat16
+      --moe-runner-backend deep_gemm
+      --speculative-algorithm EAGLE
+      --speculative-num-steps 5
+      --speculative-eagle-topk 1
+      --speculative-num-draft-tokens 6
+      --speculative-adaptive
+      --reasoning-parser glm45
+      --enable-strict-thinking
+      --grammar-backend xgrammar
+      --tool-call-parser glm47
+      --chat-template /root/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/3f1971b7b5f7a528c9c4ef6212c8785298a8c24a/chat_template.jinja
+      --context-length 1048576
+      --dist-init-addr 127.0.0.1:29510
+      --watchdog-timeout 1800
+      --host 0.0.0.0
+      --port 8000
+      --enable-metrics
+      --enable-cache-report
+      --log-requests-level 0
+      --disable-fast-image-processor
+      --limit-mm-data-per-request '{"image": 64}'
+  volumes:
+    - kernel_cache:/root/.cache
+    - huggingface_cache:/root/.cache/huggingface
+  environment:
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    # Local snapshot path; nothing is fetched at engine start.
+    - HF_HUB_OFFLINE=1
+    - TRANSFORMERS_OFFLINE=1
+    - HF_HUB_DISABLE_TELEMETRY=1
+    - DO_NOT_TRACK=1
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    - OPENBLAS_L2_SIZE=2097152
+    - NCCL_DEBUG=WARN
+    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
+    - TRITON_CACHE_DIR=/root/.cache/triton
+  restart: unless-stopped
+  stop_grace_period: 5m
+  logging: *logging-conf
+
+x-dcgm-common: &dcgm-common
+  image: nvcr.io/nvidia/k8s/dcgm-exporter@sha256:613ab03c11d442fd960ff515f547e9921537454a712d08160bc8f677f89f1c35
+  command: ["-f", "/etc/dcgm-exporter/nearai-h200.csv"]
+  runtime: nvidia
+  cap_add:
+    - SYS_ADMIN
+  configs:
+    - source: dcgm_h200_metrics
+      target: /etc/dcgm-exporter/nearai-h200.csv
+      mode: 0444
+  restart: unless-stopped
+  logging: *logging-conf
+
+x-dsv4-flash-common: &dsv4-flash-common
+  <<: *nvidia
+  init: true
+  # DeepSeek-V4-Flash-0731 target-only TP4 sparse-prefill-on configuration.
+  # The single replica consumes four H200 GPUs; mixed 8192-token prefill, one
+  # continuous decode step, and a 4096-token admission reserve bound
+  # long-prefill interference. This pinned nightly includes the upstream
+  # overlap-scheduler WAR-fence alignment from sgl-project/sglang#33587.
+  # DSPARK remains disabled because it is not qualified for this mixed workload.
+  # gpu04 uses the same DeepSeek serving settings, with different GPU placement.
+  image: docker.io/nearaidev/sglang@sha256:5bc4bc0dfd3629af7e57168098b5e76b4206dcb02b8ed8a872aebfd153ff240b
+  command: >
+      sglang serve
+      --trust-remote-code
+      --model-path deepseek-ai/DeepSeek-V4-Flash-0731
+      --revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062
+      --tp-size 4
+      --kv-cache-dtype fp8_e4m3
+      --moe-runner-backend marlin
+      --cuda-graph-max-bs 64
+      --mem-fraction-static 0.83
+      --max-running-requests 64
+      --max-queued-requests 16
+      --schedule-conservativeness 1.3
+      --num-continuous-decode-steps 1
+      --enable-mixed-chunk
+      --chunked-prefill-size 8192
+      --max-prefill-tokens 16384
+      --swa-full-tokens-ratio 0.1
+      --watchdog-timeout 1800
+      --disable-custom-all-reduce
+      --tool-call-parser deepseekv4
+      --reasoning-parser deepseek-v4
+      --json-model-override-args '{"dsv4_reasoning_effort_profile":"official"}'
+      --port 8000
+      --host 0.0.0.0
+      --enable-cache-report
+      --enable-metrics
+      --log-requests-level 0
+      --disable-fast-image-processor
+      --limit-mm-data-per-request '{"image": 64}'
+      --served-model-name deepseek-ai/DeepSeek-V4-Flash
+      ${DSV4_RETURN_HIDDEN_STATES:+--enable-return-hidden-states}
+  volumes:
+    - huggingface_cache:/root/.cache/huggingface
+    - kernel_cache:/root/.cache/deep_gemm
+  environment:
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    - VLLM_LOGGING_LEVEL=INFO
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    - OPENBLAS_L2_SIZE=2097152
+    - NCCL_DEBUG=WARN
+    - SGLANG_ENABLE_SPEC_V2=1
+    - SGLANG_CHUNKED_PREFILL_ADMISSION_RESERVE=4096
+    - SGLANG_DSV4_FP4_EXPERTS=1
+    # Matched H200 A/B: 10.47M -> 11.53M KV tokens per TP4 replica (+10%).
+    - SGLANG_DSV4_COMPRESS_STATE_DTYPE=bf16
+    # Containment for sgl-project/sglang#34718: avoid TopK v2's 65K-131K
+    # streaming band until its long-context illegal-address failure is fixed.
+    - SGLANG_OPT_USE_TOPK_V2=0
+    - SGLANG_ENABLE_UNIFIED_RADIX_TREE=1
+    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    - SGLANG_OPT_FLASHMLA_SPARSE_PREFILL=1
+  restart: unless-stopped
+  stop_grace_period: 5m
+  logging: *logging-conf
+
+services:
+  model-downloader:
+    image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim@sha256:4f5d923c9dcea037f57bda425dd209f3ec643da2f0b74227f68d09dab0b3bb36
+    container_name: model-downloader
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Downloading zai-org/GLM-5.3-Flash..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download zai-org/GLM-5.3-Flash --revision 84c6a6aa9497188e15a635ba793b0f95a79b1033
+        echo "Downloading corrected GLM-5.3-Flash chat template..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download zai-org/GLM-5.3-Flash chat_template.jinja --revision 3f1971b7b5f7a528c9c4ef6212c8785298a8c24a
+        echo "Downloading deepseek-ai/DeepSeek-V4-Flash..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download deepseek-ai/DeepSeek-V4-Flash --revision 553034d7dd9e06c2eeaee68cf85a17d6d4754cf0
+        echo "Downloading deepseek-ai/DeepSeek-V4-Flash-0731..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download deepseek-ai/DeepSeek-V4-Flash-0731 --revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062
+        echo "Download complete."
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-downloader","service":"model-downloader","tags":["model:zai-org/GLM-5.3-Flash","served_model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # Dormant during normal deploys. Target this service explicitly with the
+  # maintenance profile when one model's shared HF cache must be evicted.
+  # Inlined copy of the root cleanup-hf-model.yaml service: compose-manager's
+  # compose/up fetches only the requested file, so cross-file `extends:` /
+  # `include:` must not be used here (they fail at config load).
+  hf-cleanup:
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    container_name: hf-cleanup
+    profiles: ["maintenance"]
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        : "$${MODEL_NAME:?MODEL_NAME env var is required (e.g. zai-org/GLM-5-FP8)}"
+
+        echo "=== Disk usage ==="
+        df -h /root/.cache 2>/dev/null || df -h /
+
+        echo ""
+        echo "=== Cached model weights ==="
+        HUB=/root/.cache/huggingface/hub
+        if ls "$$HUB"/models--* >/dev/null 2>&1; then
+          du -sh "$$HUB"/models--* | sort -rh
+        else
+          echo "(none)"
+        fi
+        echo ""
+        echo "Total HF cache: $$(du -sh $$HUB 2>/dev/null | cut -f1)"
+
+        echo ""
+        echo "=== Cleanup ==="
+        SAFE=$$(printf '%s' "$$MODEL_NAME" | sed 's|/|--|g')
+        TARGET="$$HUB/models--$$SAFE"
+        echo "MODEL_NAME=$$MODEL_NAME"
+        echo "TARGET=$$TARGET"
+        if [ ! -d "$$TARGET" ]; then
+          echo "Not found — nothing to remove."
+          exit 0
+        fi
+        echo "Removing $$(du -sh "$$TARGET" | cut -f1) ..."
+        rm -rf "$$TARGET"
+        echo "Removed $$TARGET"
+        echo "Disk after: $$(df -h /root/.cache 2>/dev/null | tail -1 || df -h / | tail -1)"
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - MODEL_NAME=${MODEL_NAME}
+    # Verbatim from cleanup-hf-model.yaml (not the file-wide *logging-conf) so the
+    # rendered service is unchanged from the previous `extends` result.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.datadoghq.ad.logs"
+
+  nginx:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: nginx
+    depends_on:
+      - proxy-glm53
+      - proxy-dsv4-flash
+    command: /bin/sh -c 'while :; do sleep 6h; nginx -s reload; done & nginx -g "daemon off;"'
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8444:443"
+    volumes:
+      - certs:/etc/letsencrypt:ro
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+        mode: 0644
+    restart: unless-stopped
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nginx","service":"nginx","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000"]}]'
+
+  model-proxy-registrar:
+    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+    container_name: model-proxy-registrar
+    entrypoint: ["sh", "/register.sh"]
+    restart: unless-stopped
+    healthcheck:
+      # Unhealthy if the registration loop hasn't ticked in 3m (e.g. wedged
+      # before the loop, or the loop died). Surfaces silent registrar failures
+      # in `docker ps` / Datadog. See cvm-compose-files#57.
+      test: ["CMD-SHELL", "[ $$(( $$(date +%s) - $$(cat /tmp/registrar_alive 2>/dev/null || echo 0) )) -lt 180 ]"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1200s
+    environment:
+      - HOST_IP=${HOST_IP}
+      - HTTP_PORT=${HTTP_PORT:-8000}
+      - TLS_PORT=${TLS_PORT:-8444}
+      - MODEL_PROXY_TOKEN=${MODEL_PROXY_TOKEN}
+      - PROXY_TOKEN=${PROXY_TOKEN}
+    configs:
+      - source: registrar_script
+        target: /register.sh
+        mode: 0755
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-proxy-registrar","service":"model-proxy-registrar","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # --- GLM-5.3-Flash proxy ---
+  proxy-glm53:
+    <<: *vllm-proxy-common
+    container_name: proxy-glm53
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=z-ai/glm-5.3-flash
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BACKEND_URLS=http://model-sg-glm53-fp8-tp4-r1:8000
+      - VLLM_PROXY_MAX_REQUEST_SIZE=104857600
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-glm53"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "z-ai/glm-5.3-flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # --- GLM-5.3-Flash engine replica 1 (SGLang TP4, GPUs 0-3) ---
+  model-sg-glm53-fp8-tp4-r1:
+    <<: *sg-glm53-flash-common
+    container_name: model-sg-glm53-fp8-tp4-r1
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0","1","2","3"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sglang","service":"sglang","tags":["model:z-ai/glm-5.3-flash","model_path:zai-org/GLM-5.3-Flash","served_model:z-ai/glm-5.3-flash","precision:fp8-weights-bf16-kv","deployment:glm53-flash-sgl-tp4","config_variant:official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192","request_logging:disabled","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000","instance:1"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "sglang"
+      nearai.otel.service: "sglang"
+      nearai.otel.source: "sglang"
+      nearai.otel.container_name: "model-sg-glm53-fp8-tp4-r1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "z-ai/glm-5.3-flash"
+      nearai.otel.model_path: "zai-org/GLM-5.3-Flash"
+      nearai.otel.served_model: "z-ai/glm-5.3-flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.config_variant: "official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192"
+      nearai.otel.thinking_budget_policy: "default8192-public-to-native"
+      nearai.otel.request_logging: "disabled"
+      nearai.otel.instance: "1"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # --- DeepSeek-V4-Flash proxy (single TP4 replica on GPUs 4-7) ---
+
+  proxy-dsv4-flash:
+    <<: *vllm-proxy-common
+    image: nearaidev/vllm-proxy-rs@sha256:b0c5cd0786b19dfa46144107be15e340b7a338b1c341d02ffa994c9f1ea77dfd
+    container_name: proxy-dsv4-flash
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - VLLM_PROXY_STREAM_IDLE_TIMEOUT_SECS=20
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=deepseek-ai/DeepSeek-V4-Flash
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BASE_URL=http://model-sg-dsv4-flash-fp4-tp4:8000
+      - VLLM_PROXY_MAX_REQUEST_SIZE=104857600
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:deepseek-ai/DeepSeek-V4-Flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8001","instance:1","ab_arm:tp4-target-only-sparse-on-gpu30","sparse_prefill:on"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-dsv4-flash"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4-Flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ab_arm: "tp4-target-only-sparse-on-gpu30"
+      nearai.otel.sparse_prefill: "on"
+
+  model-sg-dsv4-flash-fp4-tp4:
+    <<: *dsv4-flash-common
+    container_name: model-sg-dsv4-flash-fp4-tp4
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["4","5","6","7"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sglang","service":"sglang","tags":["model:deepseek-ai/DeepSeek-V4-Flash-0731","model_path:deepseek-ai/DeepSeek-V4-Flash-0731","model_revision:7872f01b1d1fe23eabc4c98b48bffcef5a386062","deployment:glm53-flash-sgl-tp4","config_variant:dsv4-0731-tp4-target-only-sparse-on","decode_mode:target_only","sparse_prefill:on","chunk_size:8192","ab_arm:tp4-target-only-sparse-on-gpu30","max_prefill_tokens:16384","continuous_decode_steps:1","chunked_prefill_admission_reserve:4096","compress_state_dtype:bf16","watchdog_timeout:1800","cuda_graph:1","max_running_requests:64","max_queued_requests:16","schedule_conservativeness:1.3","sglang_revision:nightly-c0b6474-near-v1","engine_image:5bc4bc0dfd36","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8001","instance:1"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "sglang"
+      nearai.otel.service: "sglang"
+      nearai.otel.source: "sglang"
+      nearai.otel.container_name: "model-sg-dsv4-flash-fp4-tp4"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4-Flash-0731"
+      nearai.otel.model_path: "deepseek-ai/DeepSeek-V4-Flash-0731"
+      nearai.otel.model_revision: "7872f01b1d1fe23eabc4c98b48bffcef5a386062"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.config_variant: "dsv4-0731-tp4-target-only-sparse-on"
+      nearai.otel.decode_mode: "target_only"
+      nearai.otel.sparse_prefill: "on"
+      nearai.otel.chunk_size: "8192"
+      nearai.otel.ab_arm: "tp4-target-only-sparse-on-gpu30"
+      nearai.otel.max_prefill_tokens: "16384"
+      nearai.otel.continuous_decode_steps: "1"
+      nearai.otel.chunked_prefill_admission_reserve: "4096"
+      nearai.otel.compress_state_dtype: "bf16"
+      nearai.otel.watchdog_timeout: "1800"
+      nearai.otel.cuda_graph: "1"
+      nearai.otel.max_running_requests: "64"
+      nearai.otel.max_queued_requests: "16"
+      nearai.otel.schedule_conservativeness: "1.3"
+      nearai.otel.sglang_revision: "nightly-c0b6474-near-v1"
+      nearai.otel.engine_image: "5bc4bc0dfd36"
+
+  # --- Full-host GPU telemetry ---
+
+  dcgm-glm53:
+    <<: *dcgm-common
+    container_name: dcgm-glm53
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0","1","2","3","4","5","6","7"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"dcgm-exporter","service":"dcgm-exporter","tags":["model:z-ai/glm-5.3-flash","model_path:zai-org/GLM-5.3-Flash","served_model:z-ai/glm-5.3-flash","deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "dcgm"
+      nearai.otel.service: "dcgm-exporter"
+      nearai.otel.source: "dcgm-exporter"
+      nearai.otel.container_name: "dcgm-glm53"
+      nearai.otel.port: "9400"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "z-ai/glm-5.3-flash"
+      nearai.otel.model_path: "zai-org/GLM-5.3-Flash"
+      nearai.otel.served_model: "z-ai/glm-5.3-flash"
+      nearai.otel.deployment: "glm53-flash-sgl-tp4"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  otelcol-contrib:
+    image: otel/opentelemetry-collector-contrib@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917
+    container_name: otelcol-contrib
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    user: "0:0"
+    mem_limit: "768m"
+    environment:
+      - MONITORING_INGEST_TOKEN=${MONITORING_INGEST_TOKEN:-}
+      - CVM_NAME=${CVM_NAME:-unknown}
+      - CVM_HOST=${CVM_HOST:-unknown}
+      - DD_HOSTNAME=${DD_HOSTNAME:-unknown}
+      - ENV=${ENV:-unknown}
+      - HOST_IP=${HOST_IP:-unknown}
+    expose:
+      - "4317"
+      - "4318"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - otelcol_app_storage:/var/lib/otelcol-contrib
+    configs:
+      - source: otelcol_app_config
+        target: /etc/otelcol-contrib/config.yaml
+        mode: 0444
+    restart: unless-stopped
+    logging:
+      driver: "local"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"otelcol-contrib","service":"otelcol-contrib","tags":["deployment:glm53-flash-sgl-tp4","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+networks:
+  default:
+    external: true
+    name: dstack_default
+
+volumes:
+  otelcol_app_storage:
+  huggingface_cache:
+  kernel_cache:
+  certs:
+    external: true
+    name: certs
+
+configs:
+  dcgm_h200_metrics:
+    content: |
+      # NEAR AI H200 operational collector for DCGM 4.6.0 / exporter 4.8.3.
+      # Format: DCGM field, Prometheus type, help message.
+
+      # Clocks, temperature, power and cumulative GPU-board energy.
+      DCGM_FI_DEV_SM_CLOCK, gauge, SM clock frequency in MHz.
+      DCGM_FI_DEV_MEM_CLOCK, gauge, Memory clock frequency in MHz.
+      DCGM_FI_DEV_MEMORY_TEMP, gauge, Memory temperature in C.
+      DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature in C.
+      DCGM_FI_DEV_POWER_USAGE, gauge, GPU board power draw in W.
+      DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION, counter, GPU board energy consumed since boot in mJ.
+
+      # Utilization, framebuffer and PCIe.
+      DCGM_FI_DEV_GPU_UTIL, gauge, GPU utilization in percent.
+      DCGM_FI_DEV_MEM_COPY_UTIL, gauge, Memory copy utilization in percent.
+      DCGM_FI_DEV_FB_FREE, gauge, Framebuffer memory free in MiB.
+      DCGM_FI_DEV_FB_USED, gauge, Framebuffer memory used in MiB.
+      DCGM_FI_DEV_FB_RESERVED, gauge, Framebuffer memory reserved in MiB.
+      DCGM_FI_PROF_PCIE_TX_BYTES, gauge, PCIe transmit throughput in bytes per second.
+      DCGM_FI_PROF_PCIE_RX_BYTES, gauge, PCIe receive throughput in bytes per second.
+      DCGM_FI_DEV_PCIE_REPLAY_COUNTER, counter, Total PCIe replay events.
+
+      # Raw and exporter-owned incident signals. Windowed counts provide a
+      # stable zero series; cumulative totals preserve observed event labels.
+      DCGM_FI_DEV_XID_ERRORS, gauge, Last XID error encountered.
+      DCGM_EXP_XID_ERRORS_COUNT, gauge, XID records observed in the configured window.
+      DCGM_EXP_XID_ERRORS_TOTAL, counter, XID records observed since exporter start.
+      DCGM_EXP_CLOCK_EVENTS_COUNT, gauge, Clock events observed in the configured window.
+      DCGM_EXP_CLOCK_EVENTS_TOTAL, counter, Clock event transitions observed since exporter start.
+      DCGM_EXP_GPU_HEALTH_STATUS, gauge, Current DCGM GPU health status by health watch.
+      DCGM_EXP_P2P_STATUS, gauge, Current NVLink P2P status for each ordered GPU pair.
+
+      # Throttling and reliability constraints.
+      DCGM_FI_DEV_POWER_VIOLATION, counter, Throttling duration due to power constraints in ns.
+      DCGM_FI_DEV_THERMAL_VIOLATION, counter, Throttling duration due to thermal constraints in ns.
+      DCGM_FI_DEV_SYNC_BOOST_VIOLATION, counter, Throttling duration due to sync boost constraints in ns.
+      DCGM_FI_DEV_BOARD_LIMIT_VIOLATION, counter, Throttling duration due to board constraints in ns.
+      DCGM_FI_DEV_LOW_UTIL_VIOLATION, counter, Throttling duration due to low utilization in ns.
+      DCGM_FI_DEV_RELIABILITY_VIOLATION, counter, Throttling duration due to reliability constraints in ns.
+
+      # ECC, retired pages and row remapping.
+      DCGM_FI_DEV_ECC_SBE_VOL_TOTAL, counter, Total volatile single-bit ECC errors.
+      DCGM_FI_DEV_ECC_DBE_VOL_TOTAL, counter, Total volatile double-bit ECC errors.
+      DCGM_FI_DEV_ECC_SBE_AGG_TOTAL, counter, Total aggregate single-bit ECC errors.
+      DCGM_FI_DEV_ECC_DBE_AGG_TOTAL, counter, Total aggregate double-bit ECC errors.
+      DCGM_FI_DEV_RETIRED_SBE, counter, Total pages retired due to single-bit errors.
+      DCGM_FI_DEV_RETIRED_DBE, counter, Total pages retired due to double-bit errors.
+      DCGM_FI_DEV_RETIRED_PENDING, counter, Pages pending retirement.
+      DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS, counter, Total uncorrectable remapped rows.
+      DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS, counter, Total correctable remapped rows.
+      DCGM_FI_DEV_ROW_REMAP_FAILURE, gauge, Whether row remapping has failed.
+
+      # NVLink traffic and integrity.
+      DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL, gauge, Aggregate NVLink traffic rate across all lanes.
+      DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_COUNT_TOTAL, counter, Total NVLink flow-control CRC errors.
+      DCGM_FI_DEV_NVLINK_CRC_DATA_ERROR_COUNT_TOTAL, counter, Total NVLink data CRC errors.
+      DCGM_FI_DEV_NVLINK_REPLAY_ERROR_COUNT_TOTAL, counter, Total NVLink replay errors.
+      DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_COUNT_TOTAL, counter, Total NVLink recovery errors.
+
+      # Workload profiling. Unsupported fields are skipped by DCGM and must be
+      # represented as unsupported in Grafana rather than coerced to zero.
+      DCGM_FI_PROF_GR_ENGINE_ACTIVE, gauge, Ratio of time the graphics engine is active.
+      DCGM_FI_PROF_PIPE_TENSOR_ACTIVE, gauge, Ratio of cycles the tensor pipe is active.
+      DCGM_FI_PROF_DRAM_ACTIVE, gauge, Ratio of time the device memory interface is active.
+
+      # Stable software identity labels attached to emitted GPU metrics.
+      DCGM_FI_DRIVER_VERSION, label, NVIDIA driver version.
+      DCGM_FI_NVML_VERSION, label, NVML version.
+      DCGM_FI_DEV_BRAND, label, GPU product brand.
+      DCGM_FI_DEV_VBIOS_VERSION, label, GPU VBIOS version.
+
+  otelcol_app_config:
+    content: |
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+
+        filelog/docker_containers:
+          include: [/var/lib/docker/containers/*/*-json.log]
+          start_at: end
+          storage: file_storage
+          include_file_path: true
+          operators:
+            - type: json_parser
+              parse_from: body
+              parse_to: attributes
+              timestamp:
+                parse_from: attributes.time
+                layout_type: gotime
+                layout: '2006-01-02T15:04:05.999999999Z07:00'
+              on_error: send_quiet
+            - type: move
+              from: attributes.log
+              to: body
+              if: 'attributes.log != nil'
+            - type: move
+              from: attributes.stream
+              to: attributes["log.iostream"]
+              if: 'attributes.stream != nil'
+            - type: remove
+              field: attributes.time
+              if: 'attributes.time != nil'
+            - type: regex_parser
+              parse_from: attributes["log.file.path"]
+              regex: '/var/lib/docker/containers/(?P<container_id>[a-f0-9]{12})[a-f0-9]*/'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'model:(?P<model>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'served_model:(?P<served_model>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'model_path:(?P<model_path>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'precision:(?P<precision>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'deployment:(?P<deployment>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'ip:(?P<ip>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'port:(?P<port>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'env:(?P<env>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'host:(?P<host>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'instance:(?P<instance>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'replica:(?P<replica>[^",\]]+)'
+              on_error: send_quiet
+            - type: add
+              field: attributes["service.name"]
+              value: cvm-docker
+
+        prometheus/apps:
+          config:
+            scrape_configs:
+              - job_name: sglang-model-sg-glm53-fp8-tp4-r1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-sg-glm53-fp8-tp4-r1:8000']
+                    labels:
+                      service: "sglang"
+                      source: "sglang"
+                      container_name: "model-sg-glm53-fp8-tp4-r1"
+                      model: "z-ai/glm-5.3-flash"
+                      model_path: "zai-org/GLM-5.3-Flash"
+                      served_model: "z-ai/glm-5.3-flash"
+                      precision: "fp8-weights-bf16-kv"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+                      instance: "1"
+                      config_variant: "official-upstream-fc91d24-h200-tp4-ep4-eagle-adaptive-5-1-6-strict-budget8192"
+                      thinking_budget_policy: "default8192-public-to-native"
+                      request_logging: "disabled"
+              - job_name: sglang-model-sg-dsv4-flash-fp4-tp4
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-sg-dsv4-flash-fp4-tp4:8000']
+                    labels:
+                      service: "sglang"
+                      source: "sglang"
+                      container_name: "model-sg-dsv4-flash-fp4-tp4"
+                      model: "deepseek-ai/DeepSeek-V4-Flash-0731"
+                      model_path: "deepseek-ai/DeepSeek-V4-Flash-0731"
+                      model_revision: "7872f01b1d1fe23eabc4c98b48bffcef5a386062"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8001"
+                      instance: "1"
+                      config_variant: "dsv4-0731-tp4-target-only-sparse-on"
+                      decode_mode: "target_only"
+                      sparse_prefill: "on"
+                      chunk_size: "8192"
+                      ab_arm: "tp4-target-only-sparse-on-gpu30"
+                      max_prefill_tokens: "16384"
+                      continuous_decode_steps: "1"
+                      chunked_prefill_admission_reserve: "4096"
+                      compress_state_dtype: "bf16"
+                      watchdog_timeout: "1800"
+                      cuda_graph: "1"
+                      max_running_requests: "64"
+                      max_queued_requests: "16"
+                      schedule_conservativeness: "1.3"
+                      sglang_revision: "nightly-c0b6474-near-v1"
+                      engine_image: "5bc4bc0dfd36"
+              - job_name: dcgm-dcgm-glm53
+                scrape_interval: 15s
+                scrape_timeout: 10s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['dcgm-glm53:9400']
+                    labels:
+                      service: "dcgm-exporter"
+                      source: "dcgm-exporter"
+                      container_name: "dcgm-glm53"
+                      model: "z-ai/glm-5.3-flash"
+                      model_path: "zai-org/GLM-5.3-Flash"
+                      served_model: "z-ai/glm-5.3-flash"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "9400"
+              - job_name: inference-proxy-proxy-glm53
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-glm53:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-glm53"
+                      model: "z-ai/glm-5.3-flash"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+              - job_name: inference-proxy-proxy-dsv4-flash
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-dsv4-flash:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-dsv4-flash"
+                      model: "deepseek-ai/DeepSeek-V4-Flash"
+                      deployment: "glm53-flash-sgl-tp4"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8001"
+                      instance: "1"
+                      ab_arm: "tp4-target-only-sparse-on-gpu30"
+                      sparse_prefill: "on"
+        prometheus/self:
+          config:
+            scrape_configs:
+              - job_name: otelcol-app
+                scrape_interval: 30s
+                static_configs:
+                  - targets: ['localhost:8888']
+
+      processors:
+        memory_limiter:
+          check_interval: 1s
+          limit_mib: 512
+          spike_limit_mib: 128
+
+        resource:
+          attributes:
+            - key: host.name
+              value: $${env:DD_HOSTNAME}
+              action: upsert
+            - key: cvm.name
+              value: $${env:CVM_NAME}
+              action: upsert
+            - key: host.machine
+              value: $${env:CVM_HOST}
+              action: insert
+            - key: deployment.environment
+              value: $${env:ENV}
+              action: upsert
+            - key: service.namespace
+              value: near-ai
+              action: insert
+
+        transform/docker_metadata:
+          error_mode: ignore
+          log_statements:
+            - context: log
+              statements:
+                - set(attributes["service.name"], attributes["attrs"]["com.docker.compose.service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil
+                - set(attributes["service.name"], ParseJSON(attributes["attrs"]["com.datadoghq.ad.logs"])[0]["service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil
+                - set(attributes["log.source"], ParseJSON(attributes["attrs"]["com.datadoghq.ad.logs"])[0]["source"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil
+                - set(attributes["service"], attributes["service.name"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil and attributes["service.name"] != nil
+                - set(attributes["source"], attributes["log.source"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil and attributes["log.source"] != nil
+                - set(attributes["container.name"], attributes["attrs"]["com.docker.compose.service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil
+
+        filter/app_logs:
+          error_mode: ignore
+          logs:
+            log_record:
+              - 'attributes["model"] == nil and attributes["deployment"] == nil'
+              - 'attributes["service.name"] == "compose-manager"'
+              - 'attributes["service.name"] == "compose-manager-launcher"'
+              - 'attributes["service.name"] == "otelcol-management"'
+              - 'attributes["service.name"] == "otelcol-contrib"'
+              - 'attributes["service.name"] == "datadog-agent"'
+
+        groupbyattrs/docker_service:
+          keys:
+            - service.name
+            - service
+            - container.name
+            - log.source
+            - source
+            - log.iostream
+            - model
+            - served_model
+            - model_path
+            - precision
+            - deployment
+            - env
+            - host
+            - ip
+            - port
+            - instance
+            - replica
+
+        batch:
+          send_batch_size: 1024
+          send_batch_max_size: 2048
+          timeout: 5s
+
+      exporters:
+        otlphttp/gateway:
+          endpoint: https://telemetry.infra.near.ai
+          headers:
+            Authorization: "Bearer $${env:MONITORING_INGEST_TOKEN}"
+          sending_queue:
+            num_consumers: 1
+            queue_size: 128
+            storage: file_storage
+
+      extensions:
+        file_storage:
+          directory: /var/lib/otelcol-contrib/storage
+          create_directory: true
+
+      service:
+        extensions: [file_storage]
+        pipelines:
+          logs/app:
+            receivers: [filelog/docker_containers]
+            processors: [memory_limiter, resource, transform/docker_metadata, filter/app_logs, groupbyattrs/docker_service, batch]
+            exporters: [otlphttp/gateway]
+          metrics/app:
+            receivers: [prometheus/apps]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          metrics/otlp:
+            receivers: [otlp]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          metrics/self:
+            receivers: [prometheus/self]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+        telemetry:
+          metrics:
+            address: localhost:8888
+          logs:
+            level: info
+
+  registrar_script:
+    content: |
+      #!/bin/sh
+      PROXY_URL="https://completions.near.ai"
+      TOKEN="$${MODEL_PROXY_TOKEN}"
+      INFERENCE_TOKEN="$${PROXY_TOKEN}"
+
+      if [ -z "$$TOKEN" ] || [ -z "$$INFERENCE_TOKEN" ]; then
+        echo "ERROR: MODEL_PROXY_TOKEN and PROXY_TOKEN are required for model-proxy registration"
+        exit 1
+      fi
+
+      MAX_RETRIES=3
+
+      for port in 8000 8001; do
+        eval "REG_$$port=false"
+        eval "FAIL_COUNT_$$port=0"
+      done
+
+      routing_port_for() {
+        echo "$${TLS_PORT}"
+      }
+
+      # $1 = endpoint (host:port), $2 = routing port for that backend.
+      register_endpoint() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\",\"routing_port\":$$2}" || true
+      }
+
+      unregister_endpoint() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/unregister/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\"}" || true
+      }
+
+      register_model() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/model" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$1\",\"domain\":\"$$2\"}" || true
+      }
+
+      cleanup() {
+        echo "SIGTERM received, unregistering all endpoints"
+        for port in 8000 8001; do
+          unregister_endpoint "$${HOST_IP}:$$port"
+        done
+        exit 0
+      }
+      trap cleanup TERM INT
+
+      # $1 = host:port. Probe the host-published port via HOST_IP, not the
+      # compose service DNS name: a service-name probe fails with curl (6)
+      # "Could not resolve host" if the registrar loses compose-network DNS
+      # (e.g. after a backend is recreated independently), wedging the health
+      # check so every model drops to 0 backends. See cvm-compose-files#57.
+      check_chat() {
+        status=$$(curl -sS --connect-timeout 10 --max-time 45 -o /dev/null -w "%{http_code}" \
+          -X POST "http://$$1/v1/chat/completions" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$2\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}")
+        curl_status=$$?
+
+        if [ "$$curl_status" -ne 0 ]; then
+          case "$$curl_status" in
+            52|56)
+              echo "[$$2] Health probe hit connection-level backpressure (curl $$curl_status); treating as alive but saturated"
+              return 0
+              ;;
+          esac
+          echo "[$$2] Health probe curl failed with status $$curl_status"
+          return 1
+        fi
+
+        case "$$status" in
+          2*)
+            return 0
+            ;;
+          503)
+            echo "[$$2] Backend returned 503; treating as alive but saturated"
+            return 0
+            ;;
+          *)
+            echo "[$$2] Backend returned HTTP $$status"
+            return 1
+            ;;
+        esac
+      }
+
+      check_port() {
+        case $$1 in
+          8000) check_chat "$${HOST_IP}:8000" "z-ai/glm-5.3-flash" ;;
+          8001) check_chat "$${HOST_IP}:8001" "deepseek-ai/DeepSeek-V4-Flash" ;;
+        esac
+      }
+
+      # Probe the host-published nginx port via HOST_IP instead of the
+      # "nginx" compose DNS name. A stale/abandoned docker service-name
+      # resolution (e.g. after nginx is recreated) otherwise wedges this
+      # readiness gate forever and silently drops every model to 0 backends.
+      # Bounded + loud so a persistent probe failure falls through to the
+      # registration loop (which health-checks each backend directly) instead
+      # of hanging here forever. See cvm-compose-files#57.
+      READY_URL="http://$${HOST_IP}:8000/v1/models"
+      echo "Waiting for first model to be ready (probing $$READY_URL)..."
+      ready_attempts=0
+      until curl --connect-timeout 5 --max-time 10 -sf \
+        -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+        "$$READY_URL" > /dev/null 2>&1; do
+        ready_attempts=$$((ready_attempts + 1))
+        if [ "$$ready_attempts" -ge 30 ]; then
+          echo "WARN: first model not reachable at $$READY_URL after $$ready_attempts attempts (~20m); entering registration loop anyway (each backend is health-checked directly before registering)"
+          break
+        fi
+        echo "First model not ready yet (attempt $$ready_attempts/30), retrying in 30s..."
+        sleep 30
+      done
+      echo "First model ready, starting registration loop"
+
+      while true; do
+        for port in 8000 8001; do
+          # Refreshed per port so a slow-but-progressing serial loop is not
+          # falsely marked unhealthy by the registrar container healthcheck.
+          date +%s > /tmp/registrar_alive
+          endpoint="$${HOST_IP}:$$port"
+          eval "was_reg=\$$REG_$$port"
+          eval "fails=\$$FAIL_COUNT_$$port"
+          if check_port $$port; then
+            eval "FAIL_COUNT_$$port=0"
+            register_endpoint "$$endpoint" "$$(routing_port_for $$port)"
+            if [ "$$was_reg" = false ]; then
+              echo "Registered $$endpoint"
+            fi
+            eval "REG_$$port=true"
+          else
+            fails=$$((fails + 1))
+            eval "FAIL_COUNT_$$port=$$fails"
+            echo "Health check failed for $$endpoint (fail count: $$fails)"
+            if [ "$$was_reg" = true ] && [ "$$fails" -ge "$$MAX_RETRIES" ]; then
+              unregister_endpoint "$$endpoint"
+              eval "REG_$$port=false"
+            fi
+          fi
+        done
+
+        register_model "z-ai/glm-5.3-flash" "glm-5-3-flash.completions.near.ai"
+        register_model "deepseek-ai/DeepSeek-V4-Flash" "dsv4-flash.completions.near.ai"
+        date +%s > /tmp/registrar_alive
+        sleep 60
+      done
+  nginx_conf:
+    content: |
+      log_format json_combined escape=json
+        '{'  '"time":"$$time_iso8601"'
+        ',"request_id":"$$http_x_request_id"'
+        ',"org_id":"$$http_x_org_id"'
+        ',"workspace_id":"$$http_x_workspace_id"'
+        ',"http_host":"$$host"'
+        ',"method":"$$request_method"'
+        ',"uri":"$$uri"'
+        ',"status":$$status'
+        ',"request_length":$$request_length'
+        ',"bytes_sent":$$bytes_sent'
+        ',"request_time":$$request_time'
+        ',"upstream_addr":"$$upstream_addr"'
+        '}';
+
+      access_log /var/log/nginx/access.log json_combined;
+
+      proxy_http_version 1.1;
+      proxy_set_header Host $$host;
+      proxy_set_header X-Real-IP $$remote_addr;
+      proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $$scheme;
+      proxy_set_header Connection '';
+      proxy_buffering off;
+      proxy_cache off;
+      proxy_read_timeout 3600s;
+      client_max_body_size 100m;
+      client_body_buffer_size 1m;
+
+      # :8000 - GLM-5.3-Flash
+      server {
+        listen 8000;
+        location / { proxy_pass http://proxy-glm53:8000; }
+      }
+
+      # :8001 - DeepSeek-V4-Flash replica 1 (registrar probe path for the 8444 backend)
+      server {
+        listen 8001;
+        location / { proxy_pass http://proxy-dsv4-flash:8000; }
+      }
+
+      ssl_certificate /etc/letsencrypt/live/completions.near.ai/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/completions.near.ai/privkey.pem;
+      ssl_protocols TLSv1.2 TLSv1.3;
+
+      server {
+        listen 443 ssl http2;
+        server_name glm-5-3-flash.completions.near.ai
+                    glm-5-3-flash.completions-stg.near.ai
+                    ~^glm-5-3-flash-i\d+\.completions(-stg)?\.near\.ai$$;
+        # Keep H2 connections from cloud-api alive across long idle gaps so the
+        # bucket-pinned TCP connection survives between chats. Without this,
+        # nginx defaults (75s idle, 1000 req/conn) close the connection and the
+        # next request opens a new TCP via model-proxy's L4 LB → may land on a
+        # different backend → signature 404. Pairs with cloud-api H2 keepalive
+        # PINGs (http2_keep_alive_while_idle).
+        keepalive_timeout 1h;
+        keepalive_requests 1000000;
+        location / { proxy_pass http://proxy-glm53:8000; }
+      }
+
+      server {
+        listen 443 ssl http2;
+        server_name dsv4-flash.completions.near.ai
+                    ~^dsv4-flash-i\d+\.completions\.near\.ai$$;
+        keepalive_timeout 1h;
+        keepalive_requests 1000000;
+        location / { proxy_pass http://proxy-dsv4-flash:8000; }
+      }

@@ -431,7 +431,8 @@ struct BraveWebSearchTool: Tool {
     enum KeyCheck: Equatable {
         /// Brave answered. The key is good.
         case valid
-        /// Brave rejected it — 401/403. A typo, or a key from the wrong product.
+        /// Brave rejected it — 401/403, or 422 with SUBSCRIPTION_TOKEN_INVALID
+        /// (a key it cannot parse). A typo, or a key from the wrong product.
         case rejected
         /// The key is REAL but has no credit left, or is being throttled — 429.
         /// Saving it is correct; searches will work again next month.
@@ -460,12 +461,14 @@ struct BraveWebSearchTool: Tool {
         request.timeoutInterval = 15
 
         do {
-            let (_, response) = try await http.data(for: request)
+            let (data, response) = try await http.data(for: request)
             guard let http = response as? HTTPURLResponse else { return .unreachable }
             switch http.statusCode {
             case 200...299: return .valid
             case 401, 403:  return .rejected
             case 429:       return .outOfCredit
+            case 422 where LLMError.BraveErrorEnvelope.parse(String(data: data, encoding: .utf8))?.isInvalidToken == true:
+                return .rejected
             default:        return .braveUnavailable(status: http.statusCode)
             }
         } catch {
@@ -579,7 +582,9 @@ struct BraveWebSearchTool: Tool {
 
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw LLMError(source: .braveGrounding,
-                           userMessage: LLMError.groundingMessage(httpStatus: http.statusCode),
+                           userMessage: LLMError.groundingMessage(
+                               httpStatus: http.statusCode,
+                               responseBody: String(data: data, encoding: .utf8)),
                            httpStatus: http.statusCode, url: url,
                            requestHeaders: ["X-Subscription-Token": apiKey],
                            requestBodyJSON: nil, messageHistory: nil,

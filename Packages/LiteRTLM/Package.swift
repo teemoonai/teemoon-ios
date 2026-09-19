@@ -8,32 +8,27 @@
 import PackageDescription
 
 // A VENDORED copy of Google's LiteRT-LM Swift wrapper.
-// Upstream: https://github.com/google-ai-edge/LiteRT-LM @ v0.14.0
-// Commit:   80f301ff9a3b02c2c1e7be2dd1a567752f7b51b6
+// Upstream: https://github.com/google-ai-edge/LiteRT-LM @ v0.17.1
+// Commit:   5e58e9a0aef7abf7091207a8b1d1063a1c800f08
 // Licence:  Apache 2.0 (see LICENSE; sources carry Google's copyright headers)
 //
 // WHY VENDORED, and what to check before deleting this package:
 //
-// Upstream's v0.14.0 manifest declares binary-target checksums that do not match
-// its own published release assets — the artifacts were evidently re-uploaded
-// after tagging. SPM refuses to resolve:
+// v0.14.0 was vendored because its manifest checksums did not match its own
+// published assets. v0.17.1's do match (the iOS zip's computed checksum is
+// the one upstream's manifest declares — and it is the v0.17.0 asset, reused
+// under the new tag). The package stays vendored for the reasons that remain:
+// the source patches in VENDORING.md, the dropped `-all_load`, and the
+// macOS slice, which upstream still ships library-shaped (see below).
 //
-//     checksum of downloaded artifact of binary target 'CLiteRTLM'
-//     (dddac2f6…) does not match checksum specified by the manifest (4a4bdb0e…)
+// The iOS checksum below was recomputed with `swift package compute-checksum`
+// on the downloaded asset, not copied. Honest limitation: that verifies the
+// artifact is self-consistent, NOT that it is authentic. Authenticity rests
+// on HTTPS from Google's official GitHub releases, and on the zip containing
+// a well-formed xcframework (ios-arm64 + ios-arm64-simulator slices, checked).
 //
-// Pinning to 0.13.1 did not help: SPM kept resolving 0.14.0 even after clearing
-// Package.resolved, the repository cache and the checkout.
-//
-// The checksums below are the REAL ones, obtained by downloading each artifact
-// and running `swift package compute-checksum` — not copied from the error
-// message. Honest limitation: that verifies the artifacts are self-consistent,
-// NOT that they are authentic. Authenticity rests on HTTPS from Google's
-// official GitHub releases, and on the zips containing a well-formed xcframework
-// (ios-arm64 + ios-arm64-simulator slices, checked by hand).
-//
-// DELETE THIS PACKAGE and depend on upstream directly once
-// `.package(url: "https://github.com/google-ai-edge/LiteRT-LM", from: …)`
-// resolves cleanly.
+// DELETE THIS PACKAGE and depend on upstream directly once every patch in
+// VENDORING.md is upstream and the macOS slice ships framework-shaped.
 //
 // Note for whoever revisits: cloning upstream also trips a Git LFS smudge error
 // (`remote missing object`). `GIT_LFS_SKIP_SMUDGE=1` is the fix — the
@@ -54,8 +49,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "CLiteRTLM",
-            url: "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.14.0/CLiteRTLM.xcframework.zip",
-            checksum: "dddac2f6713ed65eaf01c18e115d9fec22184adf575cc7856a21387e8ba937e1"
+            url: "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.17.1/CLiteRTLM.xcframework.zip",
+            checksum: "c94fc12aa0403cb47208e419cc3bfe258214ea17035f7a63c16de536869f2186"
         ),
         // THE macOS SLICE IS REPACKAGED LOCALLY — it is not consumed from the URL.
         //
@@ -89,8 +84,10 @@ let package = Package(
         // the artifact is committed via LFS rather than fetched from a
         // release URL.
         //
-        // Regenerate (only needed when bumping the upstream version) by
-        // following the repackage procedure in `Packages/LiteRTLM/VENDORING.md`.
+        // Regenerate (only needed when bumping the upstream version) by the
+        // procedure in `Packages/LiteRTLM/VENDORING.md`. The v0.17.1 zip's
+        // pinned SHA-256 is
+        // 83efd536485c9d58fcd7fb7d4556ddb16ca46bb775b0449d08d9825c6836c1a4.
         //
         // The procedure is bit-for-bit reproducible — same upstream zip in,
         // same bytes out — so the committed artifact can always be re-derived
@@ -113,7 +110,8 @@ let package = Package(
         // CLiteRTLM.framework with the UUIDs [7826BF37-E5CD-3CE1-9AE9-447F3F8A285D]".
         // It is a WARNING — the build uploads and distributes normally.
         //
-        // Checked rather than assumed (2026-07-30, v0.14.0):
+        // Checked rather than assumed (2026-07-30, v0.14.0; v0.17.1 ships the
+        // same way):
         //   • the device slice's UUID is exactly the one App Store Connect names
         //   • `dwarfdump --debug-info` on that binary prints an EMPTY .debug_info —
         //     it ships stripped, so there is no DWARF to build a dSYM out of

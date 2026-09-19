@@ -1,22 +1,26 @@
 # vendoring: LiteRTLM
 
 This package is a vendored copy of Google's [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM)
-Swift wrapper — `v0.14.0`, commit `80f301ff9a3b02c2c1e7be2dd1a567752f7b51b6`,
+Swift wrapper — `v0.17.1`, commit `5e58e9a0aef7abf7091207a8b1d1063a1c800f08`,
 Apache-2.0 (see `LICENSE`; sources carry Google's copyright headers). It is not
 a git submodule and not a URL dependency — it is tracked as plain files and
 wired into the app via a `relativePath` entry in `teemoon.xcodeproj/project.pbxproj`.
 
-Why: upstream's own `v0.14.0` manifest checksums do not match its published
-release assets (SPM refuses to resolve, and pinning to `0.13.1` doesn't help
-because SPM keeps resolving `0.14.0` regardless). SPM's `.unsafeFlags` is also
-only legal in local path packages. On top of that, the macOS binary slice
-needs reshaping (below) and the Swift source carries one functional patch.
-This document is the LiteRTLM-specific rebuild/audit record.
+Why: v0.14.0 was vendored because its manifest checksums did not match its
+published assets. v0.17.1's do match, so that reason is gone; what remains
+is the macOS binary slice, which upstream still ships library-shaped and
+which needs reshaping (below), the dropped `-all_load`, and the source
+patches in the register. This document is the LiteRTLM-specific
+rebuild/audit record. Bumped v0.14.0 → v0.17.1 on 2026-09-18.
 
 ## patch register
 
-Seven deltas from upstream. Re-apply all of them on any version bump — the
-build will not catch a lost patch.
+Eight deltas from upstream, one of them now upstream itself. Re-apply all of
+them on any version bump — the build will not catch a lost patch. The
+mechanical route: diff the vendored `Sources/LiteRTLM` against the OLD
+upstream tag to get the patch set, apply it to the new tag's `swift/` with
+`patch -p1`, and re-apply any rejected hunk by hand (2026-09-18: 5 of 8 hunks
+applied clean; 2 were obsolete, see 7; 1 was patch 5, re-placed by hand).
 
 1. **`Tool.getSchema()` promoted from protocol extension to protocol
    requirement** — `Sources/LiteRTLM/Tool.swift:240` (comment above the
@@ -83,6 +87,19 @@ build will not catch a lost patch.
    the wedged decode resumes on foreground against a freed engine. With the
    reference, the engine is deleted only after that session's final
    callback. Cost: a poisoned engine lives until its leaked decode ends.
+   **Upstream since v0.17.x**: `Conversation` now has its own
+   `private let engine: Engine`, set from `createConversation`. The local
+   hunks were dropped on the v0.17.1 bump; nothing to re-apply while that
+   stays true, and the belt is verified by the same live test.
+
+8. **`Engine+RawAudio.swift` — a teemoon-authored file, not a patch to
+   upstream** — the C API's `input_data` route for raw audio, which the
+   Swift wrapper does not expose (the header comment records the two
+   measured mistakes it avoids). It depends on `Engine.handle` being
+   internal rather than `private` (the one-line change in `Engine.swift`,
+   commented "teemoon change"). Nothing in the app calls it yet — voice
+   input is parked — so it may be deleted if upstream ships an audio path
+   or if it stops compiling against a new header set.
 
 ## the macOS slice: repackaged, not just re-checksummed
 
@@ -108,13 +125,13 @@ clone, LFS included.
 
 ### repackage procedure
 
-The original tooling lived at `scripts/repackage-litertlm-mac.sh` (not
-present in this distribution). To reproduce or regenerate the artifact:
+To reproduce or regenerate:
 
 1. **Download** the pinned upstream asset:
-   `https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.14.0/CLiteRTLM_mac.xcframework.zip`
+   `https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.17.1/CLiteRTLM_mac.xcframework.zip`
 2. **Verify its SHA-256 before unpacking anything.** The pinned value is
-   `450615483509aaa6d34b321fdc6862e41a224b674468ab10aff64ebe113d21b7`.
+   `83efd536485c9d58fcd7fb7d4556ddb16ca46bb775b0449d08d9825c6836c1a4`
+   (v0.17.1; v0.14.0's was `450615483509aaa6d34b321fdc6862e41a224b674468ab10aff64ebe113d21b7`).
    Refuse to proceed on a mismatch — do not "fix" this by pasting the actual
    hash back into the pin. Upstream has re-uploaded release assets under an
    existing tag before (see checksum caveat above); a mismatch here means
@@ -135,8 +152,10 @@ present in this distribution). To reproduce or regenerate the artifact:
    - Copy Google's headers verbatim into `Versions/A/Headers/` — they are
      byte-identical to the iOS framework's and only touch stdbool/stddef/
      stdint, so nothing needs include-path rewriting.
-   - Generate (don't copy) an umbrella header
-     `#import <CLiteRTLM/engine.h>` + `#import <CLiteRTLM/capabilities_c.h>`,
+   - Generate (don't copy) an umbrella header with one `#import` per
+     upstream header, in name order (v0.17.1: capabilities, conversation,
+     embedding_engine, engine, experimental — the iOS slice's own umbrella
+     is exactly that list),
      and a framework modulemap declaring `framework module CLiteRTLM`
      mirroring the iOS slice's. The module name stays `CLiteRTLM` —
      upstream's own macOS modulemap already declares that name — so
@@ -174,7 +193,7 @@ message.
 
 ### no dSYM for CLiteRTLM (iOS)
 
-Checked rather than assumed (2026-07-30, v0.14.0): the device slice ships
+Checked rather than assumed (2026-07-30, v0.14.0; unchanged at v0.17.1): the device slice ships
 stripped (`dwarfdump --debug-info` prints empty `.debug_info`), and
 upstream's release has no dSYM asset to fetch. A crash inside LiteRT's
 native code will show raw addresses for its frames in Organizer/App Store

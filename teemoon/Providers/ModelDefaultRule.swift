@@ -26,6 +26,12 @@ enum ModelDefaultRule: Equatable {
     /// First match from an ordered curated id list — for huge catalogues (Fireworks,
     /// OpenRouter) where a hand-picked shortlist beats a heuristic.
     case curated([String])
+    /// The strongest model whose weights are published, by what every
+    /// catalog reports: price tier first, then parameter count read from the
+    /// id, then recency. No leaderboard is consulted — this is a consistent,
+    /// explainable proxy, not a quality measurement. Falls back to the
+    /// catalog's first model when nothing is marked open.
+    case strongestOpenWeight
     /// Whatever the catalogue returns first — generic fallback (Grok / unknown).
     case first
 
@@ -39,7 +45,10 @@ enum ModelDefaultRule: Equatable {
     /// (newest first within each family). Returns nil only for an empty catalogue.
     func resolve(from models: [KnownModel]) -> String? {
         func pool(_ e2eeOnly: Bool) -> [KnownModel] {
-            e2eeOnly ? models.filter { NearAIModelCatalog.confidentiality(forID: $0.id).isAttestable }
+            // `.teeOwn` only. Attested third-party (Chutes) hardware has no
+            // confidential endpoint via near.ai, so recommending one under an
+            // e2ee-only rule would name a model teemoon cannot seal.
+            e2eeOnly ? models.filter { NearAIModelCatalog.confidentiality(forID: $0.id) == .teeOwn }
                      : models
         }
         switch self {
@@ -49,6 +58,14 @@ enum ModelDefaultRule: Equatable {
             return models.first?.id
         case .newest(let e2eeOnly):
             return (pool(e2eeOnly).first ?? models.first)?.id
+        case .strongestOpenWeight:
+            let open = models.filter { $0.openWeights == true }
+            guard !open.isEmpty else { return models.first?.id }
+            // Price, then size, then recency, then catalogue order.
+            let keyed = open.enumerated().map { i, m in
+                (key: (Self.priceScore(m), Self.parameterCount(m.id) ?? 0, m.isNew ? 1.0 : 0, -Double(i)), id: m.id)
+            }
+            return keyed.max { $0.key < $1.key }?.id
         case .curated(let ids):
             let have = Set(models.map { $0.id.lowercased() })
             return ids.first { have.contains($0.lowercased()) } ?? models.first?.id
@@ -75,12 +92,30 @@ enum ModelDefaultRule: Equatable {
         }
     }
 
+    /// Total parameters in billions, read from the id: "27b" → 27,
+    /// "120b-a12b" → 120 (the total, not the active count), "2.4t-a95b" →
+    /// 2400. nil when the id carries no size.
+    private static let sizeInID = try! NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)([tb])(?![a-z0-9])"#)
+
+    static func parameterCount(_ id: String) -> Double? {
+        let l = id.lowercased()
+        guard let m = sizeInID.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)),
+              let numRange = Range(m.range(at: 1), in: l), let unitRange = Range(m.range(at: 2), in: l),
+              let n = Double(l[numRange]) else { return nil }
+        return l[unitRange] == "t" ? n * 1000 : n
+    }
+
     /// "1M" → 1_000_000, "203k" → 203_000, "128000" → 128_000.
+    /// Only the unit directly after the number counts: a local row reads
+    /// "128k · Q4_K_M", and a `contains("m")` there returned 128 million.
     static func contextValue(_ s: String) -> Double {
         let t = s.lowercased()
-        let num = Double(t.prefix(while: { $0.isNumber || $0 == "." })) ?? 0
-        if t.contains("m") { return num * 1_000_000 }
-        if t.contains("k") { return num * 1_000 }
-        return num
+        let digits = t.prefix(while: { $0.isNumber || $0 == "." })
+        let num = Double(digits) ?? 0
+        switch t.dropFirst(digits.count).first {
+        case "m": return num * 1_000_000
+        case "k": return num * 1_000
+        default:  return num
+        }
     }
 }

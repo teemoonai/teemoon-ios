@@ -523,6 +523,9 @@ struct ProvenanceCacheUpgradeTests {
 private final class ScriptedGitHub: URLProtocol {
     nonisolated(unsafe) static var script: [(status: Int, headers: [String: String])] = []
     nonisolated(unsafe) static var requestCount = 0
+    /// Both candidate repos, each retried once, all clean (un-throttled) misses.
+    static let fourClean404s: [(status: Int, headers: [String: String])] =
+        (34...37).reversed().map { (404, ["X-RateLimit-Remaining": "\($0)"]) }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -567,9 +570,10 @@ struct Provenance404ClassificationTests {
         #expect(ScriptedGitHub.requestCount == 1)   // no pointless retry against a dry quota
     }
 
+    /// Two candidates (the guessed repo, then the compose repo), one retry
+    /// each: a clean 404 is believed only after four answers.
     @Test func clean404RetriesOnceThenFailsClosed() async {
-        ScriptedGitHub.script = [(404, ["X-RateLimit-Remaining": "37"]),
-                                 (404, ["X-RateLimit-Remaining": "36"])]
+        ScriptedGitHub.script = ScriptedGitHub.fourClean404s
         ScriptedGitHub.requestCount = 0
         let outcome = await makeService().verify(.init(image: "nearaidev/compose-manager-launcher",
                                                        digest: String(repeating: "2", count: 64)))
@@ -577,7 +581,26 @@ struct Provenance404ClassificationTests {
             Issue.record("expected definitive fetchFailed, got \(outcome)"); return
         }
         #expect(why.contains("404"))
-        #expect(ScriptedGitHub.requestCount == 2)   // the retry happened
+        #expect(ScriptedGitHub.requestCount == 4)   // both repos, each retried once
+    }
+
+    /// A clean miss is remembered for an hour: the next pass asks nothing,
+    /// so an unpublished image cannot drain the anonymous GitHub quota — and
+    /// draining it is what used to flip an orange session green.
+    @Test func aCleanMissIsNotAskedAgainWithinTheHour() async {
+        ProvenanceService.forgetMisses()
+        ScriptedGitHub.script = ScriptedGitHub.fourClean404s
+        ScriptedGitHub.requestCount = 0
+        let digest = String(repeating: "9", count: 64)
+        let service = makeService()
+        let first = await service.verify(.init(image: "nearaidev/compose-manager-launcher", digest: digest))
+        guard case .unverified(.fetchFailed) = first else { Issue.record("expected a definitive miss, got \(first)"); return }
+        #expect(ScriptedGitHub.requestCount == 4)
+
+        let second = await service.verify(.init(image: "nearaidev/compose-manager-launcher", digest: digest))
+        guard case .unverified(.fetchFailed) = second else { Issue.record("expected the remembered miss, got \(second)"); return }
+        #expect(ScriptedGitHub.requestCount == 4, "no request for a digest missed within the hour")
+        ProvenanceService.forgetMisses()
     }
 
     @Test func transient404ThenSuccessIsRescuedByTheRetry() async {
@@ -593,5 +616,80 @@ struct Provenance404ClassificationTests {
             #expect(!why.contains("404"), "retry should have rescued the fetch, got \(why)")
         }
         #expect(ScriptedGitHub.requestCount == 2)
+    }
+}
+
+// MARK: - fetch: the guessed repo is not the only place near.ai publishes
+
+/// GitHub, as the app sees it: 404 for the guessed `nearai/sglang`, the real
+/// fixture bundle under `nearai/cvm-compose-files`. Records every URL asked.
+private final class AttestationHostStub: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var asked: [String] = []
+    nonisolated(unsafe) static var bundle = Data()
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "api.github.com"
+    }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        Self.asked.append(path)
+        let hit = path.hasPrefix("/repos/nearai/cvm-compose-files/")
+        let response = HTTPURLResponse(url: request.url!, statusCode: hit ? 200 : 404,
+                                       httpVersion: "HTTP/1.1", headerFields: ["X-RateLimit-Remaining": "40"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: hit ? Self.bundle : Data("{\"message\":\"Not Found\"}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@Suite("ProvenanceService fetch", .serialized)
+struct ProvenanceServiceFetchTests {
+
+    private func stubbedSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AttestationHostStub.self]
+        return URLSession(configuration: config)
+    }
+
+    private func freshDefaults() -> UserDefaults {
+        let name = "provenance.test.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        return d
+    }
+
+    @Test func repoCandidatesStartWithTheGuessAndEndWithTheComposeRepo() {
+        #expect(ProvenanceService.githubRepos(forImage: "docker.io/nearaidev/sglang")
+                == ["nearai/sglang", "nearai/cvm-compose-files"])
+        // The compose repo itself is asked once, not twice.
+        #expect(ProvenanceService.githubRepos(forImage: "nearaidev/cvm-compose-files")
+                == ["nearai/cvm-compose-files"])
+    }
+
+    /// GLM-5.3 flash, 2026-09-12: `nearai/sglang` does not exist, and the
+    /// image's two SLSA attestations live under the compose repo's workflow.
+    /// The guessed repo's clean 404 used to be the final answer — "image
+    /// unpublished" for an image that is published.
+    @Test func aCleanMissAtTheGuessedRepoFallsThroughToTheComposeRepo() async throws {
+        AttestationHostStub.asked = []
+        AttestationHostStub.bundle = try TestFixture.data("nearai_cloudapi_attestation.json", file: #filePath)
+        let service = ProvenanceService(session: stubbedSession(), defaults: freshDefaults())
+
+        let ref = ProvenanceService.ImageRef(image: "docker.io/nearaidev/sglang",
+                                             digest: ImageProvenanceTests.fixtureDigest)
+        let outcome = await service.verify(ref)
+
+        guard case .verified(let repo, _, _, _, _) = outcome else {
+            Issue.record("expected .verified via the fallback repo, got \(outcome)")
+            return
+        }
+        #expect(repo == "https://github.com/nearai/cloud-api")   // whatever the bundle says
+        #expect(AttestationHostStub.asked == [
+            "/repos/nearai/sglang/attestations/sha256:\(ImageProvenanceTests.fixtureDigest)",
+            "/repos/nearai/sglang/attestations/sha256:\(ImageProvenanceTests.fixtureDigest)",
+            "/repos/nearai/cvm-compose-files/attestations/sha256:\(ImageProvenanceTests.fixtureDigest)",
+        ], "the guess retried once, then the compose repo answered: \(AttestationHostStub.asked)")
     }
 }

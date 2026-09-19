@@ -74,6 +74,16 @@ struct TrustVerdictTests {
         #expect(v.heroTitle == "one reply didn't check out")
     }
 
+    /// GLM-5.3 flash, 2026-09-12: the sheet opened on "but its logs copy what
+    /// you type" (a reviewed leak) and flipped to "one image unpublished" the
+    /// moment provenance landed — the weaker line hid the stronger one.
+    @Test func aReviewedLeakOutranksAnUnpublishedImage() {
+        let v = TrustVerdict.make(input { $0.auditState = .leaks; $0.unpublishedButSealed = true })
+        #expect(v.heroTitle.contains("logs copy what you type"))
+        #expect(!v.heroTitle.contains("unpublished"))
+        #expect(v.heroSubtitle.contains("monitoring logs"))
+    }
+
     @Test func unpublishedButSealedDoesNotSayUnencrypted() {
         let v = TrustVerdict.make(input {
             $0.attestationState = .degraded

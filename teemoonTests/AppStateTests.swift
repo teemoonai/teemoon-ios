@@ -141,6 +141,11 @@ struct ProviderStoreTests {
 @Suite("ConfidentialSession")
 struct ConfidentialSessionTests {
 
+    /// A verifier handle that never answers within the test.
+    private func neverAnswers() -> Task<Void, Never> {
+        Task { try? await Task.sleep(for: .seconds(30)) }
+    }
+
     // These tests read `attestationState`, which goes through the store's
     // `currentProviderID`. A persisting store backs that property with the
     // app-shared UserDefaults key — under parallel test execution any other
@@ -167,6 +172,228 @@ struct ConfidentialSessionTests {
         store.addProvider(provider)
         store.currentProviderID = provider.id.uuidString
         return store
+    }
+
+    /// A verdict still in flight is neutral in `attestationState`, so a send
+    /// in that window rode an unsettled gate: on the phone, every other
+    /// message to a host whose TLS check fails (2026-09-09). `prepareTurn`
+    /// now waits for the hard-block-capable verdicts before the caller
+    /// re-reads the policy.
+    @Test @MainActor func prepareTurnWaitsForAnInFlightVerdictBeforeTheGateIsRead() async {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.lastRequestUsedE2EE = true
+        #expect(session.sendPolicy == .allow, "precondition: the preview record verifies")
+        session.tlsTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            session.tlsAttestation = .failed("live TLS certificate does not match the attested fingerprint")
+        }
+        #expect(session.verdictsPending)
+        #expect(session.sendPolicy == .allow, "the unsettled gate still reads allow — the hole")
+
+        _ = await session.prepareTurn()
+
+        #expect(!session.verdictsPending)
+        #expect(session.tlsAttestation?.isHardFailure == true)
+        #expect(session.sendPolicy == .block)
+        #expect(ChatViewModel.postPrepareRefusal(policy: session.sendPolicy, acceptedDegrade: true,
+                                                 verdictsPending: false) != nil)
+    }
+
+    /// A verdict that never lands is not a pass: the wait is bounded and the
+    /// caller learns it is still pending.
+    @Test @MainActor func prepareTurnReportsAVerdictStillPendingAtTheDeadline() async {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.lastRequestUsedE2EE = true
+        let previous = ConfidentialSession.verifierSettleTimeout
+        ConfidentialSession.verifierSettleTimeout = .milliseconds(250)
+        defer { ConfidentialSession.verifierSettleTimeout = previous }
+        session.tlsTask = neverAnswers()
+        defer { session.tlsTask?.cancel() }
+
+        let started = ContinuousClock.now
+        _ = await session.prepareTurn()
+
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(session.verdictsPending)
+        #expect(ChatViewModel.postPrepareRefusal(policy: session.sendPolicy, acceptedDegrade: false,
+                                                 verdictsPending: session.verdictsPending) != nil)
+    }
+
+    /// The simulator, 2026-09-12: "end-to-end encrypted" at 1.4 s, "image
+    /// unpublished" at 4.5 s. A sealed session read green while its image
+    /// provenance was still being fetched; now it reads verifying until the
+    /// pass writes its result, and the send gate does not change.
+    @Test @MainActor func aSealedSessionIsVerifyingUntilProvenanceSettles() async {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.lastRequestUsedE2EE = true
+        #expect(session.attestationState == .ok, "precondition: the preview record verifies")
+        #expect(session.sendPolicy == .allow)
+
+        session.provenanceSettled = false
+        session.provenanceTask = neverAnswers()
+        defer { session.provenanceTask?.cancel() }
+        #expect(session.attestationState == .verifying)
+        #expect(session.sendPolicy == .allow, "in-flight provenance never gates a send")
+
+        session.imageProvenance = .allVerified(verified: [], thirdParty: [])
+        session.provenanceSettled = true
+        #expect(session.attestationState == .ok)
+
+        // An inconclusive pass leaves no result but does settle: not verifying forever.
+        session.imageProvenance = nil
+        #expect(session.attestationState == .ok)
+    }
+
+    /// NVIDIA, 2026-09-12: every send was refused with "Verification is still
+    /// running, so nothing was sent". The near.ai session before it had its
+    /// TLS probe cancelled by the switch; the handle stayed, no verdict ever
+    /// came, and the chat path — unlike the Siri intent — asked the pending
+    /// predicate for a provider that has no verdicts at all.
+    @Test @MainActor func aPlainTLSProviderNeverWaitsOnAnotherSessionsVerifiers() {
+        let store = Self.storeMatchingPreviewRecord()
+        let session = ConfidentialSession(providers: store)
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.tlsTask = neverAnswers()
+        defer { session.tlsTask?.cancel() }
+        #expect(session.verdictsPending, "precondition: the near.ai probe is in flight")
+
+        // The stale handle is still there; only the active provider changed.
+        let nvidia = Provider.nvidia
+        store.addProvider(nvidia)
+        store.currentProviderID = nvidia.id.uuidString
+        #expect(!nvidia.capabilities.contains(.attestation))
+        #expect(!session.verdictsPending)
+        #expect(ChatViewModel.postPrepareRefusal(policy: session.sendPolicy, acceptedDegrade: false,
+                                                 verdictsPending: session.verdictsPending) == nil)
+    }
+
+    /// A cancelled verifier never answers, so a switch must drop its handle —
+    /// otherwise the next near.ai session inherits a verdict that is "pending"
+    /// forever, and even its own sends wait the full settle timeout.
+    @Test @MainActor func aSwitchDropsCancelledVerifierHandles() {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.tlsTask = neverAnswers()
+        session.dcapTask = neverAnswers()
+        #expect(session.verdictsPending)
+
+        session.clearDerivedState(resetCounts: true)
+
+        #expect(session.tlsTask == nil)
+        #expect(session.dcapTask == nil)
+        #expect(session.nrasTask == nil)
+        #expect(!session.verdictsPending)
+    }
+
+    /// THE GATE MATRIX. Every kind of provider crossed with every prior state
+    /// the session can be in when a send starts. A gate change that widens —
+    /// like build 34's pending-verdict refusal, which reached plain-TLS
+    /// providers through a cancelled near.ai probe — has to fail a cell here
+    /// before it can reach a phone.
+    @Test @MainActor func theSendGateAnswersEveryProviderKindInEveryPriorState() {
+        enum Kind: String, CaseIterable { case attested, plainCloud, selfHosted, onDevice }
+        enum Prior: String, CaseIterable { case fresh, staleHandleNoReset, afterSwitchReset, hardFailure }
+
+        func makeSession(_ kind: Kind) -> ConfidentialSession {
+            let store: ProviderStore
+            switch kind {
+            case .attested:
+                store = Self.storeMatchingPreviewRecord()
+            case .plainCloud:
+                store = ProviderStore(inMemory: true)
+                let p = Provider.nvidia
+                store.addProvider(p); store.currentProviderID = p.id.uuidString
+            case .selfHosted:
+                store = ProviderStore(inMemory: true)
+                let p = Provider(name: "box", endpoint: "http://box.local:11434/v1",
+                                 model: "gemma4:e4b", requiresAPIKey: false)
+                store.addProvider(p); store.currentProviderID = p.id.uuidString
+            case .onDevice:
+                store = ProviderStore(inMemory: true)
+                let p = Provider(name: "this phone", endpoint: "", model: "gemma-4-e2b",
+                                 requiresAPIKey: false, localModelID: "gemma-4-e2b")
+                store.addProvider(p); store.currentProviderID = p.id.uuidString
+            }
+            let session = ConfidentialSession(providers: store)
+            session.attestationTask?.cancel()
+            return session
+        }
+
+        for kind in Kind.allCases {
+            for prior in Prior.allCases {
+                let session = makeSession(kind)
+                let cell = "kind=\(kind.rawValue) prior=\(prior.rawValue)"
+                if kind == .attested {
+                    session.attestation = .preview
+                    session.lastRequestUsedE2EE = true
+                }
+                switch prior {
+                case .fresh:
+                    break
+                case .staleHandleNoReset:
+                    session.tlsTask = neverAnswers()
+                case .afterSwitchReset:
+                    session.tlsTask = neverAnswers()
+                    session.dcapTask = neverAnswers()
+                    session.clearDerivedState(resetCounts: true)
+                    if kind == .attested {   // the new session's own record
+                        session.attestation = .preview
+                        session.lastRequestUsedE2EE = true
+                    }
+                case .hardFailure:
+                    session.tlsAttestation = .failed("live TLS certificate does not match the attested fingerprint")
+                }
+                defer { session.tlsTask?.cancel(); session.dcapTask?.cancel() }
+
+                let refusal = ChatViewModel.postPrepareRefusal(policy: session.sendPolicy, acceptedDegrade: false,
+                                                               verdictsPending: session.verdictsPending)
+                switch (kind, prior) {
+                case (.attested, .staleHandleNoReset):
+                    #expect(session.verdictsPending, "\(cell)")
+                    #expect(refusal != nil, "\(cell)")          // a real verdict is in flight
+                case (.attested, .hardFailure):
+                    #expect(session.sendPolicy == .block, "\(cell)")
+                    #expect(refusal != nil, "\(cell)")
+                case (.attested, _):
+                    #expect(!session.verdictsPending, "\(cell)")
+                    #expect(session.sendPolicy == .allow, "\(cell)")
+                    #expect(refusal == nil, "\(cell)")
+                default:
+                    // No verdicts exist for these providers: nothing pending,
+                    // nothing blocked, whatever a previous session left behind.
+                    #expect(!session.verdictsPending, "\(cell)")
+                    #expect(session.sendPolicy == .allow, "\(cell)")
+                    #expect(refusal == nil, "\(cell)")
+                }
+            }
+        }
+    }
+
+    /// A refusal before the wire sent nothing. It used to be booked as an
+    /// unsealed request, and once the key was present that read as
+    /// plaintext-went-out: a hard block only a provider switch cleared.
+    @Test @MainActor func aRefusalBeforeTheWireDoesNotReadAsAnUnsealedRequest() {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        // The old bookkeeping, for contrast: this is the poison.
+        session.beginRequest(expectingE2EE: false)
+        session.finishTurn(debugInfo: nil, error: nil)
+        #expect(session.degradeIsHardFailure, "precondition: the old shape reads as a hard break")
+
+        session.abandonTurn(reason: "nothing was sent")
+        #expect(session.lastRequestUsedE2EE == nil)
+        #expect(!session.degradeIsHardFailure)
+        #expect(session.sendPolicy == .allow)
+        #expect(session.lastE2EEFailReason == "nothing was sent")
     }
 
     /// Guards the pairing above directly, so the *cause* is what fails rather
@@ -516,4 +743,57 @@ struct MoonPhaseTests {
     @Test func currentSymbolName_isValidSFSymbol() {
         #expect(MoonPhase.currentSymbolName.hasPrefix("moonphase."))
     }
+}
+
+/// near.ai's endpoints directory is the only host map. What a miss means
+/// depends on the tier, and getting it wrong sends in the clear.
+@Suite("a missing direct host")
+struct MissingDirectHostTests {
+
+    @Test func anOwnFleetModelWithNoHostDegrades() {
+        #expect(NearAIModelCatalog.confidentiality(forID: "z-ai/glm-5.3-flash") == .teeOwn)
+        #expect(ConfidentialSession.outcome(whenNoDirectHostFor: "z-ai/glm-5.3-flash") == .degraded)
+    }
+
+    /// An id the guess has never seen also classifies own-fleet, so it degrades
+    /// too. That is the fail-closed direction: the send asks.
+    @Test func anUnknownIdDegrades() {
+        #expect(ConfidentialSession.outcome(whenNoDirectHostFor: "z-ai/glm-6-preview") == .degraded)
+    }
+
+    /// Tiers that never had a confidential endpoint stay ordinary: no lock, no
+    /// spinner, no block.
+    @Test func proxiedAndThirdPartyModelsAreOrdinary() {
+        #expect(ConfidentialSession.outcome(whenNoDirectHostFor: "anthropic/claude-sonnet-5") == .ordinary)
+        #expect(ConfidentialSession.outcome(whenNoDirectHostFor: "moonshotai/kimi-k3") == .ordinary)
+    }
+
+/// A missing directory host used to read "Could not reach the attestation
+/// server" although the server answered, and stayed that way until a provider
+/// switch. It names itself now, and the pre-send staleness check retries it.
+@Suite("a missing direct host — reason and retry")
+@MainActor
+struct MissingDirectHostReasonTests {
+    @Test func theReasonNamesTheDirectoryNotTheServer() {
+        let session = ConfidentialSession(providers: ConfidentialSessionTests.storeMatchingPreviewRecord())
+        session.attestationFetchFailed = true
+        session.directHostMissing = true
+        #expect(session.e2eeDegradedReason?.contains("no confidential host") == true)
+        session.directHostMissing = false
+        #expect(session.e2eeDegradedReason == "Could not reach the attestation server.")
+    }
+
+    @Test func aFailedFetchIsRetriedAfterTheInterval() {
+        let session = ConfidentialSession(providers: ConfidentialSessionTests.storeMatchingPreviewRecord())
+        session.attestationFetchFailed = true
+        session.attestationAttemptedAt = Date().addingTimeInterval(-ConfidentialSession.attestationRetryInterval - 1)
+        session.refreshAttestationIfStale()
+        #expect(session.attestationAttemptedAt.map { Date().timeIntervalSince($0) < 5 } == true)
+        // Too soon after the last try: left alone.
+        let stamp = Date().addingTimeInterval(-5)
+        session.attestationAttemptedAt = stamp
+        session.refreshAttestationIfStale()
+        #expect(session.attestationAttemptedAt == stamp)
+    }
+}
 }

@@ -79,14 +79,19 @@ enum WhereLocality: String, CaseIterable, Identifiable, Hashable {
 }
 
 extension Provider {
+    /// Any near.ai host, gateway or direct node. Asks the catalog router, so
+    /// the host rule is spelled once — a substring test on the endpoint would
+    /// claim E2EE for `near.ai.evil.com` and for `api.linear.ai`.
+    var isNearAI: Bool { Provider.isNearAIHost(openAIBaseURL?.host) }
+
+    /// Host-only form, for screens holding a URL rather than a `Provider`.
+    static func isNearAIHost(_ host: String?) -> Bool {
+        EndpointModelCatalog.Source.resolve(host: host) == .nearAI
+    }
+
     /// One fixed id, no catalog (Brave Answers). Not a browse row.
     var isFixedAnswerService: Bool {
         answersSingleTurnOnly && hasBuiltInGrounding
     }
 
-    /// Large multi-vendor routers that need search-first browse.
-    var prefersSearchFirstBrowse: Bool {
-        let host = openAIBaseURL?.host?.lowercased() ?? endpoint.lowercased()
-        return host.contains("openrouter")
-    }
 }

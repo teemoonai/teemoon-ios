@@ -43,6 +43,27 @@ struct ModelDefaultRuleTests {
         #expect(ModelDefaultRule.contextValue("203k") == 203_000)
         #expect(ModelDefaultRule.contextValue("128000") == 128_000)
         #expect(ModelDefaultRule.contextValue("") == 0)
+        // A local row spells the quantisation after the size. The "m" in
+        // "q4_k_m" is not a unit; reading it as one made 128k look like 128M
+        // and a laptop model win every largest-context comparison.
+        #expect(ModelDefaultRule.contextValue("128k · Q4_K_M") == 128_000)
+        #expect(ModelDefaultRule.contextValue("32768 · Q8_0") == 32_768)
+    }
+
+    /// `attested 3p` (Chutes) hardware is attestable but has NO confidential
+    /// endpoint via near.ai, so an e2ee-only rule must never name one — however
+    /// dear it is. Live on 2026-09-14 that was kimi-k3 at $19.80.
+    @Test func e2eeOnlyExcludesAttestedThirdParty() {
+        let models = [
+            km("moonshotai/kimi-k3", "$3.30/$16.50", "1M"),      // attested 3p, 19.80
+            km("z-ai/glm-5.3-flash", "$0.15/$0.50", "1M"),       // own fleet, 0.65
+        ]
+        #expect(ModelDefaultRule.mostExpensive(e2eeOnly: true).resolve(from: models)
+                == "z-ai/glm-5.3-flash")
+        #expect(NearAIModelCatalog.confidentiality(forID: "moonshotai/kimi-k3") == .teeThirdParty)
+        // Without the filter the dearest model still wins.
+        #expect(ModelDefaultRule.mostExpensive(e2eeOnly: false).resolve(from: models)
+                == "moonshotai/kimi-k3")
     }
 
     // MARK: mostExpensive (near.ai's rule)
@@ -72,6 +93,57 @@ struct ModelDefaultRuleTests {
     }
 
     // MARK: other rules
+
+    // MARK: strongestOpenWeight
+
+    private func open(_ id: String, _ price: String, isNew: Bool = false) -> KnownModel {
+        var m = km(id, price, ""); m.openWeights = true; m.isNew = isNew; return m
+    }
+    private func closed(_ id: String, _ price: String) -> KnownModel {
+        var m = km(id, price, ""); m.openWeights = false; return m
+    }
+
+    @Test func parameterCountReadsTotalsFromIds() {
+        #expect(ModelDefaultRule.parameterCount("qwen/qwen3.8-27b") == 27)
+        #expect(ModelDefaultRule.parameterCount("nvidia/nemotron-3-super-120b-a12b") == 120)
+        #expect(ModelDefaultRule.parameterCount("nvidia/nemotron-3-ultra-550b-a55b") == 550)
+        #expect(ModelDefaultRule.parameterCount("qwen/qwen3.8-2.4t-a95b") == 2400)
+        #expect(ModelDefaultRule.parameterCount("z-ai/glm-5.3-flash") == nil)
+        #expect(ModelDefaultRule.parameterCount("x-ai/grok-4.6") == nil)
+        #expect(ModelDefaultRule.parameterCount("zai-org/GLM-5.1-FP8") == nil)
+    }
+
+    @Test func strongestOpenWeightIgnoresClosedModelsHoweverExpensive() {
+        let picked = ModelDefaultRule.strongestOpenWeight.resolve(from: [
+            closed("anthropic/claude-opus-5", "$5.00/$25.00"),
+            open("deepseek/deepseek-v4-pro", "$1.60/$3.20"),
+            open("moonshotai/kimi-k3", "$2.65/$13.28"),
+            km("qwen/qwen3.8-max", "$2.00/$6.00", ""),        // unknown, not open
+        ])
+        #expect(picked == "moonshotai/kimi-k3")
+    }
+
+    @Test func strongestOpenWeightOnAFreeHostFallsToParameterCount() {
+        let picked = ModelDefaultRule.strongestOpenWeight.resolve(from: [
+            open("nvidia/nemotron-3-super-120b-a12b", ""),
+            open("moonshotai/kimi-k3", ""),
+            open("nvidia/nemotron-3-ultra-550b-a55b", ""),
+        ])
+        #expect(picked == "nvidia/nemotron-3-ultra-550b-a55b")
+    }
+
+    @Test func strongestOpenWeightBreaksAFullTieByRecency() {
+        let picked = ModelDefaultRule.strongestOpenWeight.resolve(from: [
+            open("qwen/qwen3.6-27b", "$0.30/$2.00"),
+            open("qwen/qwen3.7-27b", "$0.30/$2.00", isNew: true),
+        ])
+        #expect(picked == "qwen/qwen3.7-27b")
+    }
+
+    @Test func strongestOpenWeightWithNothingOpenTakesTheFirstModel() {
+        #expect(ModelDefaultRule.strongestOpenWeight.resolve(from: [closed("a", "$1/$1"), closed("b", "$9/$9")]) == "a")
+        #expect(ModelDefaultRule.strongestOpenWeight.resolve(from: []) == nil)
+    }
 
     @Test func fixedReturnsItsIdRegardlessOfCatalogue() {
         #expect(ModelDefaultRule.fixed("brave").resolve(from: []) == "brave")

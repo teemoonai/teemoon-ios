@@ -126,6 +126,10 @@ struct LiteRTTransport: GenerationTransport {
         /// and ignored in fact.
         struct Key: Hashable { let path: URL; let contextTokens: Int }
         private var engines: [Key: LiteRTLM.Engine] = [:]
+        /// Builds in flight. A warm-up and a turn asking for the same engine
+        /// share one build; the actor suspends at `initialize()`, so without
+        /// this the second caller found no engine and built another.
+        private var building: [Key: Task<LiteRTLM.Engine, Error>] = [:]
 
         func evictAll() async {
             guard !engines.isEmpty else { return }
@@ -162,7 +166,14 @@ struct LiteRTTransport: GenerationTransport {
         func engine(for path: URL, contextTokens: Int, sizeMB: Int) async throws -> LiteRTLM.Engine {
             let key = Key(path: path, contextTokens: contextTokens)
             if let existing = engines[key] { return existing }
+            if let inFlight = building[key] { return try await inFlight.value }
+            let task = Task { try await self.build(key: key, path: path, sizeMB: sizeMB) }
+            building[key] = task
+            defer { building[key] = nil }
+            return try await task.value
+        }
 
+        private func build(key: Key, path: URL, sizeMB: Int) async throws -> LiteRTLM.Engine {
             guard FileManager.default.fileExists(atPath: path.path) else {
                 throw LocalInferenceError.modelNotDownloaded(path.lastPathComponent)
             }
@@ -188,16 +199,25 @@ struct LiteRTTransport: GenerationTransport {
                 // Metal. The whole reason to evaluate this runtime is its GPU
                 // path; measuring the CPU one would answer a different question.
                 backend: .gpu,
-                maxNumTokens: contextTokens,
+                maxNumTokens: key.contextTokens,
                 cacheDir: FileManager.default.temporaryDirectory.path
             )
             LiteRTTransport.enableExperimentalFeatures()
+            // Read at engine creation, like every experimental flag. Gated on
+            // the file: a bundle without a drafter has nothing to speculate with.
+            let fileSupports = LiteRTLM.Capabilities(modelPath: path.path)?.hasSpeculativeDecodingSupport() ?? false
+            let speculative = LiteRTSpeculativeDecoding.setting(
+                disabled: LiteRTSpeculativeDecoding.disabledByEnvironment, fileSupports: fileSupports)
+            LiteRTLM.ExperimentalFlags.enableSpeculativeDecoding = speculative
+            logger.info("[litert] speculative decoding disabled=\(LiteRTSpeculativeDecoding.disabledByEnvironment, privacy: .public) fileSupports=\(fileSupports, privacy: .public) enabled=\(speculative.map(String.init) ?? "default", privacy: .public)")
+            DiagLog.note("[litert] speculative disabled=\(LiteRTSpeculativeDecoding.disabledByEnvironment) fileSupports=\(fileSupports) enabled=\(speculative.map(String.init) ?? "default")")
 
             let engine = LiteRTLM.Engine(engineConfig: config)
             let start = ContinuousClock.now
             try await engine.initialize()
             let took = start.duration(to: .now)
             logger.info("[litert] engine ready in \(took.description, privacy: .public)")
+            DiagLog.note("[litert] engine ready in \(took.description)")
             engines[key] = engine
             // The cost, not just the fact — this is what the developer-mode card
             // shows, and the log line was the only place it existed.
@@ -213,6 +233,22 @@ struct LiteRTTransport: GenerationTransport {
     /// multi-gigabyte engine is the largest thing teemoon holds by orders of
     /// magnitude, and the first thing worth giving back. See
     /// `LocalMemoryPressure`.
+    /// Builds the engine for an on-device provider ahead of its first turn —
+    /// on selection and at launch, per LiteRT-LM's guidance to create the
+    /// engine once, early and off the main thread. A turn that arrives while
+    /// this runs shares the build (`EngineCache.building`). Skipped when a
+    /// generation is in flight: that turn is loading it anyway. The memory
+    /// gate inside `engine(for:)` still decides; a refusal is quiet.
+    static func warmUp(for provider: Provider?) {
+        guard let ref = LocalWarmUpPolicy.target(for: provider) else { return }
+        Task.detached(priority: .utility) {
+            guard await !LocalGenerationGate.shared.isBusy else { return }
+            DiagLog.note("[litert] warm-up: \(ref.displayName)")
+            _ = try? await EngineCache.shared.engine(
+                for: ref.bundleFile, contextTokens: 8192, sizeMB: ref.sizeMB)
+        }
+    }
+
     static func evictEngines() async {
         await EngineCache.shared.evictAll()
     }
@@ -241,10 +277,31 @@ struct LiteRTTransport: GenerationTransport {
         // estimated from character counts.
         LiteRTLM.ExperimentalFlags.enableBenchmark = true
         LiteRTLM.ExperimentalFlags.enableConversationToolCallStreaming = true
-        // Constrains generation to the tool schema. Small models are exactly the
-        // ones that emit *almost* valid call JSON, and teemoon's own coercion
-        // only repairs what it can still parse.
-        LiteRTLM.ExperimentalFlags.enableConversationConstrainedDecoding = true
+        // Constrained decoding is NOT set here: it is per conversation, see
+        // `setConstrainedDecoding(toolsAttached:)`.
+    }
+
+    /// Constrained decoding, per conversation — OFF on this runtime.
+    ///
+    /// On LiteRT-LM v0.17 it neutralises the drafter, and every on-device
+    /// turn carries the search tool, so "only when tools are attached" would
+    /// be every turn. Tool calls still parse with it off. Re-measure before
+    /// turning it back on. The flag is global but read at
+    /// `createConversation`, which is why it is set right before each one.
+    ///
+    /// DEBUG bench override: `TEEMOON_BENCH_FLAGS` = `none` / `streaming` /
+    /// `constrained` forces the pair, to re-measure what each costs.
+    static func setConstrainedDecoding(toolsAttached: Bool) {
+        var constrained = false
+        #if DEBUG
+        if let arm = ProcessInfo.processInfo.environment["TEEMOON_BENCH_FLAGS"] {
+            constrained = arm == "constrained"
+            LiteRTLM.ExperimentalFlags.enableConversationToolCallStreaming = arm == "streaming"
+            DiagLog.note("[litert] bench flags: streaming=\(arm == "streaming") constrained=\(constrained)")
+        }
+        #endif
+        LiteRTLM.ExperimentalFlags.enableConversationConstrainedDecoding = constrained
+        DiagLog.note("[litert] conversation: toolsAttached=\(toolsAttached) constrained=\(constrained)")
     }
 
     /// Room left for the model's own answer, and for the grounding payload a
@@ -319,6 +376,7 @@ struct LiteRTTransport: GenerationTransport {
             for: modelPath, contextTokens: contextTokens, sizeMB: estimatedSizeMB
         )
         let shims = await LiteRTToolBridge.bridged(tools: overrideTools ?? tools) { _, _, _ in }
+        Self.setConstrainedDecoding(toolsAttached: !shims.isEmpty)
         let conversation = try await engine.createConversation(
             with: LiteRTLM.ConversationConfig(tools: shims, enableToolCallStreaming: true)
         )
@@ -440,15 +498,19 @@ struct LiteRTTransport: GenerationTransport {
                     events?.onToolExecutionEnded()
                 }
             )
+            Self.setConstrainedDecoding(toolsAttached: true)
             conversation = try await engine.createConversation(
                 with: LiteRTLM.ConversationConfig(
                     systemMessage: systemMessage, initialMessages: history,
-                    tools: shims, enableToolCallStreaming: true)
+                    tools: shims, samplerConfig: LiteRTSpeculativeDecoding.benchSampler,
+                    enableToolCallStreaming: true)
             )
         } else {
+            Self.setConstrainedDecoding(toolsAttached: false)
             conversation = try await engine.createConversation(
                 with: LiteRTLM.ConversationConfig(
-                    systemMessage: systemMessage, initialMessages: history)
+                    systemMessage: systemMessage, initialMessages: history,
+                    samplerConfig: LiteRTSpeculativeDecoding.benchSampler)
             )
         }
 
@@ -647,6 +709,8 @@ struct LiteRTTransport: GenerationTransport {
                 decode=\(info.lastDecodeTokenCount, privacy: .public)tok \
                 (\(Int(info.lastDecodeTokensPerSecond), privacy: .public)tok/s)
                 """)
+            // Into native.log too: the unified log is not readable off a device.
+            DiagLog.note("[litert] bench ttft=\(info.timeToFirstTokenInSecond)s prefill=\(info.lastPrefillTokenCount)tok (\(Int(info.lastPrefillTokensPerSecond))tok/s) decode=\(info.lastDecodeTokenCount)tok (\(Int(info.lastDecodeTokensPerSecond))tok/s)")
         }
 
         // Surface what the tools did. The calls have already run inside

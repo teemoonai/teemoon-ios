@@ -176,6 +176,8 @@ final class AddEditProviderModel {
 
     var conn: ConnState = .idle
     var fetchedModels: [KnownModel] = []
+    /// Where a saved setup's list is recorded. Injected so a test can watch it.
+    var catalogStore: LiveCatalogStore = .shared
     var showModelBrowser = false
     var showDeleteConfirm = false
     /// Set by `probe()` when the endpoint is detected as Ollama — enables native
@@ -347,7 +349,7 @@ final class AddEditProviderModel {
 
     /// Matching cloud preset for the current endpoint / selected tile, if any.
     var matchedCloudPreset: Provider? {
-        Provider.presets.first { $0.endpoint == fullEndpoint }
+        Provider.presets.first { Provider.presetMatchKey($0.endpoint) == Provider.presetMatchKey(fullEndpoint) }
             ?? Provider.presets.first { $0.name == selectedPresetName }
     }
 
@@ -409,7 +411,7 @@ final class AddEditProviderModel {
     /// Such a provider gets a connection check instead of a model section —
     /// there is nothing to pick, fetch, or refresh.
     var fixedModelID: String? {
-        guard let preset = Provider.presets.first(where: { $0.endpoint == fullEndpoint }),
+        guard let preset = Provider.presets.first(where: { Provider.presetMatchKey($0.endpoint) == Provider.presetMatchKey(fullEndpoint) }),
               case .fixed(let id) = preset.defaultModelRule ?? .first else { return nil }
         return id
     }
@@ -435,9 +437,7 @@ final class AddEditProviderModel {
     }
 
     /// near.ai rows carry the confidentiality tier badge, matching the browser.
-    var showsInlineTiers: Bool {
-        fullEndpointURL?.host?.lowercased().hasSuffix("near.ai") == true
-    }
+    var showsInlineTiers: Bool { Provider.isNearAIHost(fullEndpointURL?.host) }
 
     // MARK: - Copy
 
@@ -465,7 +465,7 @@ final class AddEditProviderModel {
     func probe(select preferred: String? = nil, userInitiated: Bool = false) async {
         guard let base = probeBaseURL else { return }
         defer { hasProbed = true }
-        let preset = Provider.presets.first(where: { $0.endpoint == fullEndpoint })
+        let preset = Provider.presets.first(where: { Provider.presetMatchKey($0.endpoint) == Provider.presetMatchKey(fullEndpoint) })
         let request = EndpointProbe.Request(
             baseURL: base,
             host: fullEndpointURL?.host,
@@ -630,7 +630,8 @@ final class AddEditProviderModel {
         // Seed the label as "provider model" on load from the curated display name, so
         // it reads right immediately — the live catalogue refreshes it if the name differs.
         if !preset.model.isEmpty {
-            let known = KnownModel.models(for: preset.id).first { $0.id == preset.model }
+            let known = WhereProviderPresentation.browseModels(for: preset, apiKey: apiKey)
+                .first { $0.id == preset.model }
                 ?? KnownModel(id: preset.model,
                               displayName: preset.model.split(separator: "/").last.map(String.init) ?? preset.model,
                               vendor: "", price: "")
@@ -762,6 +763,12 @@ final class AddEditProviderModel {
             // with the reason rather than dismissing into a broken provider.
             keySaveError = error.localizedDescription
             return false
+        }
+        // Settings is another door onto the same list — but only once the key
+        // is SAVED. Recording from the probe wrote under whatever key was in
+        // the field, and a test-then-cancel pruned the saved account's list.
+        if !fetchedModels.isEmpty {
+            catalogStore.record(fetchedModels, for: provider, apiKey: apiKey)
         }
         // Adding a provider activates it (you added it to use it); editing leaves
         // the active provider unchanged unless none is set.

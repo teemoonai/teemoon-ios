@@ -139,6 +139,8 @@ enum EndpointModelCatalog {
         case nearAI
         case xAI
         case fireworks
+        case openRouter
+        case nvidia
         /// Plain `GET {base}/models` — a self-hosted server or an unknown cloud.
         case generic
 
@@ -147,6 +149,8 @@ enum EndpointModelCatalog {
             if host == "near.ai" || host.hasSuffix(".near.ai") { return .nearAI }
             if XAIAdapter.handles(host: host) { return .xAI }
             if FireworksAdapter.handles(host: host) { return .fireworks }
+            if OpenRouterAdapter.handles(host: host) { return .openRouter }
+            if NVIDIAAdapter.handles(host: host) { return .nvidia }
             return .generic
         }
     }
@@ -161,41 +165,13 @@ enum EndpointModelCatalog {
         apiKey: String = "",
         session: URLSession = .shared
     ) async -> ProbeResult {
-        var request = URLRequest(url: baseURL.appendingPathComponent("models"))
-        request.timeoutInterval = 12
-        let key = apiKey.trimmingCharacters(in: .whitespaces)
-        if !key.isEmpty {
-            if let headerName = authHeaderName {
-                request.setValue(key, forHTTPHeaderField: headerName)
-            } else {
-                request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-            }
+        let list: OpenAIModelsResponse
+        switch await fetchList(OpenAIModelsResponse.self, from: baseURL.appendingPathComponent("models"),
+                               apiKey: apiKey, authHeaderName: authHeaderName, session: session) {
+        case .failure(let kind): return .failed(kind)
+        case .success(let decoded): list = decoded
         }
-
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            let kind = failureKind(forTransport: error)
-            if kind == .offline {
-                logger.warning("[probe] transport error for \(baseURL.absoluteString): \(error.localizedDescription)")
-            }
-            return .failed(kind)
-        }
-
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // `key.isEmpty` is the honest signal: auth is only attached above when a
-        // key exists, so a 403 here answered a request that carried none.
-        if let kind = failureKind(forStatus: status, body: data, sentKey: !key.isEmpty) {
-            logger.warning("[probe] HTTP \(status) for \(baseURL.absoluteString)")
-            return .failed(kind)
-        }
-
-        guard let list = try? JSONDecoder().decode(OpenAIModelsResponse.self, from: data),
-              !list.data.isEmpty else {
-            return .failed(.badResponse)
-        }
+        guard !list.data.isEmpty else { return .failed(.badResponse) }
 
         var seen = Set<String>()
         let models: [KnownModel] = list.data.compactMap { m in
@@ -211,12 +187,52 @@ enum EndpointModelCatalog {
                 // namespace only as the fallback.
                 vendor: ModelCatalog.familyVendor(forID: ModelCatalog.slug(m.id))
                         ?? ModelCatalog.vendorLabel(forID: m.id),
-                price: "",
+                // A plain list carries no price. For a first-party vendor host
+                // the shipped list-price snapshot fills it — exact model match
+                // only, blank otherwise. A self-hosted server stays blank.
+                price: ListPriceSnapshot.price(host: baseURL.host, modelID: m.id),
                 contextWindow: m.contextLabel
             )
         }
         logger.info("[probe] \(models.count) chat model(s) at \(baseURL.absoluteString)")
         return models.isEmpty ? .failed(.badResponse) : .connected(models)
+    }
+
+    /// One authenticated GET, decoded. Every catalogue adapter lists through
+    /// this so a status-code rule lands once. Auth is attached only when the
+    /// key is non-empty — `sentKey` below must stay tied to that, or a 403 on
+    /// a keyless call gets blamed on a key that does not exist.
+    static func fetchList<T: Decodable>(
+        _ type: T.Type, from url: URL, apiKey: String,
+        authHeaderName: String? = nil, session: URLSession
+    ) async -> Swift.Result<T, FailureKind> {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        let key = apiKey.trimmingCharacters(in: .whitespaces)
+        if !key.isEmpty {
+            request.setValue(authHeaderName == nil ? "Bearer \(key)" : key,
+                             forHTTPHeaderField: authHeaderName ?? "Authorization")
+        }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            let kind = failureKind(forTransport: error)
+            if kind == .offline {
+                logger.warning("[fetch] transport error for \(url.absoluteString): \(error.localizedDescription)")
+            }
+            return .failure(kind)
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if let kind = failureKind(forStatus: status, body: data, sentKey: !key.isEmpty) {
+            logger.warning("[fetch] HTTP \(status) for \(url.absoluteString)")
+            return .failure(kind)
+        }
+        guard let decoded = try? JSONDecoder().decode(T.self, from: data) else {
+            return .failure(.badResponse)
+        }
+        return .success(decoded)
     }
 }
 

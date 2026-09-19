@@ -99,7 +99,8 @@ struct ChatView: View {
     private var activeKnownModel: KnownModel? {
         guard let provider = providerStore.activeProvider else { return nil }
         if let local = LocalModelCatalog.model(id: provider.model) { return .onDevice(local) }
-        if let known = WhereProviderPresentation.browseModels(for: provider)
+        if let known = WhereProviderPresentation.browseModels(
+            for: provider, apiKey: providerStore.browseCredential(for: provider))
             .first(where: { $0.id == provider.model }) { return known }
         // NEVER NIL FOR A REAL PROVIDER, or the menu renders EMPTY and the long
         // press looks broken. The catalogue consulted here is the shipped
@@ -118,6 +119,15 @@ struct ChatView: View {
 
     /// The live catalogue entry for the active model — the same fetch the model
     /// browser makes, against the provider that is actually answering.
+    private func activeModelOffersLoader() -> (() async -> [ModelOffer])? {
+        guard let provider = providerStore.activeProvider,
+              let loader = WhereProviderPresentation.offersLoader(
+                  for: provider, apiKey: providerStore.browseCredential(for: provider))
+        else { return nil }
+        let id = provider.model
+        return { await loader(id) }
+    }
+
     private func activeModelLiveLoader() -> (() async -> KnownModel?)? {
         guard let provider = providerStore.activeProvider,
               // ONE loader, shared with the Where sheet — including the
@@ -415,7 +425,11 @@ struct ChatView: View {
                     }
                     HStack(alignment: .bottom) { chatInput }
                 }
-                    .padding()
+                    // 8 under the field, not 16: the home indicator (or the
+                    // keyboard) already keeps its own distance, and 16 on top
+                    // of that floats the composer. Sides and top stay 16.
+                    .padding([.horizontal, .top])
+                    .padding(.bottom, 8)
                     #if os(macOS)
                     // Same 720pt column as the transcript above (see
                     // ConversationView). Capping only the transcript would leave
@@ -484,7 +498,8 @@ struct ChatView: View {
                             // Same rule as the Where sheet: the entry says what
                             // it knows, this view does not decide.
                             confidentiality: model.confidentialityNote,
-                            liveLoader: activeModelLiveLoader()
+                            liveLoader: activeModelLiveLoader(),
+                            offersLoader: activeModelOffersLoader()
                         )
                     }
                     .presentationDetents([.large])
@@ -793,14 +808,15 @@ struct ChatView: View {
         providerStore.activeProvider.map { providerStore.hasCredential(for: $0) } ?? true
     }
 
-    private func performGenerate() {
+    private func performGenerate(acceptedDegrade: Bool = false) {
         viewModel.generate(
             currentThread: &currentThread,
             modelContext: modelContext,
             settings: settings,
             providers: providerStore,
             session: confidentialSession,
-            llm: llm
+            llm: llm,
+            acceptedDegrade: acceptedDegrade
         )
         isPromptFocused = false
     }
@@ -811,9 +827,9 @@ struct ChatView: View {
     private func generateBypassing() {
         if let message = pendingRetryMessage {
             pendingRetryMessage = nil
-            performRetry(from: message)
+            performRetry(from: message, acceptedDegrade: true)
         } else {
-            performGenerate()
+            performGenerate(acceptedDegrade: true)
         }
     }
 
@@ -862,7 +878,7 @@ struct ChatView: View {
         presentSend(prep) { performRetry(from: message) }
     }
 
-    private func performRetry(from message: Message) {
+    private func performRetry(from message: Message, acceptedDegrade: Bool = false) {
         viewModel.retry(
             from: message,
             currentThread: &currentThread,
@@ -870,7 +886,8 @@ struct ChatView: View {
             settings: settings,
             providers: providerStore,
             session: confidentialSession,
-            llm: llm
+            llm: llm,
+            acceptedDegrade: acceptedDegrade
         )
     }
 }

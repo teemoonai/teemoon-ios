@@ -46,3 +46,63 @@ struct EndpointDirectoryTests {
         #expect(EndpointDirectory.parseDirectory(data)?["a/b"] == "https://x.completions.near.ai/v1")
     }
 }
+
+/// The directory chooses where sealed prompts go, so it is also a filter.
+@Suite("EndpointDirectory host rule")
+struct EndpointDirectoryHostRuleTests {
+
+    @Test func nearAIHostsOverHTTPSAreAccepted() {
+        #expect(EndpointDirectory.confidentialHost("glm-5-3-flash.completions.near.ai")
+                == "https://glm-5-3-flash.completions.near.ai")
+        #expect(EndpointDirectory.confidentialHost("https://dsv4-flash.completions.near.ai")
+                == "https://dsv4-flash.completions.near.ai")
+    }
+
+    @Test func everythingElseIsRejected() {
+        #expect(EndpointDirectory.confidentialHost("http://glm.completions.near.ai") == nil)
+        #expect(EndpointDirectory.confidentialHost("glm.completions.near.ai.evil.com") == nil)
+        #expect(EndpointDirectory.confidentialHost("evil.example") == nil)
+        #expect(EndpointDirectory.confidentialHost("glm.completions.near.ai:8443") == nil)
+        #expect(EndpointDirectory.confidentialHost("glm.completions.near.ai/redirect") == nil)
+    }
+
+    /// A rejected row drops out of the map rather than poisoning it.
+    @Test func aRejectedRowIsDroppedNotKept() throws {
+        let json = """
+        {"endpoints":[{"domain":"evil.example","models":["z-ai/glm-5.3-flash"]},
+                      {"domain":"glm-5-3-flash.completions.near.ai","models":["z-ai/glm-5.3-flash"]}]}
+        """
+        let map = try #require(EndpointDirectory.parseDirectory(Data(json.utf8)))
+        #expect(map["z-ai/glm-5.3-flash"] == "https://glm-5-3-flash.completions.near.ai/v1")
+        #expect(!map.values.contains { $0.contains("evil.example") })
+    }
+
+private final class FailingDirectoryStub: URLProtocol {
+    nonisolated(unsafe) static var requests = 0
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        Self.requests += 1
+        let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+@Suite("EndpointDirectory — a failure is remembered")
+struct EndpointDirectoryFailureTests {
+    /// `buildModels` asks once per own-fleet row. A host that is down must
+    /// cost one round trip per minute, not one timeout per row.
+    @Test func aFailedFetchIsNotRepeatedForEveryRow() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FailingDirectoryStub.self]
+        FailingDirectoryStub.requests = 0
+        let directory = EndpointDirectory(session: URLSession(configuration: config))
+        for id in ["own/one", "own/two", "own/three"] {
+            _ = await directory.directBase(forModel: id)
+        }
+        #expect(FailingDirectoryStub.requests == 1)
+    }
+}
+}

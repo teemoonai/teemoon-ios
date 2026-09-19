@@ -18,20 +18,25 @@ struct CloudKeyProviderPickerView: View {
     @State private var idsBeforeAdd: Set<UUID> = []
 
     var body: some View {
+        let offered = providerStore.presetsWithoutKey()
         Form {
             Section {
-                ForEach(Provider.presets) { preset in
+                if offered.isEmpty {
+                    Text("every provider here already has a key — change one from its own row in places & keys.")
+                        .foregroundStyle(.secondary).textCase(.lowercase)
+                }
+                ForEach(offered) { preset in
                     Button {
                         idsBeforeAdd = Set(providerStore.providers.map(\.id))
                         addingPreset = preset
                     } label: {
                         WhereRow(
-                            glyph: preset.isFixedAnswerService
-                                ? "sparkle.magnifyingglass" : WhereLocality.cloud.systemImage,
+                            glyph: WhereLocality.cloud.systemImage,
                             glyphTint: Color.accentColor,
                             title: preset.name.lowercased(),
                             showsE2EETag: preset.capabilities.contains(.endToEndEncryption),
-                            caption: WhereProviderPresentation.presetCaption(for: preset)
+                            caption: WhereProviderPresentation.presetCaption(for: preset),
+                            captionLineLimit: 2
                         )
                     }
                     .buttonStyle(.plain)

@@ -79,6 +79,12 @@ struct WhereSheetView: View {
     /// Provider ids as they were before an add sheet opened, so the one that came
     /// back can be identified without the sheet having to report it.
     @State var idsBeforeAdd: Set<UUID> = []
+    /// First run's two rows push, like settings' places & keys does.
+    enum FirstRunPush: String, Identifiable {
+        case computer, cloudKey
+        var id: String { rawValue }
+    }
+    @State var firstRunPush: FirstRunPush?
     /// Row to scroll to — the setup that was just added.
     @State var scrollTarget: String?
     enum AddTarget: String, Identifiable {
@@ -181,6 +187,36 @@ struct WhereSheetView: View {
                 }
             }
             .groupedListStyle()
+            // PUSHED, like settings → places & keys, and the same screens:
+            // the computer form, or pick the provider then its key form. A
+            // sheet rising over this sheet read as a different task, and two
+            // rows side by side must animate the same way. On pop, adopt
+            // whatever the form saved, exactly as the sheet paths do.
+            .navigationDestination(item: $firstRunPush) { push in
+                switch push {
+                case .computer:
+                    // No keyboard until a field is tapped, like the key form:
+                    // a keyboard on appear springs the sheet to full height.
+                    AddEditProviderView(mode: .add, startsCustom: true, customStart: .computer,
+                                        focusesEndpointOnAppear: false)
+                        .navigationBarBackButtonHidden(true)
+                case .cloudKey:
+                    CloudKeyProviderPickerView()
+                }
+            }
+            .onChange(of: firstRunPush) { _, push in
+                if push == nil { adoptNewlyAdded() }
+            }
+            // A setup SAVED from a first-run push ends the sheet, not just
+            // the push. The user came here to start chatting; the composer
+            // with the chip naming their new model is that. Popping to the
+            // picker asked them to pick again, and popping to the sheet
+            // showed a list of one. Cancel still pops, since nothing changed.
+            .onChange(of: providerStore.providers.count) { old, new in
+                guard firstRunPush != nil, new > old else { return }
+                adoptNewlyAdded()
+                dismiss()
+            }
             // The list adds ~35pt above its first section, which under a nav bar
             // put the segmented control most of an inch below the title with
             // nothing in between. The picker is the sheet's primary control —
@@ -258,7 +294,8 @@ struct WhereSheetView: View {
                         // Where row falls back to the shipped snapshot, which
                         // is always behind.
                         liveLoader: liveModelLoader(for: target.provider,
-                                                    id: target.model.id)
+                                                    id: target.model.id),
+                        offersLoader: offersLoader(for: target.provider, id: target.model.id)
                     )
                 }
             }
@@ -351,9 +388,15 @@ struct WhereSheetView: View {
                 // — and stays that way if this refresh fails.
                 homeProbe.seed(from: providerStore)
                 // Names the server, lists its models, and finds which are warm.
-                await homeProbe.refresh(providerStore.providers) { provider in
+                // The home probe waits on a LAN box that may be asleep; the
+                // catalogue counts should not queue behind it.
+                async let home: Void = homeProbe.refresh(providerStore.providers) { provider in
                     providerStore.credential(for: provider)
                 }
+                async let catalogues: Void = LiveCatalogStore.shared.refreshAll(
+                    providerStore.providers, maxAge: 86_400,
+                    credential: { providerStore.browseCredential(for: $0) })
+                _ = await (home, catalogues)
                 syncHomeEquipped()
             }
             .onAppear {
@@ -503,7 +546,11 @@ struct WhereSheetView: View {
             networkSatisfied: pathObserver.isSatisfied,
             home: home,
             credentialFor: { self.providerStore.credential(for: $0) },
-            credentialForEndpoint: { self.providerStore.credential(forEndpoint: $0) ?? "" }
+            credentialForEndpoint: { self.providerStore.credential(forEndpoint: $0) ?? "" },
+            catalogCount: { provider in
+                LiveCatalogStore.shared.count(for: provider,
+                                              apiKey: self.providerStore.browseCredential(for: provider))
+            }
         )
     }
 
@@ -543,14 +590,6 @@ struct WhereSheetView: View {
         } header: {
             sectionHeader("get")
         }
-    }
-
-    func liveCatalogLoader(for provider: Provider) -> (() async -> [KnownModel]?)? {
-        WhereProviderPresentation.liveModelsLoader(
-            for: provider,
-            apiKey: browseKey(for: provider),
-            homeKind: nil
-        )
     }
 
     func browseKey(for provider: Provider) -> String {
@@ -606,11 +645,19 @@ struct WhereSheetView: View {
         return { await loader()?.first { $0.id == id } }
     }
 
+    func offersLoader(for provider: Provider, id: String) -> (() async -> [ModelOffer])? {
+        guard let loader = WhereProviderPresentation.offersLoader(
+            for: provider, apiKey: providerStore.browseCredential(for: provider)
+        ) else { return nil }
+        return { await loader(id) }
+    }
+
     func knownModel(for row: Equipped) -> KnownModel {
         if let local = LocalModelCatalog.model(id: row.modelID) {
             return .onDevice(local)
         }
-        if let known = WhereProviderPresentation.browseModels(for: row.provider)
+        if let known = WhereProviderPresentation.browseModels(
+            for: row.provider, apiKey: providerStore.browseCredential(for: row.provider))
             .first(where: { $0.id == row.modelID }) {
             return known
         }

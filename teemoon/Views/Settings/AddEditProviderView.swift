@@ -94,6 +94,10 @@ struct AddEditProviderView: View {
     @State private var appliedConnOverride = false
 
     @FocusState var endpointFocused: Bool
+    /// Off when pushed inside a detented sheet: a keyboard on appear springs
+    /// the sheet to full height before the user has touched anything. The key
+    /// form never autofocuses; the computer form should not either there.
+    let focusesEndpointOnAppear: Bool
 
     init(scope: Scope = .full,
          mode: Mode,
@@ -103,8 +107,10 @@ struct AddEditProviderView: View {
          customStart: CustomStart = .computer,
          startsPullingModel: Bool = false,
          initialPreset: Provider? = nil,
-         embedInNavigationStack: Bool = true) {
+         embedInNavigationStack: Bool = true,
+         focusesEndpointOnAppear: Bool = true) {
         self.scope = scope
+        self.focusesEndpointOnAppear = focusesEndpointOnAppear
         self.mode = mode
         self.keyOverride = keyOverride
         self.connOverride = connOverride
@@ -226,7 +232,7 @@ struct AddEditProviderView: View {
             // Add mode: start with the cursor in the url field — you type the url
             // first, and the label auto-fills from the model.
             .task {
-                guard !form.isEditing else { return }
+                guard !form.isEditing, focusesEndpointOnAppear else { return }
                 try? await Task.sleep(for: .seconds(0.4))
                 if form.selectedPresetName.isEmpty { endpointFocused = true }   // only focus the url in custom mode
             }

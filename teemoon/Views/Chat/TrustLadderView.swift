@@ -37,6 +37,10 @@ struct TrustLadderView: View {
     @State var rung: TrustRung
     @State var timedOut = false
     @State var showEncryptedModelPicker = false
+    @State var showNearAIKeyForm = false
+    /// Read once per appearance, not on every body pass: `hasCredential` is a
+    /// Keychain round trip.
+    @State var nearAIHasKey = false
     @State var pickedEncryptedModel = ""
 
     /// Optional scroll-to-id for previews/tours (e.g. "reverify"). Production nil.
@@ -209,11 +213,14 @@ struct TrustLadderView: View {
                 }
             }
             #endif
+            .task {
+                nearAIHasKey = nearAIProvider.map { providerStore.hasCredential(for: $0) } ?? false
+            }
             .task(id: session.attestationState) {
                 timedOut = false
-                guard session.attestationState == .verifying else { return }
+                guard session.awaitsFirstRecord else { return }
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if !Task.isCancelled && session.attestationState == .verifying { timedOut = true }
+                if !Task.isCancelled && session.awaitsFirstRecord { timedOut = true }
             }
             // inert in normal runs; -DesignTourBottom scrolls to the known-code
             // section so the capture pipeline can screenshot it.

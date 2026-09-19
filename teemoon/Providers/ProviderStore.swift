@@ -197,9 +197,21 @@ final class ProviderStore {
     /// so no view has to know that activating a model means writing two
     /// separate pieces of state.
     func activate(modelID: String, on provider: Provider) {
-        let updated = provider.equipping(modelID)
+        var updated = provider.equipping(modelID)
+        // `modelCapabilities` describes the ACTIVE model, so a switch must take
+        // the new model's own row. Carrying the previous model's bits made the
+        // tools gate answer for a model that is no longer running; nil is
+        // "unknown", which the gate treats optimistically.
+        updated.modelCapabilities = capabilities(ofModel: modelID, on: provider.id)
         updateProvider(updated)
         currentProviderID = updated.id.uuidString
+    }
+
+    /// What the config knows a model can do, or nil when it has never been
+    /// fetched for that model.
+    func capabilities(ofModel modelID: String, on serverID: UUID) -> ModelCapabilities? {
+        config.snapshot.equipped
+            .first { $0.serverID == serverID && $0.modelID == modelID }?.capabilities
     }
 
     /// Removes a model from a provider's equipped set. Deletes the provider
@@ -270,7 +282,10 @@ final class ProviderStore {
     /// capabilities of models that are equipped but not active, `addedAt`,
     /// `lastUsedAt`, each row's id) across a write.
     private func save() {
-        guard persists, !isLoading else { return }
+        // Not gated on `persists`: an in-memory `ConfigStore` keeps the
+        // snapshot and skips the file, and that snapshot is where per-model
+        // facts (capabilities, addedAt, lastUsedAt) live between edits.
+        guard !isLoading, !isRefilling else { return }
         config.write(
             ProviderConfigProjection.snapshot(
                 providers: providers,
@@ -278,7 +293,23 @@ final class ProviderStore {
                 previous: config.snapshot
             )
         )
+        // A switched model starts with nil capabilities (`Provider.model`
+        // clears them); its own row is the answer, when there is one.
+        var refilled = providers
+        var changed = false
+        for i in refilled.indices where refilled[i].modelCapabilities == nil {
+            if let caps = capabilities(ofModel: refilled[i].model, on: refilled[i].id) {
+                refilled[i].modelCapabilities = caps
+                changed = true
+            }
+        }
+        if changed {
+            isRefilling = true
+            providers = refilled
+            isRefilling = false
+        }
     }
+    private var isRefilling = false
 
     private func load() {
         let snapshot = config.load()

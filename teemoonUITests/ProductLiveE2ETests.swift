@@ -17,7 +17,7 @@ import XCTest
 
 final class ProductLiveE2ETests: XCTestCase {
 
-    private static let model = "z-ai/glm-5.2"
+    private static let model = "z-ai/glm-5.3-flash"
 
     override func setUp() { continueAfterFailure = false }
 

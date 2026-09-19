@@ -109,9 +109,9 @@ struct VerificationRunView: View {
         }
         .task(id: session.attestationState) {
             timedOut = false
-            guard session.attestationState == .verifying else { return }
+            guard session.awaitsFirstRecord else { return }
             try? await Task.sleep(nanoseconds: 8_000_000_000)
-            if !Task.isCancelled && session.attestationState == .verifying { timedOut = true }
+            if !Task.isCancelled && session.awaitsFirstRecord { timedOut = true }
         }
         .sheet(item: $glossaryTerm) { entry in
             GlossarySheet(entry: entry)

@@ -99,6 +99,20 @@ struct Keychain {
         }
     }
 
+    /// Every item under teemoon's service — the whole key set, not one account.
+    /// iOS keeps an app's keychain across an uninstall, so a reinstall that has
+    /// to look like a first install needs this; nothing in a shipping flow does.
+    static func deleteAll() throws {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.deleteFailed(status)
+        }
+    }
+
     enum KeychainError: Error, LocalizedError {
         case saveFailed(OSStatus)
         case deleteFailed(OSStatus)

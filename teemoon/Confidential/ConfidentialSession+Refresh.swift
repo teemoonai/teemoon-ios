@@ -41,7 +41,13 @@ extension ConfidentialSession {
         // forcing state for the finding-4.1 fail-closed refusal test. Same
         // DEBUG + `--uitesting` gate as `seededState` itself; a shipping
         // build cannot reach it.
-        if Self.seededState?.suppressLiveAttestation == true { return }
+        if let seeded = Self.seededState, seeded.suppressLiveAttestation {
+            if seeded.plantsPendingVerifier, tlsTask == nil,
+               activeProvider?.capabilities.contains(.attestation) == true {
+                tlsTask = Task { try? await Task.sleep(for: .seconds(600)) }
+            }
+            return
+        }
         #endif
         attestationTask?.cancel()
         attestationFetchFailed = false
@@ -69,6 +75,8 @@ extension ConfidentialSession {
         }
         let provID = provider.id
         let apiKey = credential(for: provider)
+        directHostMissing = false
+        attestationAttemptedAt = Date()
         attestationTask = Task { [weak self] in
             // Adopt results only while this task still speaks for the CURRENT
             // (provider, model): a cancelled-but-completing fetch from the
@@ -77,39 +85,30 @@ extension ConfidentialSession {
             // context clear alone can't stop an in-flight task that is
             // already past its last cancellation checkpoint).
             do {
-                // Resolve the model's direct TEE host from near.ai's live
-                // /endpoints directory (with the shipped hardcoded map as a
-                // fallback), not just the hardcoded presets. Newer models like
-                // GLM-5.2 only appear in the live directory, and without their
-                // direct host the model-enclave manifest (its image set) is never
-                // fetched and the E2EE key can't bind to the node. Mirrors what
-                // the TLS path already does.
+                // near.ai's live /endpoints directory is the only host map:
+                // without the model's direct host the model-enclave manifest is
+                // never fetched and the E2EE key cannot bind to the node.
                 let gpuNodeURL = await EndpointDirectory.shared.directBase(forModel: provider.model)
-                    ?? provider.directGPUNodeURL
-                // near.ai's confidential models each publish a direct host (the
-                // invariant the catalog gate enforces). An attestable-classified
-                // model that resolves none is one near.ai doesn't serve in an
-                // enclave — a retired/stale model like deepseek-v3.2. Attesting it
-                // would stall on "verifying" then fail closed, so short-circuit to
-                // non-attestable: no false lock, no send block, no spinner.
                 guard !Task.isCancelled, self?.attestedContext == context else { return }
                 guard let gpuNodeURL else {
-                    // No direct host resolved. Distinguish two very different
-                    // situations before declaring the model non-attestable:
-                    //  • the directory AUTHORITATIVELY lists no confidential host
-                    //    → an ordinary model (honest .none: no lock, no block); vs
-                    //  • a COLD MISS (directory never reached, nothing persisted)
-                    //    for a model the catalog classifies as attestable → we
-                    //    can't confirm it's ordinary, so failing to .none would
-                    //    fail OPEN to a silent unencrypted send. Surface it as a
-                    //    fetch failure (degraded → send needs confirmation) until
-                    //    the directory loads and we can tell for sure.
-                    let authoritative = await EndpointDirectory.shared.hasAuthoritativeData()
+                    // See `outcome(whenNoDirectHostFor:)`.
+                    // `.none` — "ordinary model, nothing to verify" — is honest
+                    // ONLY for a tier that claims no encryption: proxied, or
+                    // attested third-party, neither of which has a confidential
+                    // endpoint by design.
+                    //
+                    // An OWN-FLEET model with no host is unexplained: a cold
+                    // directory, a failed fetch, or a gap in the published map.
+                    // All three mean "couldn't check", and `.none` there sends
+                    // in the clear under a row that says end-to-end encrypted.
+                    // Degrade instead, so the send asks first.
+                    let outcome = ConfidentialSession.outcome(whenNoDirectHostFor: provider.model)
                     guard !Task.isCancelled, self?.attestedContext == context else { return }
-                    if !authoritative && NearAIModelCatalog.isAttestable(provider.model) {
-                        logger.warning("[refresh] no host for attestable model=\(provider.model, privacy: .public) on a cold directory — failing closed (degraded), not .none")
+                    if outcome == .degraded {
+                        logger.warning("[refresh] no direct host for own-fleet model=\(provider.model, privacy: .public) — degraded, not .none")
                         self?.attestation = nil
                         self?.attestationFetchFailed = true
+                        self?.directHostMissing = true
                         return
                     }
                     self?.noConfidentialEndpoint = true
@@ -151,11 +150,14 @@ extension ConfidentialSession {
     /// a real switch but not on an in-place re-verify (keepExisting).
     func clearDerivedState(resetCounts: Bool) {
         provenanceTask?.cancel()
-        dcapTask?.cancel()
-        nrasTask?.cancel()
-        tlsTask?.cancel()
+        // Cancel AND drop the handles: a cancelled verifier never answers, and
+        // a handle with no answer reads as a verdict still pending.
+        dcapTask?.cancel(); dcapTask = nil
+        nrasTask?.cancel(); nrasTask = nil
+        tlsTask?.cancel(); tlsTask = nil
         attestation = nil
         noConfidentialEndpoint = false
+        directHostMissing = false
         modelArtifact = nil
         imageProvenance = nil
         modelLayerVerification = nil
@@ -176,7 +178,16 @@ extension ConfidentialSession {
     /// or if the Ed25519 key is missing (e.g. model TEE was cold-starting during initial fetch).
     /// Called before each generation to keep the Ed25519 key fresh.
     func refreshAttestationIfStale() {
-        guard let record = attestation else { return }
+        guard let record = attestation else {
+            // A failed fetch is retried, at most once a minute: a directory
+            // that lagged the catalogue, or a server that was down, must not
+            // stay degraded until a provider switch.
+            if attestationFetchFailed,
+               attestationAttemptedAt.map({ Date().timeIntervalSince($0) > Self.attestationRetryInterval }) ?? true {
+                refreshAttestation()
+            }
+            return
+        }
         let age = Date().timeIntervalSince(record.fetchedAt)
         let keyMissing = record.modelEd25519PubKey == nil
         if age > Self.attestationMaxAge || keyMissing {

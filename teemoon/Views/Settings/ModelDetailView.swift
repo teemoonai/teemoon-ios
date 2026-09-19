@@ -41,9 +41,14 @@ struct ModelDetailView: View {
     /// and fills in when the answer arrives. A spinner over an empty page would
     /// be slower and say less.
     var liveLoader: (() async -> KnownModel?)? = nil
+    /// Who can serve this model, when the catalogue publishes such a list.
+    /// Fetched when the page opens, beside `liveLoader`. nil otherwise — an
+    /// empty section would imply the list exists.
+    var offersLoader: (() async -> [ModelOffer])? = nil
 
     @State private var copiedID = false
     @State private var live: KnownModel? = nil
+    @State private var offers: [ModelOffer] = []
 
     /// The live entry once it lands, else what we opened with.
     private var shown: KnownModel { live ?? model }
@@ -104,6 +109,8 @@ struct ModelDetailView: View {
             Section("what it costs") {
                 if !shown.price.isEmpty {
                     row("price", shown.priceLabel)
+                } else if shown.isFree {
+                    row("price", "free")
                 } else {
                     // Absent, not guessed — see the header.
                     Text("no published price")
@@ -115,6 +122,11 @@ struct ModelDetailView: View {
                 }
                 if let out = shown.maxOutputTokens {
                     row("max output", ModelCatalog.contextLabel(out).lowercased())
+                }
+                // Cache reads, image tokens, a per-search fee, a long-context
+                // tier: what the two headline rates leave out.
+                ForEach(shown.extraCosts, id: \.label) { cost in
+                    row(cost.label, cost.amount)
                 }
             }
 
@@ -145,6 +157,24 @@ struct ModelDetailView: View {
                     if !shown.inputModalities.isEmpty {
                         row("accepts", shown.inputModalities.joined(separator: ", "))
                     }
+                    if !shown.reasoningEfforts.isEmpty {
+                        row("reasoning", shown.reasoningEfforts.joined(separator: ", "))
+                    }
+                    if let cutoff = shown.knowledgeCutoff {
+                        row("knows up to", cutoff)
+                    }
+                }
+            }
+
+            if !offers.isEmpty {
+                Section {
+                    ForEach(offers) { offer in providerOffer(offer) }
+                } header: {
+                    Text("providers").textCase(.lowercase)
+                } footer: {
+                    Text("who openrouter can route this model to. speed is "
+                         + "measured over the last half hour.")
+                        .textCase(.lowercase)
                 }
             }
 
@@ -177,8 +207,13 @@ struct ModelDetailView: View {
         }
         .formStyle(.grouped)
         .task {
-            guard let liveLoader, live == nil else { return }
-            if let fresh = await liveLoader() { live = fresh }
+            // Both at once: the card is worth less with either half missing,
+            // and the providers table is a second request.
+            async let fresh: KnownModel? = liveLoader?() ?? nil
+            async let routes: [ModelOffer] = offersLoader?() ?? []
+            if live == nil, let fresh = await fresh { live = fresh }
+            let loaded = await routes
+            if !loaded.isEmpty { offers = loaded }
         }
         .navigationTitle("model")
         #if os(iOS)
@@ -212,6 +247,45 @@ struct ModelDetailView: View {
     /// "JSON mode" — because this view reports what was said rather than
     /// teemoon's reading of it, and the raw name is what you would put in a
     /// request.
+    /// One routing target. Only what the catalogue actually reported: latency
+    /// and throughput are null without a key, and a row of blanks says nothing.
+    @ViewBuilder
+    private func providerOffer(_ offer: ModelOffer) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(offer.title)
+                    .font(.body.weight(.medium))
+                    .textCase(.lowercase)
+                if offer.isZeroDataRetention {
+                    Text("zero data retention")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.green.opacity(0.13)))
+                        .fixedSize()
+                }
+            }
+            if offer.isFree {
+                row("price", "free")
+            } else if !offer.price.isEmpty {
+                row("price", offer.price + " / 1M tokens")
+            }
+            if let context = offer.contextTokens {
+                row("context", ModelCatalog.contextLabel(context).lowercased())
+            }
+            if let out = offer.maxOutputTokens {
+                row("max output", ModelCatalog.contextLabel(out).lowercased())
+            }
+            if let quant = offer.quantization { row("quantization", quant) }
+            if let uptime = offer.uptimeLabel { row("uptime · 1d", uptime) }
+            if let latency = offer.latencyLabel { row("first token", latency) }
+            if let throughput = offer.throughputLabel { row("speed", throughput) }
+            if offer.supportsImplicitCaching { row("caching", "automatic") }
+        }
+        .padding(.vertical, 4)
+    }
+
     private func chips(_ items: [String]) -> some View {
         FlowLayout(spacing: 6) {
             ForEach(items, id: \.self) { item in
@@ -303,5 +377,67 @@ private struct FlowLayout: Layout {
                 // show a date shape the wire path would reject.
                 deprecationDate: KnownModel.deprecationDate(fromProvider: "2026-12-01"))
     )
+    }
+}
+
+#Preview("Model detail — nvidia, free tier") {
+    NavigationStack {
+        ModelDetailView(
+            model: KnownModel(
+                id: "nvidia/nemotron-3-super-120b-a12b",
+                displayName: "nemotron-3-super-120b-a12b",
+                vendor: "NVIDIA",
+                // No price and no context: the hosted tier is free for
+                // development, and the list reports no window.
+                price: "",
+                modelPageURL: "https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b",
+                isFree: true)
+        )
+    }
+}
+
+/// An OpenRouter card with everything that catalogue publishes: the cost lines
+/// under the headline rate, what the model can be asked to do, and who it can
+/// be routed to. Values are from a real 2026-09-15 capture.
+#Preview("Model detail — openrouter") {
+    NavigationStack {
+        ModelDetailView(
+            model: {
+                var model = KnownModel(
+                    id: "openai/gpt-5.4",
+                    displayName: "GPT 5.4",
+                    vendor: "OpenAI",
+                    price: "$2.50/$15.00",
+                    contextWindow: "1.1M",
+                    capabilities: [.tools, .vision],
+                    summary: "GPT-5.4 unifies the Codex and GPT lines into one model.",
+                    features: ["tools", "reasoning", "structured outputs", "moderated"],
+                    samplingParameters: ["reasoning_effort", "response_format", "seed", "tools"],
+                    maxOutputTokens: 128_000,
+                    inputModalities: ["text", "image", "file"],
+                    modelPageURL: "https://openrouter.ai/openai/gpt-5.4")
+                model.extraCosts = [
+                    .init(label: "cache read", perMillion: 0.25),
+                    .init(label: "web search", perCall: 0.01),
+                    .init(label: "past 272k", perMillion: 5, perMillionOutput: 22.5),
+                ]
+                model.reasoningEfforts = ["xhigh", "high", "medium", "low", "none"]
+                model.knowledgeCutoff = "2025-09-30"
+                return model
+            }(),
+            offersLoader: {
+                [
+                    ModelOffer(
+                        providerName: "OpenAI", tag: "openai/flex", price: "$1.25/$7.50",
+                        contextTokens: 1_050_000, maxOutputTokens: 128_000,
+                        uptimePercent: 91.6, latencyMilliseconds: 2085.5,
+                        throughputTokensPerSecond: 37),
+                    ModelOffer(
+                        providerName: "Azure", tag: "azure/us", price: "$2.50/$15.00",
+                        contextTokens: 1_050_000, uptimePercent: 99.97,
+                        latencyMilliseconds: 600, throughputTokensPerSecond: 38,
+                        isZeroDataRetention: true),
+                ]
+            })
     }
 }

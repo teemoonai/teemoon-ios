@@ -58,7 +58,7 @@ struct NearAICatalogParseTests {
 
     @Test func priceAndContextLabels() throws {
         let r = try decoded()
-        #expect(NearAIModelCatalog.priceLabel(r.data[0].pricing) == "$1/$5")
+        #expect(NearAIModelCatalog.priceLabel(r.data[0].pricing) == "$1.00/$5.00")
         #expect(NearAIModelCatalog.priceLabel(r.data[1].pricing) == "$1.40/$4.40")
         #expect(NearAIModelCatalog.priceLabel(nil) == "")
         #expect(NearAIModelCatalog.contextLabel(200000) == "200k")
@@ -104,7 +104,7 @@ struct NearAICatalogParseTests {
 
         let haiku = try #require(models.first { $0.id == "anthropic/claude-haiku-4-5" })
         #expect(haiku.displayName == "Claude Haiku 4.5")
-        #expect(haiku.price == "$1/$5")
+        #expect(haiku.price == "$1.00/$5.00")
         #expect(haiku.contextWindow == "200k")
         #expect(haiku.capabilities?.contains(.vision) == true)
     }

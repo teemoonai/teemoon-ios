@@ -85,16 +85,13 @@ extension ProviderStore {
             candidates.insert(ModelCatalog.displayName(forID: id).lowercased())
             candidates.insert(ModelCatalog.compactName(forID: id).lowercased())
         }
-        // Cloud presets label by the CATALOG's pretty name ("Qwen3.7 Plus"), which the
-        // id alone does not produce.
-        if let preset = Provider.presets.first(where: {
-            endpointKey($0.endpoint) == endpointKey(provider.endpoint)
-        }) {
-            for model in KnownModel.models(for: preset.id) {
-                candidates.insert(model.displayName.lowercased())
-                candidates.insert(model.id.lowercased())
-                candidates.insert(ModelCatalog.displayName(forID: model.id).lowercased())
-            }
+        // A cloud label names the CATALOG's pretty name ("Qwen3.7 Plus"), which
+        // the id alone does not produce — so the words come from what this
+        // server actually answered with, whichever key fetched it.
+        for model in LiveCatalogStore.shared.allModels(forEndpoint: provider.endpoint) {
+            candidates.insert(model.displayName.lowercased())
+            candidates.insert(model.id.lowercased())
+            candidates.insert(ModelCatalog.displayName(forID: model.id).lowercased())
         }
         if candidates.contains(suffix.lowercased()) { return true }
         // A machine's label names whatever it ran THAT DAY, and the most stale labels
@@ -267,6 +264,51 @@ extension ProviderStore {
         let count = dropped.count
         let subject = count == 1 ? "one duplicate setup" : "\(count) duplicate setups"
         mergeNotice = "teemoon merged \(subject) — \(reason). nothing you could run has been lost."
+    }
+
+    /// The near.ai setup a near.ai-wide action applies to: the active one
+    /// when it is near.ai, else the first configured.
+    var nearAIProvider: Provider? {
+        if let p = activeProvider, p.isNearAI { return p }
+        return providers.first { $0.isNearAI }
+    }
+
+    /// near.ai retires models; a saved setup keeps pointing at one and every
+    /// send through it is refused. Given the ids near.ai serves right now,
+    /// move such a setup — and prune its equipped list — to the preset's
+    /// default, or the first served model if the default is gone too.
+    /// Returns the setups it moved; an empty `served` list moves nothing.
+    @discardableResult
+    func healRetiredNearAIModels(served ids: [String]) -> [Provider] {
+        guard let first = ids.first else { return [] }
+        let served = Set(ids.map { $0.lowercased() })
+        let fallback = served.contains(Provider.nearAI.model.lowercased()) ? Provider.nearAI.model : first
+        var moved: [Provider] = []
+        for p in providers where p.isNearAI && !p.model.isEmpty {
+            var healed = p
+            if !served.contains(p.model.lowercased()) { healed.model = fallback }
+            healed.equippedModels = p.equippedModels.map { list in
+                let kept = list.filter { served.contains($0.lowercased()) }
+                return kept.isEmpty ? [healed.model] : kept
+            }
+            guard healed != p else { continue }
+            updateProvider(healed)
+            moved.append(healed)
+        }
+        return moved
+    }
+
+    /// Launch-time version of `healRetiredNearAIModels`: asks near.ai what it
+    /// serves and heals from that. Through the one store, so the count and the
+    /// browser's first frame get the same fresh list. Offline or keyless it
+    /// moves nothing — a send would fail either way, and the next launch tries
+    /// again.
+    func healRetiredNearAIModelsFromLive() async -> [Provider] {
+        guard let p = nearAIProvider else { return [] }
+        let key = credential(for: p)
+        guard !key.isEmpty,
+              let served = await LiveCatalogStore.shared.refresh(p, apiKey: key, maxAge: 0) else { return [] }
+        return healRetiredNearAIModels(served: served.map(\.id))
     }
 
     /// Test seam: the heals run at load, which an in-memory store skips.

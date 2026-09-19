@@ -1,0 +1,52 @@
+{
+ "data": [
+  {
+   "model_id": "deepseek/deepseek-v4-pro",
+   "provider_name": "NextBit",
+   "tag": "nextbit/fp8",
+   "name": "NextBit | deepseek/deepseek-v4-pro-20260423",
+   "quantization": "fp8",
+   "context_length": 1048576
+  },
+  {
+   "model_id": "deepseek/deepseek-v4-pro",
+   "provider_name": "BaseTen",
+   "tag": "baseten/fp4",
+   "name": "BaseTen | deepseek/deepseek-v4-pro-20260423",
+   "quantization": "fp4",
+   "context_length": 1048576
+  },
+  {
+   "model_id": "deepseek/deepseek-v4-pro",
+   "provider_name": "Azure",
+   "tag": "azure/us",
+   "name": "Azure | deepseek/deepseek-v4-pro-20260423",
+   "quantization": "unknown",
+   "context_length": 1048576
+  },
+  {
+   "model_id": "openai/gpt-5.4",
+   "provider_name": "Azure",
+   "tag": "azure/us",
+   "name": "Azure | openai/gpt-5.4-20260305",
+   "quantization": "unknown",
+   "context_length": 1050000
+  },
+  {
+   "model_id": "deepseek/deepseek-v4-pro",
+   "provider_name": "BaseTen",
+   "tag": "baseten/fp4",
+   "name": "BaseTen | deepseek/deepseek-v4-pro-20260423",
+   "quantization": "fp4",
+   "context_length": 1048576
+  },
+  {
+   "model_id": "openai/gpt-5.4",
+   "provider_name": "Azure",
+   "tag": "azure/eu",
+   "name": "Azure | openai/gpt-5.4-20260305",
+   "quantization": "unknown",
+   "context_length": 1050000
+  }
+ ]
+}

@@ -72,8 +72,12 @@ struct ErrorDrainer {
 
 func apiErrorMessage(from responseBody: String, httpStatus: Int, provider: String) -> String {
     guard let data = responseBody.data(using: .utf8),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let errorObj = json["error"] as? [String: Any]
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return LLMError.providerMessage(httpStatus: httpStatus, provider: provider) }
+    if let problem = ProblemDetails.message(json: json, httpStatus: httpStatus, provider: provider) {
+        return problem
+    }
+    guard let errorObj = json["error"] as? [String: Any]
     else { return LLMError.providerMessage(httpStatus: httpStatus, provider: provider) }
 
     var parts: [String] = []
@@ -99,4 +103,20 @@ func apiErrorMessage(from responseBody: String, httpStatus: Int, provider: Strin
         return LLMError.providerMessage(httpStatus: httpStatus, provider: provider)
     }
     return "\(provider) (HTTP \(httpStatus)): \(parts.joined(separator: " — "))"
+}
+
+/// A body with a top-level `detail` and no `error` envelope — NVIDIA's:
+/// `{"status":404,"title":"Not Found","detail":"Function '…': Not found for
+/// account '…'"}`. Their catalog lists models the account cannot call (20 of
+/// 28 sampled, 2026-09-18), and that 404 is the MODEL, not the URL: the
+/// generic 404 line sent the user to check a provider URL that was fine.
+/// The function id and account id in the detail are not repeated.
+enum ProblemDetails {
+    static func message(json: [String: Any], httpStatus: Int, provider: String) -> String? {
+        guard json["error"] == nil, let detail = json["detail"] as? String, !detail.isEmpty else { return nil }
+        if httpStatus == 404, detail.hasPrefix("Function ") {
+            return "\(provider) does not serve this model on your account (HTTP 404). Pick another model in where."
+        }
+        return "\(provider) (HTTP \(httpStatus)): \(detail)"
+    }
 }

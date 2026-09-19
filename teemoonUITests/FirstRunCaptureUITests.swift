@@ -49,6 +49,85 @@ final class FirstRunCaptureUITests: XCTestCase {
         }
     }
 
+    /// "start here", then the pushed cloud-key picker — no download started.
+    /// Clean install required.
+    func test0StartHereCapture() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting-capture"]
+        app.launch()
+
+        let chip = app.buttons["chat.whereChip"].firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 10), "no where chip")
+        Thread.sleep(forTimeInterval: 1.2)
+        chip.tap()
+        Thread.sleep(forTimeInterval: 1.4)
+        save(XCUIScreen.main.screenshot(), as: "00-start-here", app: app)
+
+        // The row's label is title and subtitle together, so match the prefix.
+        let cloud = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "use a cloud api"))
+            .firstMatch
+        XCTAssertTrue(cloud.waitForExistence(timeout: 5), "no cloud row on first run")
+        cloud.tap()
+        Thread.sleep(forTimeInterval: 1.2)
+        XCTAssertTrue(app.staticTexts["near.ai"].firstMatch.waitForExistence(timeout: 3),
+                      "the cloud row did not land on the provider picker")
+        save(XCUIScreen.main.screenshot(), as: "01-cloud-picker-pushed", app: app)
+
+        // Back, then the computer row — pushed the same way.
+        // The sheet's own bar, not the chat's behind it.
+        app.navigationBars["add cloud key"].buttons.firstMatch.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        let computer = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "connect a computer"))
+            .firstMatch
+        XCTAssertTrue(computer.waitForExistence(timeout: 5), "no computer row after popping back")
+        computer.tap()
+        Thread.sleep(forTimeInterval: 1.2)
+        save(XCUIScreen.main.screenshot(), as: "02-computer-form-pushed", app: app)
+
+        // Cancel pops to start here; then save a near.ai key and the whole
+        // sheet must go — the composer, with the chip naming near.ai, is
+        // where a first setup lands.
+        app.buttons["cancel"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        cloud.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        app.staticTexts["near.ai"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        // By placeholder, not "first text field": the chat composer sits
+        // behind the sheet and is the first one in the hierarchy.
+        let key = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "placeholderValue == %@", "api key"))
+            .firstMatch
+        XCTAssertTrue(key.waitForExistence(timeout: 5), "no key field on the near.ai form")
+        key.tap()
+        dismissKeyboardIntro(app)
+        key.typeText("sk-uitest-not-a-real-key")
+        save(XCUIScreen.main.screenshot(), as: "03-nearai-key-form", app: app)
+        app.buttons["save"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(app.navigationBars["where"].exists,
+                       "the where sheet stayed up after saving a first setup")
+        XCTAssertFalse(app.navigationBars["add cloud key"].exists,
+                       "landed back on the picker after saving a first setup")
+        // The chip re-labels a beat after the sheet goes; wait for it.
+        let named = app.buttons.matching(identifier: "chat.whereChip")
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "near.ai"))
+            .firstMatch
+        XCTAssertTrue(named.waitForExistence(timeout: 5),
+                      "the chip does not name the setup just saved")
+        save(XCUIScreen.main.screenshot(), as: "04-composer-after-save", app: app)
+
+        // Reopened: ready now with the new setup, and `get` with the other
+        // providers as settings draws them.
+        named.tap()
+        Thread.sleep(forTimeInterval: 1.4)
+        app.swipeUp()
+        Thread.sleep(forTimeInterval: 0.8)
+        save(XCUIScreen.main.screenshot(), as: "05-where-after-save", app: app)
+    }
+
     func test1FirstRunFlow() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting-capture"]

@@ -37,13 +37,51 @@ struct LLMError: Error {
         }
     }
 
-    static func groundingMessage(httpStatus: Int) -> String {
+    /// Brave's error body: `{"error":{"code":"…","detail":"…"}}`. A key it
+    /// cannot parse answers HTTP 422 with code SUBSCRIPTION_TOKEN_INVALID —
+    /// not a 401 — so the status alone does not say "bad key".
+    struct BraveErrorEnvelope: Equatable {
+        static let invalidToken = "SUBSCRIPTION_TOKEN_INVALID"
+        let code: String
+        let detail: String?
+
+        static func parse(_ body: String?) -> BraveErrorEnvelope? {
+            guard let body, let data = body.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let error = json["error"] as? [String: Any],
+                  let code = error["code"] as? String else { return nil }
+            return BraveErrorEnvelope(code: code, detail: error["detail"] as? String)
+        }
+
+        var isInvalidToken: Bool { code == Self.invalidToken }
+    }
+
+    /// True when the key itself was refused: 401/402/403, or Brave's 422
+    /// with SUBSCRIPTION_TOKEN_INVALID. The tool loop must stop on these —
+    /// a rephrased query cannot fix a key.
+    var isKeyRejection: Bool {
+        guard let httpStatus else { return false }
+        if httpStatus == 401 || httpStatus == 402 || httpStatus == 403 { return true }
+        return httpStatus == 422 && BraveErrorEnvelope.parse(responseBody)?.isInvalidToken == true
+    }
+
+    static func groundingMessage(httpStatus: Int, responseBody: String? = nil) -> String {
+        let envelope = BraveErrorEnvelope.parse(responseBody)
+        if envelope?.isInvalidToken == true {
+            return "Brave web search rejected the API key (HTTP \(httpStatus)): "
+                + (envelope?.detail ?? "The provided subscription token is invalid.")
+                + " Check your Brave API key in Settings → Search."
+        }
         switch httpStatus {
         case 401: return "Brave web search failed (HTTP 401). Check your Brave API key in Settings → Search."
         case 402: return "Brave web search failed (HTTP 402). Your Brave API subscription has run out of credits."
         case 403: return "Brave web search denied (HTTP 403). Your API key may not have access to this endpoint."
         case 429: return "Brave web search rate limit reached (HTTP 429). Try again in a moment."
-        default: return "Brave web search returned an error (HTTP \(httpStatus))."
+        default:
+            if let detail = envelope?.detail, !detail.isEmpty {
+                return "Brave web search returned an error (HTTP \(httpStatus)): \(detail)"
+            }
+            return "Brave web search returned an error (HTTP \(httpStatus))."
         }
     }
 }

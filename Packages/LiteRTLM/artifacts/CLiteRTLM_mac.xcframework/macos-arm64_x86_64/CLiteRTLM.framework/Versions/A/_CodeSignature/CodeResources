@@ -15,21 +15,42 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			1JniQmq03duhzXUyrb0ygRXDCYMRIclfXpXdm2lSMS0=
+			K20tKSIfBebcssb3iKWE79iM4YH0dJ1GvJPzAhMlP44=
 			</data>
 		</dict>
-		<key>Headers/capabilities_c.h</key>
+		<key>Headers/capabilities.h</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			6ZdNArX/5TcUZCKSacgw9vgkDux6gOCvkRfw7+L4GXU=
+			d/R5m8whKIA3m2lW34lfKDmaFIt29t1zPA8RunQEYjY=
+			</data>
+		</dict>
+		<key>Headers/conversation.h</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			FWO3Xu4fBoi+2YQxY4G608f6PMYZi5u7UTXB6XkQHI4=
+			</data>
+		</dict>
+		<key>Headers/embedding_engine.h</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			9+NlUEOyAJDLKtsMrdOov+fg8AUlp4qSQB0Gd23qN8k=
 			</data>
 		</dict>
 		<key>Headers/engine.h</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			OfeBnHwc3es0r5ht3D6CubUs3SPOVB/dcAFUh/meNn4=
+			MM/LSfg4qeljcon3x/aWs45BEuPaXtsXPPa0bHSeLJw=
+			</data>
+		</dict>
+		<key>Headers/experimental.h</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			aBRNp14PY0M6LTS1sbw6I94I0F3oMPjxCbhUzLLox9M=
 			</data>
 		</dict>
 		<key>Modules/module.modulemap</key>

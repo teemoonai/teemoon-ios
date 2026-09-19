@@ -28,6 +28,7 @@ struct ProviderPresetSection: View {
                         title: preset.name.lowercased(),
                         showsE2EETag: preset.capabilities.contains(.endToEndEncryption),
                         caption: WhereProviderPresentation.presetCaption(for: preset),
+                        captionLineLimit: 2,
                         isSelected: form.selectedPresetName == preset.name
                     )
                 }
@@ -66,7 +67,9 @@ struct ProviderPresetSection: View {
 
     /// The same glyphs the Where sheet gives these rows: the cloud tier's
     /// symbol, and the answer-service mark for a preset with no catalogue.
+    /// One glyph for every hosted provider, brave included: the row is a
+    /// place you send a key to, and the caption says what comes back.
     private func glyph(for preset: Provider) -> String {
-        preset.isFixedAnswerService ? "sparkle.magnifyingglass" : WhereLocality.cloud.systemImage
+        WhereLocality.cloud.systemImage
     }
 }

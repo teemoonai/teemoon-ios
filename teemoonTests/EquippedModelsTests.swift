@@ -207,3 +207,82 @@ struct EquippedModelsTests {
         #expect(p.equipped.count == 1)
     }
 }
+
+/// `modelCapabilities` describes the ACTIVE model. Switching models has to
+/// re-read it, or the tools gate answers for the model that just left.
+@Suite("switching models re-reads capabilities")
+struct ActiveModelCapabilitiesTests {
+
+    @Test @MainActor func activateTakesTheNewModelsOwnCapabilities() {
+        let store = ProviderStore(inMemory: true)
+        var p = Provider(name: "server", endpoint: "http://box.local/v1", model: "with-tools",
+                         requiresAPIKey: false)
+        p.equippedModels = ["with-tools"]
+        p.modelCapabilities = [.tools]
+        store.providers = [p]
+
+        // A second model whose catalogue row says it cannot call tools.
+        store.activate(modelID: "no-tools", on: store.providers[0])
+        var switched = store.providers[0]
+        switched.modelCapabilities = []
+        store.updateProvider(switched)
+
+        // Back to the first: its own row said tools, and that is what must return.
+        store.activate(modelID: "with-tools", on: store.providers[0])
+        #expect(store.providers[0].model == "with-tools")
+        #expect(store.providers[0].modelSupportsTools)
+    }
+
+    /// The failing direction: a model known NOT to call tools must not inherit
+    /// the previous model's tools bit.
+    @Test @MainActor func aNoToolsModelDoesNotInheritTools() {
+        let store = ProviderStore(inMemory: true)
+        var p = Provider(name: "server", endpoint: "http://box.local/v1", model: "no-tools",
+                         requiresAPIKey: false)
+        p.equippedModels = ["no-tools"]
+        p.modelCapabilities = []
+        store.providers = [p]
+        store.updateProvider(store.providers[0])            // persist the row
+
+        var withTools = store.providers[0].equipping("with-tools")
+        withTools.modelCapabilities = [.tools]
+        store.updateProvider(withTools)
+        #expect(store.providers[0].modelSupportsTools)
+
+        store.activate(modelID: "no-tools", on: store.providers[0])
+        #expect(store.providers[0].model == "no-tools")
+        #expect(!store.providers[0].modelSupportsTools)
+    }
+
+    /// `activate` and browse took the new model's own row; six other doors
+    /// (the encrypted-model picker, the heals, unequip, home sync, delete)
+    /// moved `model` and carried the previous model's bits, and the projection
+    /// then wrote them into the new model's row. The rule lives on `Provider`
+    /// now, so a raw model move is enough at every door.
+    @MainActor
+    @Test func aRawModelMoveTakesTheNewModelsOwnCapabilities() {
+        let store = ProviderStore(inMemory: true)
+        var p = Provider(name: "near.ai", endpoint: "https://x/v1", model: "with-tools")
+        p.modelCapabilities = [.tools]
+        store.addProvider(p)
+        store.activate(modelID: "no-tools", on: store.providers[0])
+        var learned = store.providers[0]
+        learned.modelCapabilities = []               // fetched: no tools
+        store.updateProvider(learned)
+
+        var moved = store.providers[0]
+        moved.model = "with-tools"                    // any door, no bookkeeping
+        store.updateProvider(moved)
+        #expect(store.providers[0].modelCapabilities == [.tools])
+        #expect(store.providers[0].modelSupportsTools)
+
+        var back = store.providers[0]
+        back.model = "no-tools"
+        store.updateProvider(back)
+        #expect(store.providers[0].modelCapabilities == [])
+        #expect(!store.providers[0].modelSupportsTools)
+        // Neither move overwrote the other row.
+        #expect(store.capabilities(ofModel: "with-tools", on: p.id) == [.tools])
+        #expect(store.capabilities(ofModel: "no-tools", on: p.id) == [])
+    }
+}

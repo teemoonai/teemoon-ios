@@ -76,6 +76,12 @@ extension ProviderStore {
         return !credential(for: provider).trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// The cloud presets the add-key picker should still offer: those with no
+    /// keyed setup on their endpoint. A keyed one is edited from its own row.
+    func presetsWithoutKey() -> [Provider] {
+        Provider.presets.filter { credential(forEndpoint: $0.endpoint) == nil }
+    }
+
     /// The key already saved for whichever configured provider points at this
     /// endpoint, or nil when none does.
     ///
@@ -136,9 +142,6 @@ extension ProviderStore {
     func setCredential(_ apiKey: String, forEndpoint endpoint: String?, legacyID: UUID?) throws {
         let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
         let account = endpoint.flatMap { Self.keyAccount(endpoint: $0) }
-        // A key that is removed or replaced must not survive in any cached
-        // request either. See SharedURLCache.
-        defer { SharedURLCache.purge() }
         if trimmed.isEmpty {
             if let account { try Keychain.delete(for: account) }
             if let legacyID { try? Keychain.delete(for: legacyID.uuidString) }

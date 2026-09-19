@@ -100,6 +100,11 @@ extension ConfidentialSession {
                 if attestation.e2eeKeyBoundToModelTEE == false { return .degraded }
                 // Sealed, but a digest has no published attestation — not `.ok`.
                 if imageProvenance?.isUnpublishedOnly == true { return .degraded }
+                // Sealed, and provenance is still being fetched: not green yet.
+                // Every hard verdict above already had its say; only the
+                // green-or-orange decision waits. The send gate is unchanged —
+                // `.verifying` allows exactly as `.ok` did here.
+                if imageProvenance == nil, !provenanceSettled, provenanceTask != nil { return .verifying }
                 return .ok
             }
             // No model attestation available — can't confirm E2EE key provenance.
@@ -114,6 +119,7 @@ extension ConfidentialSession {
     var e2eeDegradedReason: String? {
         guard let provider = activeProvider, provider.capabilities.contains(.attestation) else { return nil }
         guard let attestation else {
+            if directHostMissing { return "near.ai lists no confidential host for this model yet." }
             if attestationFetchFailed { return "Could not reach the attestation server." }
             return nil // still loading
         }

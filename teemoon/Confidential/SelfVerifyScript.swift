@@ -123,7 +123,11 @@ extension AttestationSummary {
         import urllib.request
 
         GREEN, RED, YELLOW, DIM, BOLD, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[1m", "\033[0m"
-        counts = {"passed": 0, "failed": 0, "skipped": 0, "warned": 0}
+        counts = {"passed": 0, "failed": 0, "skipped": 0, "warned": 0, "unchecked": 0}
+        # What would turn a skipped check into a real one. Skips with no remedy
+        # (third-party images, older proxies) are by design and never count as
+        # unchecked; skips WITH one must not be summarised as "checked out".
+        remedies = []
 
         def _tally(kind, prefix, suffix=""):
             def report(msg):
@@ -133,7 +137,13 @@ extension AttestationSummary {
 
         ok   = _tally("passed",  f"{GREEN}✓{RESET}")
         bad  = _tally("failed",  f"{RED}✗{RESET}")
-        skip = _tally("skipped", f"{DIM}−", RESET)
+        def skip(msg, remedy=None):
+            counts["skipped"] += 1
+            if remedy:
+                counts["unchecked"] += 1
+                if remedy not in remedies:
+                    remedies.append(remedy)
+            print(f"  {DIM}− {msg}{RESET}")
         # expected drift (e.g. a legitimate redeploy) — never fails the run
         warn = _tally("warned",  f"{YELLOW}~{RESET}")
 
@@ -143,6 +153,10 @@ extension AttestationSummary {
         # Same key teemoon itself sends. Read from the environment so this file
         # stays safe to paste anywhere.
         API_KEY = os.environ.get("NEARAI_CLOUD_API_KEY") or os.environ.get("API_KEY") or ""
+        NEED_KEY = ("export NEARAI_CLOUD_API_KEY (your inference key) to check the gateway "
+                    "— the path teemoon actually encrypts through — and the chat signatures")
+        NEED_FULL = "add --full for near.ai's complete suite (dcap-qvl, NRAS, report_data)"
+        NEED_CRYPTO = "pip install cryptography for the TLS check"
 
         def fetch_json(url, api_key=None):
             headers = {"accept": "application/json"}
@@ -185,6 +199,7 @@ extension AttestationSummary {
             # your session against what is fetched here, so anything missing has
             # to disable the comparisons that depend on it — see there.
             missing = []
+            missing_remedy = None
             for label, base, extra, key in (
                     ("gateway", SESSION["gateway_base"], f"&model={model_q}", API_KEY),
                     ("model host", SESSION["direct_base"], "", None)):
@@ -197,9 +212,10 @@ extension AttestationSummary {
                 except urllib.error.HTTPError as e:
                     missing.append(label)
                     if e.code in (401, 403) and not key:
+                        missing_remedy = NEED_KEY
                         skip(f"{label} report needs your API key — export "
                              f"NEARAI_CLOUD_API_KEY (the same inference key teemoon "
-                             f"sends) and re-run to check it")
+                             f"sends) and re-run to check it", remedy=NEED_KEY)
                     else:
                         bad(f"could not fetch {label} report: {e}")
                 except Exception as e:
@@ -248,7 +264,7 @@ extension AttestationSummary {
                 elif addr and unchecked:
                     skip(f"{label} signing key not checked — the {' and '.join(missing)} "
                          f"report above could not be fetched, so there is nothing to "
-                         f"compare your session's {addr[:10]}… against")
+                         f"compare your session's {addr[:10]}… against", remedy=missing_remedy)
                 elif addr:
                     bad(f"{label} signing key changed since your session — the service may "
                         f"have legitimately redeployed, but your session attested {addr[:10]}…")
@@ -262,7 +278,7 @@ extension AttestationSummary {
                          f"verify the new code against near.ai's provenance. Session attested {h[:12]}…")
                 elif unchecked:
                     skip(f"{label} code identity (compose hash) not checked — no live "
-                         f"report to compare {h[:12]}… against")
+                         f"report to compare {h[:12]}… against", remedy=missing_remedy)
                 else:
                     bad(f"{label} code identity (compose hash) AND signing key both changed since "
                         f"your session — unexpected; treat with suspicion. Session attested {h[:12]}…")
@@ -286,7 +302,7 @@ extension AttestationSummary {
                     continue
                 if gateway_report is None:
                     skip(f"{what} not checked — no gateway report to compare "
-                         f"{want[:12]}… against")
+                         f"{want[:12]}… against", remedy=missing_remedy)
                     continue
                 live = {v.lower() for v in find_all(gateway_report, field)
                         if isinstance(v, str)}
@@ -394,51 +410,66 @@ extension AttestationSummary {
             REPO_ALIASES = {"compose-manager-launcher": "compose-manager",
                             "vllm-proxy-rs": "inference-proxy"}
 
-            def nearai_repo(image):
-                """nearai/nearaidev images -> the GitHub repo publishing their
-                attestations; None for third-party images (their provenance is
-                their publisher's, not near.ai's)."""
+            # Engine images near.ai builds from the compose repo's workflows are
+            # attested there, not under a repo of their own name — the app asks
+            # the guessed repo first, then this one.
+            FALLBACK_REPOS = ["nearai/cvm-compose-files"]
+
+            def nearai_repos(image):
+                """nearai/nearaidev images -> the GitHub repos that may publish
+                their attestations, guessed first; [] for third-party images
+                (their provenance is their publisher's, not near.ai's)."""
                 parts = image.split("/")
                 if parts and ("." in parts[0] or ":" in parts[0]):
                     parts = parts[1:]  # strip registry host
                 if len(parts) < 2 or parts[0].lower() not in ("nearai", "nearaidev"):
-                    return None
+                    return []
                 name = parts[-1].split(":")[0]
-                return "nearai/" + REPO_ALIASES.get(name, name)
+                guess = "nearai/" + REPO_ALIASES.get(name, name)
+                return [guess] + [r for r in FALLBACK_REPOS if r != guess]
 
             refs = sorted({(i, d) for m in verified_manifests
                            for i, d in re.findall(r"([A-Za-z0-9._/:-]+)@sha256:([0-9a-f]{64})", m)})
             if not refs:
                 skip("no image digests to check (no verified manifest)")
             checked = 0
-            for image, d in refs:
-                repo = nearai_repo(image)
-                name = image.split("/")[-1].split(":")[0]
-                if repo is None:
-                    skip(f"{name}@{d[:12]}…: third-party base image — provenance "
-                         f"is its publisher's, not near.ai's")
-                    continue
+            def attestation_status(repo, d):
                 url = f"https://api.github.com/repos/{repo}/attestations/sha256:{d}"
                 try:
                     req = urllib.request.Request(url, headers={
                         "accept": "application/vnd.github+json",
                         "x-github-api-version": "2022-11-28"})
                     with urllib.request.urlopen(req, timeout=30) as resp:
-                        status = resp.status
+                        return resp.status
                 except urllib.error.HTTPError as e:
-                    status = e.code
+                    return e.code
                 except Exception:
-                    status = None
+                    return None
+
+            for image, d in refs:
+                repos = nearai_repos(image)
+                name = image.split("/")[-1].split(":")[0]
+                if not repos:
+                    skip(f"{name}@{d[:12]}…: third-party base image — provenance "
+                         f"is its publisher's, not near.ai's")
+                    continue
+                # Only a 404 moves on to the next candidate; anything else is
+                # the answer for this image.
+                for repo in repos:
+                    status = attestation_status(repo, d)
+                    if status != 404:
+                        break
                 if status == 200:
                     checked += 1
                     ok(f"{name}@{d[:12]}… has a build attestation on {repo}")
                 elif status == 404:
-                    bad(f"{name}@{d[:12]}… has NO build attestation on {repo} — "
-                        f"GitHub answered definitively")
+                    bad(f"{name}@{d[:12]}… has NO build attestation on "
+                        f"{' or '.join(repos)} — GitHub answered definitively")
                 else:
                     skip(f"{name}@{d[:12]}…: GitHub attestations API unavailable "
-                         f"(HTTP {status}, likely rate limit) — no evidence either way")
-            if refs and checked == 0 and not any(nearai_repo(i) for i, _ in refs):
+                         f"(HTTP {status}, likely rate limit) — no evidence either way",
+                         remedy="re-run later — GitHub rate-limited the provenance lookup")
+            if refs and checked == 0 and not any(nearai_repos(i) for i, _ in refs):
                 # mirrors the app: a manifest with no near.ai images at all is
                 # not something this check can vouch for.
                 bad("no near.ai images in the verified manifests — nothing to "
@@ -485,7 +516,7 @@ extension AttestationSummary {
                         bad("live TLS key does NOT match the attested fingerprint")
                 except ImportError:
                     skip("pip install cryptography to run the TLS check here "
-                         "(--full also covers it)")
+                         "(--full also covers it)", remedy=NEED_CRYPTO)
                 except Exception as e:
                     bad(f"TLS check errored: {e}")
 
@@ -509,7 +540,7 @@ extension AttestationSummary {
                     run_full_suite()
                 else:
                     skip("re-run with --full to clone near.ai's open-source verifier "
-                         "and run the complete suite (needs git + pip)")
+                         "and run the complete suite (needs git + pip)", remedy=NEED_FULL)
 
             return finish()
 
@@ -593,17 +624,24 @@ extension AttestationSummary {
                                             SESSION["gateway_base"].removesuffix("/v1")})
             else:
                 skip("chat + E2EE signature verification needs NEARAI_CLOUD_API_KEY "
-                     "(your normal inference key) — each makes one small live chat request")
+                     "(your normal inference key) — each makes one small live chat request",
+                     remedy=NEED_KEY)
 
         def finish():
             section("summary")
-            failed, warned = counts["failed"], counts["warned"]
+            failed, warned, unchecked = counts["failed"], counts["warned"], counts["unchecked"]
+            # "everything checked out" is only true when nothing failed AND every
+            # check that could have run did — a no-key run skips the whole
+            # gateway, and must not be summarised as a clean bill.
             verdict = (f"{RED}{failed} check(s) failed{RESET}" if failed else
                        f"{YELLOW}{warned} change(s) to re-verify — nothing failed{RESET}" if warned else
+                       f"{YELLOW}nothing failed · {unchecked} check(s) not run{RESET}" if unchecked else
                        f"{GREEN}everything checked out{RESET}")
             changed = f" · {warned} changed" if warned else ""
             print(f"  {counts['passed']} passed · {failed} failed{changed} · "
                   f"{counts['skipped']} skipped — {verdict}")
+            if remedies and not failed:
+                print(f"  {DIM}to run the rest: " + "; ".join(remedies) + f"{RESET}")
             if warned and not failed:
                 print(f"  {DIM}‘changed’ = the service redeployed since your session but its keys are "
                       f"intact (expected). Re-run with --full to verify the new code.{RESET}")

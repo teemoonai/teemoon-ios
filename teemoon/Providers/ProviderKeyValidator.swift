@@ -24,12 +24,15 @@ enum ProviderKeyValidator {
     static let nearAIModelsURL = "https://cloud-api.near.ai/v1/models"
     /// Brave web-search endpoint used to validate a subscription token.
     static let braveWebSearchURL = "https://api.search.brave.com/res/v1/web/search"
+    /// Answers 401 to a bad key where /models answers 200 to any bearer.
+    static let openRouterAuthKeyURL = "https://openrouter.ai/api/v1/auth/key"
 
     // MARK: - API
 
     enum Endpoint {
         case nearAI
         case braveSearch
+        case openRouter
     }
 
     enum ValidationResult {
@@ -52,6 +55,9 @@ enum ProviderKeyValidator {
         switch endpoint {
         case .nearAI:
             request = URLRequest(url: URL(string: nearAIModelsURL)!)
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        case .openRouter:
+            request = URLRequest(url: URL(string: openRouterAuthKeyURL)!)
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         case .braveSearch:
             var components = URLComponents(string: braveWebSearchURL)!

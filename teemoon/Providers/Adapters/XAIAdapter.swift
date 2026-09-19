@@ -48,10 +48,10 @@ enum XAIAdapter {
         apiKey: String,
         session: URLSession = .shared
     ) async -> EndpointModelCatalog.ProbeResult {
-        async let languageTask = fetch(
+        async let languageTask = EndpointModelCatalog.fetchList(
             LanguageModelsResponse.self, from: baseURL.appendingPathComponent("language-models"),
             apiKey: apiKey, session: session)
-        async let modelsTask = fetch(
+        async let modelsTask = EndpointModelCatalog.fetchList(
             ModelsResponse.self, from: baseURL.appendingPathComponent("models"),
             apiKey: apiKey, session: session)
 
@@ -96,7 +96,7 @@ enum XAIAdapter {
                 // The ONLY curated field: ids read like build artifacts
                 // ("grok-4.20-0309-non-reasoning"), so a product name is worth
                 // keeping by hand. Everything else is live.
-                displayName: KnownModel.grokDisplayNames[entry.id] ?? displayName(forID: entry.id),
+                displayName: displayName(forID: entry.id),
                 vendor: ModelCatalog.vendorLabel(forID: entry.id),
                 price: ModelCatalog.priceLabel(inputPerMillion: entry.inputPerMillion,
                                                outputPerMillion: entry.outputPerMillion),
@@ -117,8 +117,10 @@ enum XAIAdapter {
                 // resolves to something".
                 // Badge from xAI's own `created`, so it expires on its own.
                 isNew: ModelCatalog.isNew(created: entry.createdDate, now: now),
+                created: entry.createdDate,
                 capabilities: entry.capabilities,
-                modelPageURL: "https://docs.x.ai/developers/models/" + entry.id)
+                modelPageURL: "https://docs.x.ai/developers/models/" + entry.id,
+                openWeights: false)
         }
     }
 
@@ -163,42 +165,16 @@ enum XAIAdapter {
         return Double(raw) / 10_000
     }
 
-    /// "grok-4.20-0309-non-reasoning" → "Grok 4.20 0309 Non Reasoning" — used
-    /// only for ids the curated block doesn't name yet, so a new Grok still
-    /// reads as a product rather than a slug.
+    /// "grok-4.6" → "Grok 4.6"; "grok-4.20-0309-non-reasoning" → "Grok 4.20
+    /// Non Reasoning". A bare four-digit token is a build stamp, not part of
+    /// the product's name, so it is dropped.
     static func displayName(forID id: String) -> String {
         id.split(separator: "-")
+            .filter { !($0.count == 4 && $0.allSatisfy(\.isNumber)) }
             .map { $0.lowercased() == "grok" ? "Grok" : $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
     }
 
-    // MARK: - Fetch
-
-    private static func fetch<T: Decodable>(
-        _ type: T.Type, from url: URL, apiKey: String, session: URLSession
-    ) async -> Result<T, EndpointModelCatalog.FailureKind> {
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 12
-        let key = apiKey.trimmingCharacters(in: .whitespaces)
-        if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            return .failure(EndpointModelCatalog.failureKind(forTransport: error))
-        }
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if let kind = EndpointModelCatalog.failureKind(forStatus: status, body: data) {
-            logger.warning("[fetch] HTTP \(status) for \(url.absoluteString)")
-            return .failure(kind)
-        }
-        guard let decoded = try? JSONDecoder().decode(T.self, from: data) else {
-            return .failure(.badResponse)
-        }
-        return .success(decoded)
-    }
 }
 
 // MARK: - Wire contract — https://docs.x.ai/docs/api-reference

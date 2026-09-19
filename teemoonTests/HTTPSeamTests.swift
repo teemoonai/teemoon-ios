@@ -69,6 +69,22 @@ struct BraveKeyCheckTests {
         let result = await BraveWebSearchTool.checkKey("   ", http: StubHTTP(status: 200))
         #expect(result == .rejected)
     }
+
+    /// Brave answers a key it cannot parse (a 16-character one, say) with HTTP
+    /// 422 and SUBSCRIPTION_TOKEN_INVALID in the body — not a 401. Treating
+    /// that as "Brave unavailable" saved the bad key with a shrug.
+    @Test func http422WithInvalidTokenIsRejected() async {
+        let body = Data(#"{"error":{"code":"SUBSCRIPTION_TOKEN_INVALID","detail":"The provided subscription token is invalid.","meta":{"component":"authentication"}}}"#.utf8)
+        let result = await BraveWebSearchTool.checkKey("short-key", http: StubHTTP(status: 422, body: body))
+        #expect(result == .rejected)
+    }
+
+    /// Any other 422 is still Brave's problem, not the key's.
+    @Test func http422WithAnotherCodeIsUnavailable() async {
+        let body = Data(#"{"error":{"code":"VALIDATION","detail":"q is required"}}"#.utf8)
+        let result = await BraveWebSearchTool.checkKey("sk-real", http: StubHTTP(status: 422, body: body))
+        #expect(result == .braveUnavailable(status: 422))
+    }
 }
 
 @Suite("Provider key validation is offline-testable")

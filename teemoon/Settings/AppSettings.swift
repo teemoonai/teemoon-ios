@@ -179,6 +179,12 @@ final class AppSettings {
     var braveSearchKey: String {
         get {
             access(keyPath: \.braveSearchKey)
+            // DEBUG harness: behave as if no Brave key were stored, without
+            // touching the stored one — the keyless offer path on a device
+            // whose keychain has a key. Nothing else reads this variable.
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["TEEMOON_IGNORE_BRAVE_KEY"] == "1" { return "" }
+            #endif
             return Keychain.load(for: BraveWebSearchTool.keychainKey) ?? ""
         }
         set {

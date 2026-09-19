@@ -825,6 +825,8 @@ struct ConversationView: View {
             volatileItems: volatileItems(shape),
             chrome: ChatChrome(bottom: fadeBand),
             streamingContent: isGenerating ? AnyView(streamingRow) : nil,
+            tailCard: tailCard?.view,
+            tailCardKey: tailCard?.key,
             anchorItem: shape.lastUserMessageID.map(TranscriptItem.message),
             scrollToEndToken: scrollToEndToken,
             scrollToEndAnimated: scrollToEndAnimated,
@@ -922,18 +924,18 @@ struct ConversationView: View {
     // MARK: Items
 
     private func transcriptItems(_ shape: Shape) -> [TranscriptItem] {
-        var items: [TranscriptItem] = []
-        items.reserveCapacity(messages.count + 1)
-        for (index, message) in messages.enumerated() {
-            if shape.freshStarts.contains(index) {
-                items.append(.freshStart(before: message.id))
-            }
-            items.append(.message(message.id))
-            if llm.offerByMessageID[message.id] != nil {
-                items.append(.offer(message.id))
-            }
-        }
-        return items
+        itemLists(shape).transcript
+    }
+
+    /// Which list each row belongs to is `TranscriptItemsPolicy`'s call;
+    /// the newest message's offer is the tail's, not the transcript's.
+    private func itemLists(_ shape: Shape) -> TranscriptItemsPolicy.Lists {
+        TranscriptItemsPolicy.lists(
+            messageIDs: messages.map(\.id),
+            freshStarts: shape.freshStarts,
+            // The chip's own rule: a key present is search configured.
+            searchConfigured: !settings.braveSearchKey.isEmpty,
+            offered: { llm.offerByMessageID[$0] != nil })
     }
 
     /// Everything transient, in its own section so none of it diffs the
@@ -941,6 +943,11 @@ struct ConversationView: View {
     /// keeps below its lazy stack.
     private var tailItems: [TranscriptItem] {
         var items: [TranscriptItem] = []
+        // The newest reply's offer, first — right under the reply, and out of
+        // the hand-off's way (`TranscriptItemsPolicy`).
+        if let offer = itemLists(shape).tailOffer {
+            items.append(offer)
+        }
         // The streaming view is NOT here — it is mounted as a trailing subview
         // of the scroll view, because a self-sizing cell that grows on every
         // pacer tick invalidates collection-view layout on every pacer tick.
@@ -948,13 +955,30 @@ struct ConversationView: View {
         if !isGenerating, isPendingGeneration {
             items.append(.pending)
         }
-        if showsDebugCard {
-            items.append(.debugInfo(turn: llm.scrollToBottomToken))
+        // The debug and failure cards are NOT here either: they change
+        // height by design, and a self-sizing tail cell re-estimates the
+        // reply above it on every toggle. They are the trailing card —
+        // `tailCard` below — hosted after the cells like the stream.
+        return items
+    }
+
+    /// The card under the reply, and its identity. One turn's card is one
+    /// view: re-pushing it on every update would reset its open sections.
+    private var tailCard: (view: AnyView, key: String)? {
+        if showsDebugCard, let info = llm.lastRequestDebugInfo {
+            return (AnyView(debugCard(info)), "debug-\(llm.scrollToBottomToken)")
         }
         if let error = llm.lastError, llm.lastErrorThreadID == threadID {
-            items.append(.error(String(describing: error)))
+            return (AnyView(errorCard), "error-\(String(describing: error))")
         }
-        return items
+        return nil
+    }
+
+    private func debugCard(_ info: LastRequestDebugInfo) -> some View {
+        RequestDebugView(info: info)
+            .padding()
+            .accessibilityIdentifier("chat.debugCard")
+            .accessibilityValue(info.isE2EEActive ? "E2EE" : "not-e2ee")
     }
 
     /// Rows whose CONTENTS depend on state outside their own identity. Exactly
@@ -983,15 +1007,11 @@ struct ConversationView: View {
             case .pending:
                 pendingChip.padding()
             case .debugInfo:
+                // Not emitted by `tailItems` any more (the card is the
+                // trailing subview); kept for tails built by hand in tests.
                 if let info = llm.lastRequestDebugInfo {
-                    RequestDebugView(info: info)
-                        .padding()
-                        // Hosting measures in two passes. Without this the
-                        // first size is the header and the rest of the card
-                        // paints a frame later as the cell grows.
+                    debugCard(info)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("chat.debugCard")
-                        .accessibilityValue(info.isE2EEActive ? "E2EE" : "not-e2ee")
                 }
             case .error:
                 errorCard

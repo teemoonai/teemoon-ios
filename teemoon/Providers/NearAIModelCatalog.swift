@@ -2,15 +2,11 @@
 //  NearAIModelCatalog.swift
 //  teemoon
 //
-//  Builds the model-browser list for near.ai from the LIVE `/v1/models`
-//  catalogue, so it never goes stale as near.ai adds or retires models.
-//  Live model ids are merged with the curated `KnownModel.nearAIModels`
-//  metadata (display name, price, context window) where available; ids the
-//  curated list doesn't cover are synthesized, with their direct TEE host
-//  resolved from the authoritative endpoints directory (EndpointDirectory).
-//
-//  Fail-open to the curated list: if `/v1/models` is unreachable (or the key
-//  is missing), the browser falls back to the shipped curated models.
+//  near.ai's model list, built from the LIVE `/v1/models` — the only source.
+//  Direct TEE hosts come from `EndpointDirectory`; tiers come from `owned_by`
+//  and are what every E2EE claim rests on. When the fetch fails, the caller
+//  falls back to the last saved answer (`LiveCatalogStore`), never to a list
+//  compiled into the app.
 //
 
 import Foundation
@@ -28,7 +24,7 @@ enum NearAIModelCatalog {
     // runs in NO enclave. Only the first two are attestable — claiming
     // attestation for a proxied model would be proof that isn't there.
 
-    enum Confidentiality: Equatable {
+    enum Confidentiality: String, Codable, Equatable {
         case teeOwn          // near.ai's own attested enclave
         case teeThirdParty   // attested, third-party hardware (Chutes)
         case proxied         // passthrough to an upstream API — no enclave
@@ -58,6 +54,19 @@ enum NearAIModelCatalog {
         guard !tiers.isEmpty else { return }
         tierCache.withLock { cache in
             for (id, tier) in tiers { cache[id.lowercased()] = tier }
+        }
+    }
+
+    /// What the catalogue has actually said about these ids, for saving
+    /// beside a list. Only ids near.ai answered for: an id the guess merely
+    /// assumed must not be written down as though it were told to us.
+    static func knownTiers(forIDs ids: [String]) -> [String: Confidentiality] {
+        tierCache.withLock { cache in
+            var out: [String: Confidentiality] = [:]
+            for id in ids {
+                if let tier = cache[id.lowercased()] { out[id.lowercased()] = tier }
+            }
+            return out
         }
     }
 
@@ -113,13 +122,11 @@ enum NearAIModelCatalog {
     /// vendor rules don't misfile them as proxied.
     static func classify(_ id: String) -> Confidentiality {
         let l = id.lowercased()
-        // Known third-party "attested" ids (Chutes — anonymous; near.ai
-        // exposes no confidential endpoint for them, so no E2EE path via
-        // near.ai). Exact-id set: their lowercased ids collide with
-        // the own-fleet namespace (`qwen/…` vs `Qwen/…`), so prefixes can't
-        // discriminate. Kept in Provider+Presets beside the catalog snapshot.
-        if KnownModel.nearAIAttestedThirdPartyIDs.contains(where: { $0.lowercased() == l })
-            || KnownModel.nearAIRetiredAttestedThirdPartyIDs.contains(where: { $0.lowercased() == l }) {
+        // Known third-party "attested" ids (Chutes — anonymous; near.ai exposes
+        // no confidential endpoint for them, so no E2EE path via near.ai).
+        // An exact-id set because their lowercased ids collide with the
+        // own-fleet namespace (`qwen/…` vs `Qwen/…`).
+        if KnownModel.nearAIAttestedThirdPartyIDs.contains(where: { $0.lowercased() == l }) {
             return .teeThirdParty
         }
         if l.contains("gpt-oss") || l.contains("gemma") { return .teeOwn }
@@ -128,6 +135,9 @@ enum NearAIModelCatalog {
         if l.contains("openai/") || l.contains("gpt-") || l.hasPrefix("gpt") { return .proxied }
         if l.hasPrefix("o3") || l.hasPrefix("o4") || l.contains("/o3") || l.contains("/o4") { return .proxied }
         if l.contains("-max") || l.contains(".max") { return .proxied }
+        // Vendor namespaces near.ai only proxies. `deepseek/…` is proxied,
+        // `deepseek-ai/…` is a near.ai node — keep the Python mirror in step.
+        if l.hasPrefix("x-ai/") || l.hasPrefix("deepseek/") { return .proxied }
         return .teeOwn
     }
 
@@ -161,50 +171,50 @@ enum NearAIModelCatalog {
     /// that drift is what made the default model flicker.) See `ModelCatalog`.
     static func slug(_ id: String) -> String { ModelCatalog.slug(id) }
 
-    static func merge(liveIDs: [String], directHosts: [String: String]) -> [KnownModel] {
-        let curatedByID = Dictionary(
-            KnownModel.nearAIModels.map { ($0.id.lowercased(), $0) },
-            uniquingKeysWith: { first, _ in first })
-        // Fallback lookup by slug so a namespace change in the live catalog
-        // (z-ai/ ↔ zai-org/, or a dropped prefix — our snapshot drifts within days)
-        // still carries curated price/context/displayName instead of a bare row.
-        let curatedBySlug = Dictionary(
-            KnownModel.nearAIModels.map { (slug($0.id), $0) },
-            uniquingKeysWith: { first, _ in first })
-        var seen = Set<String>()
-        var result: [KnownModel] = []
-        for id in liveIDs where !isNonChat(id) {
-            let key = id.lowercased()
-            guard seen.insert(key).inserted else { continue }
-            if let m = curatedByID[key] ?? curatedBySlug[slug(id)] {
-                // Keep the LIVE id (what inference expects); borrow curated metadata.
-                result.append(KnownModel(
-                    id: id, displayName: m.displayName, vendor: m.vendor,
-                    price: m.price, contextWindow: m.contextWindow,
-                    isNew: m.isNew, directBaseURL: directHosts[key] ?? m.directBaseURL))
-            } else {
-                result.append(KnownModel(
-                    id: id, displayName: displayName(forID: id), vendor: vendorLabel(forID: id),
-                    price: "", contextWindow: "", directBaseURL: directHosts[key]))
-            }
+    /// The rows an "end-to-end encrypted" pick may offer: near.ai's own fleet
+    /// only, and only where near.ai publishes a direct host — that host is
+    /// where the Ed25519 key binding comes from, so it IS "E2EE works".
+    /// Attested third-party (Chutes) hardware passes `isAttestable` and has no
+    /// confidential endpoint, which is the overclaim that screen exists to
+    /// avoid.
+    static func encryptedChoices(from models: [KnownModel]) -> [KnownModel] {
+        // The directory answers for a row built while it was cold.
+        models.filter {
+            ($0.directBaseURL != nil || EndpointDirectory.persistedBase(forModel: $0.id) != nil)
+                && confidentiality(forID: $0.id) == .teeOwn
+                && !isNonChat($0.id)
         }
-        return sortByVendorFamily(result)
     }
 
-    /// Order like the curated list: vendor families in curated order (each family
-    /// led by its newest model), curated models keeping their curated (recency)
-    /// order, and uncurated live models at the HEAD of their family. Vendors absent
-    /// from the curated list sort after, alphabetically.
-    static func sortByVendorFamily(_ models: [KnownModel]) -> [KnownModel] {
-        ModelCatalog.sortByVendorFamily(models, curated: KnownModel.nearAIModels)
+    /// Live ids → rows, ordered for a person reading the list: what teemoon
+    /// can seal first, then what near.ai attests on someone else's hardware,
+    /// then the plain proxies; newest first inside each tier.
+    static func ordered(_ models: [KnownModel]) -> [KnownModel] {
+        func rank(_ m: KnownModel) -> Int {
+            switch confidentiality(forID: m.id) {
+            case .teeOwn: return 0
+            case .teeThirdParty: return 1
+            case .proxied: return 2
+            }
+        }
+        return models.enumerated().sorted { a, b in
+            let (ra, rb) = (rank(a.element), rank(b.element))
+            if ra != rb { return ra < rb }
+            switch (a.element.created, b.element.created) {
+            case let (x?, y?) where x != y: return x > y
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return a.offset < b.offset      // keep the server's order
+            }
+        }.map(\.element)
     }
 
     // MARK: - /v1/models wire contract
     //
     // near.ai's `/v1/models` is an OpenAI-compatible list, EXTENDED with the metadata
     // teemoon needs — pricing, context, capabilities, tier — so the live response is
-    // the source of truth and the curated `nearAIModels` is only an offline fallback +
-    // the `directBaseURL` (E2EE host) sidecar, which `/v1/models` alone does not give.
+    // the whole row. The one thing it does not give is the direct TEE host, which
+    // comes from `/endpoints`.
     // The endpoint is PUBLIC (no key required). Full shape modeled per project rule.
     // Docs: https://docs.near.ai — GET https://cloud-api.near.ai/v1/models.
 
@@ -265,8 +275,8 @@ enum NearAIModelCatalog {
     }
 
     /// Fetches `/v1/models` and builds the browser list from LIVE metadata (price,
-    /// context, capabilities, tier), or nil if unavailable (caller falls back to the
-    /// curated list). No key required — sends one only if the caller has it.
+    /// context, capabilities, tier), or nil if unavailable. No key required —
+    /// sends one only if the caller has it.
     static func fetchLive(apiKey: String = "", session: URLSession = .shared) async -> [KnownModel]? {
         var request = URLRequest(url: URL(string: ProviderKeyValidator.nearAIModelsURL)!)
         if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
@@ -274,11 +284,11 @@ enum NearAIModelCatalog {
 
         guard let (data, response) = try? await session.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else {
-            logger.warning("[catalog] /v1/models unavailable — using curated list")
+            logger.warning("[catalog] /v1/models unavailable")
             return nil
         }
         guard let list = try? JSONDecoder().decode(ModelsResponse.self, from: data), !list.data.isEmpty else {
-            logger.warning("[catalog] /v1/models decode failed — using curated list")
+            logger.warning("[catalog] /v1/models decode failed")
             return nil
         }
         // Record authoritative confidentiality tiers from `owned_by` so the capability
@@ -296,40 +306,26 @@ enum NearAIModelCatalog {
     }
 
     /// Builds `KnownModel`s straight from the live `/v1/models` metadata. The only
-    /// thing the endpoint doesn't provide is the E2EE `directBaseURL`, resolved from
-    /// the authoritative endpoints directory or, failing that, the curated snapshot.
+    /// thing the endpoint doesn't provide is the E2EE `directBaseURL`, which comes
+    /// from near.ai's endpoints directory.
     ///
     /// `now` is injectable so the recency badge can be tested against a captured
     /// response instead of drifting with the clock.
     static func buildModels(
         from live: [ModelsResponse.Model], now: Date = Date()
     ) async -> [KnownModel] {
-        let curatedBySlug = Dictionary(
-            KnownModel.nearAIModels.map { (slug($0.id), $0) },
-            uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         var result: [KnownModel] = []
         for m in live where !isNonChat(m.id) {
             let key = m.id.lowercased()
             guard seen.insert(key).inserted else { continue }
-            // DIRECTORY FIRST, snapshot as the fallback — this order used to be
-            // reversed, so a stale curated host beat the authoritative answer and
-            // teemoon would keep dialling a moved endpoint until someone re-ran
-            // the generator.
-            //
-            // And it has to be a directory, not a rule. These are deployment
-            // hostnames, not derived slugs: `z-ai/glm-5.2` → `glm-5-2` looks
-            // mechanical, but `deepseek-ai/DeepSeek-V4-Flash` → `dsv4-flash` is an
-            // abbreviation nothing could compute, one host serves TWO model ids
-            // (`glm-5-2` ← `z-ai/glm-5.2` AND `zai-org/GLM-5.2-FP8`), and the pair
-            // `Qwen3.6-35B-A3B`/`…-FP8` map to `qwen3-6-35b-nvfp4`/`qwen3-6-35b`
-            // respectively — the opposite way round from any guess. near.ai
-            // publishes the mapping unauthenticated for exactly this reason.
+            // The directory, never a rule. These are deployment hostnames:
+            // `deepseek-ai/DeepSeek-V4-Flash` is served by `dsv4-flash`, and one
+            // host serves two ids, so nothing can compute them.
             var direct: String?
-            if confidentiality(forID: m.id).isAttestable {
+            if confidentiality(forID: m.id) == .teeOwn {
                 direct = (await EndpointDirectory.shared.directBase(forModel: m.id))?.absoluteString
             }
-            if direct == nil { direct = curatedBySlug[slug(m.id)]?.directBaseURL }
             result.append(KnownModel(
                 id: m.id,
                 displayName: m.name ?? displayName(forID: m.id),
@@ -342,6 +338,7 @@ enum NearAIModelCatalog {
                 // live picker showed NO near.ai badge at all, while Where's browse
                 // rendered the curated snapshot's frozen ones.
                 isNew: ModelCatalog.isNew(created: m.createdDate, now: now),
+                created: m.createdDate,
                 directBaseURL: direct,
                 capabilities: capabilities(from: m),
                 // Straight through, unedited. near.ai already writes a real
@@ -361,7 +358,7 @@ enum NearAIModelCatalog {
                 // The tier, resolved where the catalogue is — not in a view.
                 confidentialityNote: confidentiality(forID: m.id).label))
         }
-        return sortByVendorFamily(result)
+        return ordered(result)
     }
 
     /// "$1/$5" (whole) or "$1.40/$4.40" from per-1M-token input/output prices.

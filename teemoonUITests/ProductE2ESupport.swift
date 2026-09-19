@@ -123,7 +123,7 @@ enum ProductE2E {
         return app
     }
 
-    static func launchNearAI(model: String = "z-ai/glm-5.2",
+    static func launchNearAI(model: String = "z-ai/glm-5.3-flash",
                              developerMode: Bool = false) -> XCUIApplication {
         var env = ["UITEST_SEED_NEARAI_MODEL": model]
         if developerMode { env["UITEST_DEVELOPER_MODE"] = "1" }
@@ -131,7 +131,7 @@ enum ProductE2E {
     }
 
     /// near.ai plus the Brave Search key, so `web_search` actually runs.
-    static func launchNearAIGrounded(model: String = "z-ai/glm-5.2") -> XCUIApplication {
+    static func launchNearAIGrounded(model: String = "z-ai/glm-5.3-flash") -> XCUIApplication {
         launch(environment: [
             "UITEST_SEED_NEARAI_MODEL": model,
             "UITEST_SEED_GROUNDING": "1",

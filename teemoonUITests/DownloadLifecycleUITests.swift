@@ -175,7 +175,11 @@ final class DownloadLifecycleUITests: XCTestCase {
         shot("02-downloading-\(before)pct")
 
         // 1. Background for a while. A foreground session would have been frozen.
+        #if os(iOS)
         XCUIDevice.shared.press(.home)
+        #else
+        throw XCTSkip("backgrounding via the home button is iOS-only")
+        #endif
         Thread.sleep(forTimeInterval: 20)
         app.activate()
         XCTAssertTrue(readyRow(app).waitForExistence(timeout: 10))
