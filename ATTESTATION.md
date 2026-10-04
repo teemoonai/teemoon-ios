@@ -23,7 +23,7 @@ what it does not prove. for the product overview and the three places a model ca
 
 <p align="center">
   <img src="assets/model-browser.png" width="280"
-       alt="The near.ai model catalog: a confidentiality filter, then models grouped into 'end-to-end encrypted' (qwen 3.8, glm 5.2, deepseek v4 flash…) and 'attested on third-party hardware' tiers, each with per-token input/output pricing and context length.">
+       alt="The near.ai model catalog, 49 models: an 'end-to-end encrypted' tier (glm 5.3 flash, qwen 3.8 27b, qwen 3.6 35b…), then 'attested on third-party hardware' (kimi k3, deepseek-v3.2…) and the start of 'proxied', each row with per-token input/output pricing and context length.">
   <br><em>browse the near.ai catalog — grouped by confidentiality tier, with pricing and context length</em>
 </p>
 

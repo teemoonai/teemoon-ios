@@ -10,7 +10,7 @@ beta builds on [TestFlight](https://testflight.apple.com/join/WHZ9VPms) · iPhon
 
 <p align="center">
   <img src="assets/chat.png" width="300"
-       alt="A teemoon chat labeled end-to-end encrypted, with live markdown rendering, a model chip reading glm-5.2 · near.ai, and the web search tool switched on.">
+       alt="A teemoon chat labeled end-to-end encrypted, with live markdown rendering, a model chip reading glm-5.3-flash · near.ai, and the web search tool switched on.">
 </p>
 
 teemoon is a private AI chat app. there is no teemoon server. your phone talks
@@ -39,8 +39,8 @@ exactly what the attestation code does — see [`ATTESTATION.md`](ATTESTATION.md
   included. no key, works offline, nothing leaves the device.
 - **a computer you own, or a cloud you pick.** ollama, LM Studio, or any OpenAI-compatible
   server (llama.cpp included) on your own hardware; bring your own key for near.ai, Grok,
-  Fireworks, Brave Answers, and other OpenAI-compatible providers. every cloud provider other
-  than near.ai is plain TLS, and the row says so.
+  Fireworks, OpenRouter, NVIDIA, Brave Answers, and other OpenAI-compatible providers.
+  every cloud provider other than near.ai is plain TLS, and the row says so.
 - **no account, no subscription, no analytics.** history is SwiftData on the device;
   nothing syncs anywhere.
 
@@ -104,10 +104,10 @@ also:
 - **a computer you own** — ollama, LM Studio, or any OpenAI-compatible server
   (llama.cpp included). the app can even browse and download models onto your own
   ollama server.
-- **a cloud you pick** — bring your own key for near.ai, Grok, Fireworks, Brave
-  Answers, and other OpenAI-compatible providers. (an Anthropic key does not work: the app
-  speaks chat/completions, not `/v1/messages` — Claude models are reachable only
-  proxied via near.ai.)
+- **a cloud you pick** — bring your own key for near.ai, Grok, Fireworks,
+  OpenRouter, NVIDIA, Brave Answers, and other OpenAI-compatible providers. (an Anthropic
+  key does not work: the app speaks chat/completions, not `/v1/messages` — Claude models
+  are reachable only proxied via near.ai.)
 
 **end-to-end encryption is near.ai's attested TEE fleet only. every other cloud
 provider is plain TLS. the app labels this per row** — that's the screenshot
@@ -156,7 +156,7 @@ open teemoon.xcodeproj
 ```
 
 LFS is not optional, on any platform. `Packages/LiteRTLM/artifacts/` holds a repackaged macOS
-xcframework (132 MB) that `Package.swift` references by path, and SwiftPM validates that path
+xcframework (145 MB) that `Package.swift` references by path, and SwiftPM validates that path
 when the manifest loads. clone without LFS and you get a text pointer instead of the binary,
 the package fails to resolve at all, and the iOS build goes down with it. see
 [`Packages/LiteRTLM/VENDORING.md`](Packages/LiteRTLM/VENDORING.md) for what the artifact is,
