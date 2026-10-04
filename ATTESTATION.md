@@ -37,11 +37,11 @@ check blocks the send:
   <tr>
     <td align="center">
       <img src="assets/proof.png" width="250"
-           alt="The everyday proof view: encrypted to GLM-5.1, only it can read this; a step-by-step ladder — your message readable only here, sealed to the enclave's key, the pinned published build (a swap would show up as a mismatch), an honest 'not everything here has been reviewed yet' rung, and per-reply signatures.">
+           alt="The everyday proof view, orange: encrypted to GLM-5.3-Flash-W4AFP8, but its logs copy what you type. The seal holds on the way in, but a review of this exact build found messages copied into the operator's monitoring logs; the ladder shows the message sealed so only the model can open it and the real published build, both green, then an orange step: this setup copies what you type into its operator's logs.">
     </td>
     <td align="center">
       <img src="assets/proof-expert.png" width="250"
-           alt="The expert proof view, top: the Ed25519 encryption-target key and the key bound in the model's TDX quote report_data.">
+           alt="The expert proof view, top: the same orange verdict, then the Ed25519 encryption-target key and the key bound in the model's TDX quote report_data, both green.">
     </td>
   </tr>
   <tr>
@@ -51,16 +51,16 @@ check blocks the send:
   <tr>
     <td align="center">
       <img src="assets/proof-expert-2.png" width="250"
-           alt="The expert view, per component: the running recipe verified on this device against its file_sha256, a Fable miniaudit QUALIFIED PASS on the recipe delta, vllm-proxy-rs decrypting your sealed request (miniaudit PRIVATE, two opt-in egress caveats), where end-to-end encryption terminates, and sglang running the model over your plaintext (its own miniaudit PRIVATE).">
+           alt="The expert view, known code: the model enclave verified by its own quote; the guest OS (nearai/private-ml-sdk), which sees your message, with a Fable miniaudit QUALIFIED PASS and an orange warning that teemoon has not matched this guest-OS build to a published near.ai release; and nearaidev/compose-manager, which can reach enclave processes, with a Fable miniaudit COMPROMISABLE by a credentialed operator.">
     </td>
     <td align="center">
       <img src="assets/proof-expert-3.png" width="250"
-           alt="The expert view continues: the running code traced to public source (nearai/compose-manager, dstack-vpc, inference-proxy, private-ml-sdk), per-reply signatures, and the model enclave's measured compose with a Fable miniaudit badge.">
+           alt="The expert view continues: compose-manager-launcher also COMPROMISABLE, then the running recipe verified on this device against its file_sha256; vllm-proxy-rs, which decrypts your sealed request, with a Fable miniaudit QUALIFIED PASS; where end-to-end encryption terminates; and sglang running the model over your plaintext, with a Fable miniaudit LEAKS.">
     </td>
   </tr>
   <tr>
-    <td align="center"><em>expert — the recipe checked, with Fable miniaudit verdicts</em></td>
-    <td align="center"><em>expert — every image traced to public source</em></td>
+    <td align="center"><em>expert — the known code, with Fable miniaudit verdicts</em></td>
+    <td align="center"><em>expert — the running recipe, and where the plaintext is</em></td>
   </tr>
 </table>
 
