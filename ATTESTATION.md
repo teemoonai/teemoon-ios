@@ -55,7 +55,7 @@ check blocks the send:
     </td>
     <td align="center">
       <img src="assets/proof-expert-3.png" width="250"
-           alt="The expert view continues: compose-manager-launcher also COMPROMISABLE, then the running recipe verified on this device against its file_sha256; vllm-proxy-rs, which decrypts your sealed request, with a Fable miniaudit QUALIFIED PASS; where end-to-end encryption terminates; and sglang running the model over your plaintext, with a Fable miniaudit LEAKS.">
+           alt="The expert view continues: the running recipe verified on this device against its file_sha256, with its own Fable miniaudit LEAKS (narrowly: all four replicas still select the glm47 tool-call parser); vllm-proxy-rs, which decrypts your sealed request, with a Fable miniaudit QUALIFIED PASS; and where end-to-end encryption terminates, just above sglang, the engine that runs the model over your plaintext.">
     </td>
   </tr>
   <tr>
