@@ -70,7 +70,12 @@ struct TeemoonApp: App {
         // `providers.removeAll()`, whose didSet saves — run against a real
         // config it REPLACES it. In-memory under --uitesting, DEBUG-only.
         // The incident and its pins live in `UITestIsolationTests`.
+        #if DEBUG
+        let store = Self.uiTestPlantedConfig().map { ProviderStore(config: $0) }
+            ?? ProviderStore(inMemory: Self.usesEphemeralProviderStore())
+        #else
         let store = ProviderStore(inMemory: Self.usesEphemeralProviderStore())
+        #endif
         let session = ConfidentialSession(providers: store)
         // Re-attest whenever the active provider changes, without ProviderStore
         // depending on the attestation layer.
@@ -117,6 +122,19 @@ struct TeemoonApp: App {
            ProcessInfo.processInfo.environment["UITEST_RESET_LOCAL_MODELS"] == "1" {
             for model in LocalModelCatalog.all { try? LocalModelStorage.delete(model) }
         }
+        // G5: a stand-in where a catalog model's weights go, so the delete path
+        // can be walked without 2.4 GB on disk. Simulator only, and never over a
+        // file that is there: the delete it sets up would take real weights.
+        #if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("--uitesting"),
+           let repoID = ProcessInfo.processInfo.environment["UITEST_SEED_STANDIN_WEIGHTS"],
+           let model = LocalModelCatalog.model(id: repoID),
+           !LocalModelStorage.isInstalled(model) {
+            let file = LocalModelStorage.file(for: model)
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data("stand-in".utf8).write(to: file)
+        }
+        #endif
         #endif
         // Downloads outlive the process. Pick up whatever the daemon is still
         // moving, or has landed, before any screen can start a new one — and on
@@ -236,6 +254,41 @@ struct TeemoonApp: App {
     /// function rather than inlined so the rule can be tested — see
     /// `UITestIsolationTests`, which is the regression that stops this being
     /// re-broken by someone adding a launch flag.
+    #if DEBUG
+    /// `UITEST_SEED_CONFIG` (C9): a config problem planted where the store's own
+    /// launch load will meet it — `corrupt` (an unreadable file, which must be
+    /// quarantined and shown, never read as a first run) or `duplicates` (one
+    /// connection saved twice, which the load merges and announces) — or `empty`. In a fresh
+    /// temporary directory, never the real config: the in-memory rule above is
+    /// about not touching the user's setups, and this keeps it.
+    static func uiTestPlantedConfig(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ConfigStore? {
+        guard arguments.contains("--uitesting"), let kind = environment["UITEST_SEED_CONFIG"] else { return nil }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uitest-config-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let config = ConfigStore(directory: dir, legacy: EmptyLegacyConfig())
+        switch kind {
+        case "corrupt":
+            try? Data(#"{"version": 2, "servers": [ this is not json"#.utf8)
+                .write(to: dir.appendingPathComponent(ConfigStore.fileName))
+        case "empty":
+            break   // a PERSISTING store with nothing in it, for what only a persisting store records (recently used)
+        case "duplicates":
+            var twin = Provider.fireworks
+            twin.id = UUID()
+            config.write(ProviderConfigProjection.snapshot(
+                providers: [.fireworks, twin], currentProviderID: Provider.fireworks.id.uuidString))
+        default:
+            return nil
+        }
+        os_log(.error, "[uitest] planted config %{public}@ at %{public}@", kind, dir.path)
+        return config
+    }
+    #endif
+
     static func usesEphemeralProviderStore(
         arguments: [String] = ProcessInfo.processInfo.arguments
     ) -> Bool {

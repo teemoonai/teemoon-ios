@@ -95,16 +95,38 @@ final class ReadmeHeroCaptureUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 15), "title block missing")
         XCTAssertTrue(ProductE2E.waitUntilVerified(app, timeout: 90),
                       "session never verified: \(ProductE2E.titleLabel(app))")
+        // A fresh simulator puts the swipe-typing tutorial over the composer
+        // the first time the keyboard rises; it swallowed the title tap.
+        let intro = app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "sliding your finger")).firstMatch
+        if intro.waitForExistence(timeout: 3), app.buttons["Continue"].exists {
+            app.buttons["Continue"].tap()
+            Thread.sleep(forTimeInterval: 0.6)
+        }
         title.tap()
         XCTAssertTrue(app.staticTexts["who can read this?"].waitForExistence(timeout: 8),
                       "everyday sheet did not open")
-        let sealed = ProductE2E.elementContaining(app, "only it can read")
-        XCTAssertTrue(sealed.waitForExistence(timeout: 60), "no sealed hero")
-        // Provenance lands last and can turn a green hero orange (GLM-5.1,
-        // 2026-09-10: "one image unpublished" four seconds in). Let it settle.
+        // Shoot the verdict the sheet gives, green or not: the page publishes
+        // what the app shows (GLM-5.3-Flash went orange on 2026-10-04, "its logs
+        // copy what you type"). A hero that never appears is still a failure.
+        let hero = ProductE2E.elementContaining(app, "encrypted to")
+        XCTAssertTrue(hero.waitForExistence(timeout: 60), "no verdict hero")
+        // Provenance lands last and can change the verdict seconds in. Let it settle.
         Thread.sleep(forTimeInterval: 6)
-        XCTAssertTrue(sealed.exists, "hero degraded after settling: \(ProductE2E.titleLabel(app))")
         save("proof")
+
+        // The expert view, top and two scroll positions: frame 5 picks one.
+        let expert = app.buttons["expert"].firstMatch
+        if expert.waitForExistence(timeout: 5) {
+            expert.tap()
+            Thread.sleep(forTimeInterval: 2.0)
+            save("proof-expert-0")
+            for i in 1...5 {
+                app.swipeUp(velocity: .slow)
+                Thread.sleep(forTimeInterval: 1.2)
+                save("proof-expert-\(i)")
+            }
+        }
     }
 
     /// chat.png — one grounded turn with a title that fits the bar.

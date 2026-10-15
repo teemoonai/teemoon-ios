@@ -196,18 +196,6 @@ final class LocalEngineResidency {
     /// two resident doesn't silently start lying here.
     private(set) var resident: Set<URL> = []
 
-    /// What the last engine build cost, and for which model.
-    ///
-    /// Surfaced on the developer-mode debug card. Measured 2.3–4.0 s on an iPhone
-    /// 16 Pro (`measuresWhatAColdStartCosts`), against 0.86 s warm — the number
-    /// that explains a slow first answer, and the reason the picker shows warmth at
-    /// all. Nil until something has been built this session.
-    ///
-    /// A property of the ENGINE, not of a request: one build serves every turn until
-    /// it's evicted, so the card labels it "last model load" rather than implying
-    /// this turn paid it.
-    private(set) var lastLoad: (file: URL, took: Duration)?
-
     private init() {}
 
     func isResident(_ file: URL) -> Bool { resident.contains(file) }
@@ -217,21 +205,10 @@ final class LocalEngineResidency {
     /// visible as such.
     func update(resident files: Set<URL>) { resident = files }
 
-    /// Called after a successful build, with what it cost.
-    func recordLoad(of file: URL, took: Duration) { lastLoad = (file, took) }
-
     /// Previews and tests. Never touches the real engine cache.
-    ///
-    /// `lastLoad` is settable here too, because the debug card renders it and a
-    /// canvas has no engine to build: the only way to see that row was to run a
-    /// cold generation on a device, which is exactly the state a preview exists to
-    /// spare you.
-    static func previewing(
-        _ files: [URL], lastLoad: (file: URL, took: Duration)? = nil
-    ) -> LocalEngineResidency {
+    static func previewing(_ files: [URL]) -> LocalEngineResidency {
         let residency = LocalEngineResidency()
         residency.resident = Set(files)
-        residency.lastLoad = lastLoad
         return residency
     }
 }

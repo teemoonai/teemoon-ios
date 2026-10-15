@@ -123,8 +123,9 @@ final class ProductLiveE2ETests: XCTestCase {
                       "first debug-panel turn did not settle")
         XCTAssertTrue(ProductE2E.waitForDebugCardOnScreen(app),
                       "developer mode is on but the debug card never landed on screen")
-        let e2ee = app.descendants(matching: .any)["chat.debugCard.e2ee"].firstMatch
-        XCTAssertTrue(e2ee.waitForExistence(timeout: 5),
+        // RequestDebugView stamps the seal on the CARD's value: XCUI sees the card as one element and none of its children
+        let sealed = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ AND value == %@", "chat.debugCard", "E2EE")).firstMatch
+        XCTAssertTrue(sealed.waitForExistence(timeout: 5),
                       "sealed live turn should stamp E2EE on the debug card")
         XCTAssertFalse(ProductE2E.titleLooksMismatched(app),
                        "first reply didn't check out: \(ProductE2E.titleLabel(app))")
@@ -136,5 +137,90 @@ final class ProductLiveE2ETests: XCTestCase {
                        "second reply didn't check out with the debug panel on: \(ProductE2E.titleLabel(app))")
         XCTAssertFalse(ProductE2E.titleLooksBlocked(app),
                        "session blocked after two live turns with the debug panel on")
+    }
+
+    // MARK: - use cases (the Android port's list), 2026-10-05. Neither spends: attestation and a key probe.
+
+    /// E10: re-verify on the trust sheet refreshes the stamp (a new nonce), and the expert rung's copy puts the
+    /// self-verify script on the clipboard.
+    func testReverifyRefreshesTheStampAndCopyPutsTheScriptOnTheClipboard() throws {
+        try ProductE2E.requireHostKey(forPreset: "nearai")
+        let app = ProductE2E.launchNearAI(model: Self.model)
+        let title = ProductE2E.titleBlock(app)
+        XCTAssertTrue(title.waitForExistence(timeout: 15), "title block missing")
+        title.tap()
+        let nonce = try NSRegularExpression(pattern: "nonce [0-9a-fA-F]{4}…[0-9a-fA-F]{4}")
+        func stamp() -> String? {
+            let el = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "nonce ")).firstMatch
+            guard el.exists else { return nil }
+            let l = el.label
+            return nonce.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)).flatMap { Range($0.range, in: l).map { String(l[$0]) } }
+        }
+        func waitFor(_ seconds: TimeInterval, _ cond: () -> Bool) -> Bool {
+            let end = Date().addingTimeInterval(seconds)
+            while Date() < end { if cond() { return true }; usleep(500_000) }
+            return cond()
+        }
+        XCTAssertTrue(waitFor(60) { stamp() != nil }, "the sheet never showed a nonce stamp")
+        let first = stamp()!
+        let reverify = app.buttons.matching(NSPredicate(format: "label ==[c] %@ OR label ==[c] %@", "re-verify", "re-run verification")).firstMatch
+        XCTAssertTrue(reverify.waitForExistence(timeout: 10), "the sheet offers no re-verify")
+        reverify.tap()
+        XCTAssertTrue(waitFor(60) { if let s = stamp() { return s != first }; return false }, "re-verify did not refresh the stamp (still \(first))")
+        app.buttons["expert"].firstMatch.tap()
+        let heading = app.staticTexts["re-check the live service yourself"].firstMatch
+        for _ in 0..<12 where !heading.isHittable { app.swipeUp() }
+        XCTAssertTrue(heading.waitForExistence(timeout: 10), "the expert rung has no self-verify section")
+        // the script card's pill (its label is the symbol's and the word's, "…, copy"), not a digest's copy icon
+        let file = app.staticTexts["teemoon_verify.py"].firstMatch
+        for _ in 0..<4 where !file.isHittable { app.swipeUp() }
+        guard file.exists else { throw XCTSkip("no script card on this record") }
+        // the pill in the card's own header bar: the copy button level with the file name
+        let copy = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "copy")).allElementsBoundByIndex
+            .filter { abs($0.frame.midY - file.frame.midY) < 20 }.first
+        guard let copy else { return XCTFail("the script card has no copy pill beside teemoon_verify.py") }
+        copy.tap()
+        // the pill says "copied" for 1.6 s; the read-back below is the proof, this only catches a dead button early
+        _ = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "copied")).firstMatch.waitForExistence(timeout: 2)
+        // read it back INSIDE the app: the runner reading UIPasteboard raises the paste prompt and hangs
+        // the sheet's own close (the × at its top left), not swipes: a swipe on the expert rung scrolls it
+        let close = app.buttons.matching(NSPredicate(format: "label ==[c] %@ OR label ==[c] %@ OR label ==[c] %@", "close", "done", "xmark")).firstMatch
+        if close.exists { close.tap() } else { app.swipeDown(velocity: .fast) }
+        let composer = ProductE2E.composer(app)
+        for _ in 0..<3 where !composer.isHittable { sleep(1); if !composer.isHittable { app.swipeDown(velocity: .fast) } }
+        composer.tap(); composer.press(forDuration: 1.2)
+        let paste = app.menuItems.matching(NSPredicate(format: "label ==[c] %@", "paste")).firstMatch
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), "the composer offered no paste")
+        paste.tap()
+        let pasted = composer.value as? String ?? ""
+        XCTAssertTrue(pasted.localizedCaseInsensitiveContains("python"), "the clipboard does not hold the verify script: \(pasted.prefix(80))")
+    }
+
+    /// A5: a cloud key the provider refuses is said by the add form before save (OpenRouter, a well-formed key that
+    /// is not one). NOT asserted: "nothing is saved" — save does not consult the check (AddEditProviderModel.save, on
+    /// both platforms); whether it should is an open product question (2026-10-05).
+    func testARejectedCloudKeyIsSaidByTheForm() throws {
+        let app = ProductE2E.launch(environment: ["UITEST_SEED_LOCAL_ENDPOINT": "http://127.0.0.1:9/v1", "UITEST_SEED_LOCAL_MODEL": "fake-model"])
+        ProductE2E.whereChip(app).tap()
+        app.buttons["cloud"].firstMatch.tap()
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ AND identifier != %@", "openrouter", "chat.whereChip")).firstMatch
+        // a List renders only its on-screen rows: swipe the sheet's list until openrouter is drawn
+        for _ in 0..<8 where !row.exists { app.swipeUp(velocity: .slow); sleep(1) }
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the cloud filter has no openrouter row: \(app.debugDescription.prefix(3000))")
+        row.tap()
+        let key = app.secureTextFields.firstMatch
+        XCTAssertTrue(key.waitForExistence(timeout: 10), "openrouter's key form did not open")
+        key.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the key field took no focus")
+        key.typeText("sk-or-v1-" + String(repeating: "0", count: 64))
+        XCTAssertFalse((key.value as? String ?? "").isEmpty, "the key never reached the field")
+        sleep(3)   // editing the key re-probes on its own
+        let said = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "rejected")).firstMatch
+        if !said.exists {
+            let fetch = app.buttons.matching(NSPredicate(format: "label ==[c] %@ OR label ==[c] %@ OR label ==[c] %@", "fetch models", "test connection", "refresh models")).firstMatch
+            if fetch.exists { fetch.tap() }
+        }
+        ProductE2E.attachScreenshot(app, name: "a5-after-key", to: self)
+        XCTAssertTrue(said.waitForExistence(timeout: 30), "the form did not say the key is refused: \(app.debugDescription.prefix(3000))")
     }
 }

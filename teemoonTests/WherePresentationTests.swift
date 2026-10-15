@@ -363,13 +363,15 @@ struct DebugCardTimingTests {
     }
 
     private func info(total: TimeInterval, ttft: TimeInterval,
-                      thinking: TimeInterval?, tokens: Int) -> LastRequestDebugInfo {
+                      thinking: TimeInterval?, tokens: Int,
+                      timings: EngineTimings? = nil) -> LastRequestDebugInfo {
         LastRequestDebugInfo(
             providerName: "ringzero", modelID: "gemma4:e4b", url: URL(string: "http://x/v1"),
             requestHeaders: nil, requestBodyJSON: nil, responseBody: "Ho.",
             toolCalls: [], threadID: UUID(),
             totalDuration: total, timeToFirstToken: ttft, thinkingTime: thinking,
-            outputTokens: tokens, isE2EEActive: false, teeVerification: nil)
+            outputTokens: tokens, engineTimings: timings,
+            isE2EEActive: false, teeVerification: nil)
     }
 
     /// The number that started it: 124 tokens over the 0.1s it took to emit "Ho."
@@ -385,11 +387,116 @@ struct DebugCardTimingTests {
         #expect(visibleOnly > 1000)
     }
 
-    /// A model that doesn't think keeps the old arithmetic exactly.
-    @Test func withoutThinkingTheRateIsUnchanged() {
-        let plain = info(total: 4.0, ttft: 1.0, thinking: nil, tokens: 300)
+    /// A model that doesn't think: the tokens after the first, over the visible window.
+    @Test func withoutThinkingTheRateIsOverTheVisibleWindow() {
+        let plain = info(total: 4.0, ttft: 1.0, thinking: nil, tokens: 301)
         #expect(plain.generationTime == 3.0)
         #expect(plain.tokensPerSecond == 100)
+    }
+
+    /// The window opens on a token already decoded. 5 tokens whose last four took
+    /// 0.1s is 40 tok/s; counting all five claimed 50.
+    @Test func theFirstTokenIsNotInTheWindow() {
+        #expect(info(total: 1.1, ttft: 1.0, thinking: nil, tokens: 5).tokensPerSecond!
+                .isApproximately(40))
+        // One token has no interval at all.
+        #expect(info(total: 2, ttft: 1, thinking: nil, tokens: 1).tokensPerSecond == nil)
+    }
+
+    /// On-device, LiteRT times its own decode. The card read 83 tok/s off a 0.6s
+    /// wall-clock window (53 tokens, 2026-09-23) while the engine had its own figure.
+    @Test func theEnginesOwnDecodeRateWins() {
+        let local = info(total: 6.7, ttft: 6.1, thinking: nil, tokens: 53,
+                         timings: EngineTimings(prefillTokens: 2140, prefillRate: 1412, decodeRate: 61.4))
+        #expect(local.tokensPerSecond == 61.4)
+        // A zero from a runtime that didn't measure falls back to wall-clock.
+        let unmeasured = info(total: 6.7, ttft: 6.1, thinking: nil, tokens: 53,
+                              timings: EngineTimings(prefillTokens: 0, prefillRate: 0, decodeRate: 0))
+        #expect(unmeasured.tokensPerSecond!.isApproximately(52 / 0.6))
+    }
+
+    /// Prefill shows only when a runtime timed it — never estimated from ttft,
+    /// which over HTTP also holds the network and the server's queue.
+    @Test func prefillIsShownOnlyWhenTheEngineTimedIt() {
+        #expect(info(total: 6.7, ttft: 6.1, thinking: nil, tokens: 53).prefillSummary == nil)
+        let local = info(total: 6.7, ttft: 6.1, thinking: nil, tokens: 53,
+                         timings: EngineTimings(prefillTokens: 2140, prefillRate: 1412.4, decodeRate: 61))
+        #expect(local.prefillSummary == "prefill 2140tok · 1412tok/s")
+        let cached = info(total: 2, ttft: 1, thinking: nil, tokens: 53,
+                          timings: EngineTimings(prefillTokens: 12, prefillRate: 300, decodeRate: 90,
+                                                 cachedTokens: 2000))
+        #expect(cached.prefillSummary == "prefill 12tok · 300tok/s · 2000 cached")
+    }
+
+    private func onDevice(speculative: Bool = true,
+                          timings: EngineTimings? = EngineTimings(prefillTokens: 212, prefillRate: 610, decodeRate: 52)
+    ) -> LastRequestDebugInfo {
+        LastRequestDebugInfo(
+            providerName: "gemma 4 e2b", modelID: "google/gemma-4-e2b-it-litert-lm", url: nil,
+            requestHeaders: nil, requestBodyJSON: nil, responseBody: "On the phone.",
+            toolCalls: [], threadID: UUID(),
+            totalDuration: 4.412, timeToFirstToken: 3.402, outputTokens: 24,
+            engineTimings: timings,
+            onDeviceRun: OnDeviceRun(backend: "gpu", speculative: speculative),
+            isE2EEActive: false, teeVerification: nil)
+    }
+
+    /// The two on-device rows, as Android prints them too (user, 2026-10-15, for
+    /// the speed screenshots): the speed row LEADS — decode, prefill, and what ran
+    /// them, `+ speculative` only when the drafter was on — and the chain below
+    /// loses its tok/s so the rate is printed once. No engine load: the engine is
+    /// built when the model is chosen, not per message.
+    @Test func onDeviceSpeedRowLeadsAndTheChainLosesItsRate() {
+        let spec = onDevice()
+        #expect(spec.speedLine == "decode 52tok/s · prefill 610tok/s · gpu + speculative")
+        #expect(spec.timingLine == "4.4s · ttft 3.4s · gen 1.0s · 24tok")
+        #expect(spec.prefillSummary == nil)
+
+        let plain = onDevice(speculative: false)
+        #expect(plain.speedLine == "decode 52tok/s · prefill 610tok/s · gpu")
+
+        // The runtime failed to time itself: the wall-clock decode rate, no prefill.
+        let untimed = onDevice(timings: nil)
+        #expect(untimed.speedLine == "decode 23tok/s · gpu + speculative")
+
+        // The copied text puts the speed row first too.
+        let copied = RequestDebugView(info: spec).debugText
+        #expect(copied.contains("decode 52tok/s · prefill 610tok/s · gpu + speculative\n4.4s · ttft 3.4s · gen 1.0s · 24tok"))
+    }
+
+    /// A cloud turn keeps the chain it always had: prefill there cannot be told
+    /// from the network, so it never grows a speed row.
+    @Test func cloudTurnsKeepTheirSingleChain() {
+        let cloud = info(total: 6.4, ttft: 6.3, thinking: 4.5, tokens: 124)
+        #expect(cloud.timingLine == "6.4s · ttft 6.3s · think 4.5s · gen 0.1s · 124tok · 27tok/s")
+        #expect(cloud.speedLine == nil)
+        // A home llama.cpp server's own timings stay on their own line, unchanged.
+        let home = info(total: 6.7, ttft: 6.1, thinking: nil, tokens: 53,
+                        timings: EngineTimings(prefillTokens: 2140, prefillRate: 1412.4, decodeRate: 61))
+        #expect(home.timingLine == "6.7s · ttft 6.1s · gen 0.6s · 53tok · 61tok/s")
+        #expect(home.speedLine == nil)
+        #expect(home.prefillSummary == "prefill 2140tok · 1412tok/s")
+    }
+
+    /// llama-server's last chunk, as `server-task.cpp` emits it with include_usage.
+    @Test func parserReadsLlamaCppTimings() {
+        let parser = SSEStreamParser(hasTools: false)
+        let chunk = #"""
+            data: {"choices":[],"created":1,"id":"chatcmpl-1","model":"x","object":"chat.completion.chunk","usage":{"completion_tokens":20,"prompt_tokens":2150,"total_tokens":2170},"timings":{"cache_n":10,"prompt_n":2140,"prompt_ms":1515.2,"prompt_per_token_ms":0.708,"prompt_per_second":1412.3,"predicted_n":20,"predicted_ms":250.0,"predicted_per_token_ms":12.5,"predicted_per_second":80.0}}
+            """# + "\n\n"
+        _ = parser.consume(Data(chunk.utf8))
+        #expect(parser.engineTimings == EngineTimings(
+            prefillTokens: 2140, prefillRate: 1412.3, decodeRate: 80, cachedTokens: 10))
+    }
+
+    /// Ollama sends usage and no timings.
+    @Test func parserLeavesTimingsNilWithoutThem() {
+        let parser = SSEStreamParser(hasTools: false)
+        let chunk = #"""
+            data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":392,"completion_tokens":1110,"total_tokens":1502}}
+            """# + "\n\n"
+        _ = parser.consume(Data(chunk.utf8))
+        #expect(parser.engineTimings == nil)
     }
 
     /// And the chain only grows a `think` figure when there was thinking, so a
@@ -840,4 +947,8 @@ struct ModelBrowserDoorTests {
         // Only what teemoon can seal: nothing without a host, nothing proxied.
         #expect(door.models.allSatisfy { NearAIModelCatalog.confidentiality(forID: $0.id) == .teeOwn })
     }
+}
+
+private extension Double {
+    func isApproximately(_ other: Double) -> Bool { abs(self - other) < 1e-6 }
 }

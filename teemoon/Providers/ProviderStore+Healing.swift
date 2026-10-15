@@ -311,7 +311,92 @@ extension ProviderStore {
         return healRetiredNearAIModels(served: served.map(\.id))
     }
 
+    /// A Fireworks model that left serverless, and the one that replaces it.
+    /// Only ids with a KNOWN successor: a guess would move someone's setup to a
+    /// model they never chose. Fireworks' /models needs the key, so this is static.
+    struct FireworksRetirement: Equatable {
+        let retired: String
+        let successor: String
+        let retiredName: String
+        let successorName: String
+        /// The retired id's last shipped price; the table no longer has it.
+        let retiredPrice: String
+
+        var notice: String {
+            let price = KnownModel.fireworksPrices[successor] ?? ""
+            return "\(retiredName) is no longer on fireworks, so your fireworks setup now uses \(successorName) (\(price) per 1M tokens, was \(retiredPrice))."
+        }
+    }
+
+    static let fireworksRetirements: [FireworksRetirement] = [
+        FireworksRetirement(retired: "accounts/fireworks/models/kimi-k2p6",
+                            successor: "accounts/fireworks/models/kimi-k3",
+                            retiredName: "kimi k2.6", successorName: "kimi k3",
+                            retiredPrice: "$0.95/$4.00"),
+    ]
+
+    /// Moves Fireworks setups (and their equipped lists) off retired ids, and
+    /// says so once per retirement through the "tidied up" notice. Returns the
+    /// setups it moved.
+    @discardableResult
+    func healRetiredFireworksModels() -> [Provider] {
+        var moved: [Provider] = []
+        var notices: [String] = []
+        for retirement in Self.fireworksRetirements {
+            var touched = false
+            for p in providers where EndpointModelCatalog.Source.resolve(host: p.openAIBaseURL?.host) == .fireworks {
+                var healed = p
+                if p.model == retirement.retired { healed.model = retirement.successor }
+                healed.equippedModels = p.equippedModels.map { list in
+                    var seen = Set<String>()
+                    return list.map { $0 == retirement.retired ? retirement.successor : $0 }
+                        .filter { seen.insert($0).inserted }
+                }
+                guard healed != p else { continue }
+                updateProvider(healed)
+                moved.append(healed)
+                touched = true
+            }
+            if touched { notices.append(retirement.notice) }
+        }
+        if !notices.isEmpty {
+            // On disk too: a Siri turn heals through its own store and shows nothing.
+            let pending = Self.joinNotices(readPendingNotice(), notices.joined(separator: " "))
+            writePendingNotice(pending)
+            mergeNotice = Self.joinNotices(mergeNotice, pending)
+        }
+        return moved
+    }
+
+    /// Beside the config file; nil for an in-memory config.
+    var pendingNoticeURL: URL? {
+        config.fileURL?.deletingLastPathComponent().appendingPathComponent("teemoon-pending-notice.txt")
+    }
+
+    func readPendingNotice() -> String? {
+        guard let url = pendingNoticeURL, let text = try? String(contentsOf: url, encoding: .utf8),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
+    func writePendingNotice(_ text: String?) {
+        guard let url = pendingNoticeURL else { return }
+        if let text, !text.isEmpty {
+            try? Data(text.utf8).write(to: url, options: .atomic)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Joins two notices, never repeating one already in the first.
+    static func joinNotices(_ first: String?, _ second: String?) -> String? {
+        guard let second, !second.isEmpty else { return first }
+        guard let first, !first.isEmpty else { return second }
+        return first.contains(second) ? first : first + " " + second
+    }
+
     /// Test seam: the heals run at load, which an in-memory store skips.
+    func healRetiredFireworksModelsForTesting() -> [Provider] { healRetiredFireworksModels() }
     func healKeylessSelfHostedForTesting() { healSelfHostedKeyFlags() }
     func healAutoLabelsForTesting() { healAutoLabels() }
     func mergeDuplicateEndpointsForTesting() { mergeDuplicateEndpoints() }

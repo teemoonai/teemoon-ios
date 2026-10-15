@@ -26,7 +26,7 @@ final class ToolCallLiveUITests: XCTestCase {
     func testNearAIGLM52CallsWebSearchAndShowsSources() throws {
         try ProductE2E.requireHostKey(forPreset: "nearai")
         try ProductE2E.requireGroundingKey()
-        let app = ProductE2E.launchNearAIGrounded(model: "z-ai/glm-5.2")
+        let app = ProductE2E.launchNearAIGrounded(model: "z-ai/glm-5.3-flash")
         try assertLiveToolRound(app, name: "nearai")
     }
 
@@ -41,7 +41,7 @@ final class ToolCallLiveUITests: XCTestCase {
         try ProductE2E.requireHostKey(forPreset: "fireworks")
         try ProductE2E.requireGroundingKey()
         let app = ProductE2E.launchPreset(
-            "fireworks", model: "accounts/fireworks/models/gpt-oss-20b", grounding: true)
+            "fireworks", model: "accounts/fireworks/models/glm-5p3-flash", grounding: true)
         try assertLiveToolRound(app, name: "fireworks")
     }
 

@@ -304,7 +304,7 @@ struct GenerationEngine: Sendable {
             // never leak into the answer. Log removals — never a silent drop.
             let (sanitizedText, removedMarkup) = SSEStreamParser.sanitizeToolMarkup(from: textSoFar)
             if !removedMarkup.isEmpty {
-                logger.warning("[containment] stripped \(removedMarkup.count) residual tool-markup fragment(s) from the answer (unrecovered/unknown format): \(removedMarkup.prefix(4).joined(separator: " | "))")
+                logger.warning("[containment] stripped \(removedMarkup.count) residual tool-markup fragment(s) from the answer (unrecovered/unknown format), \(removedMarkup.reduce(0) { $0 + $1.count }, privacy: .public) chars")
             }
             let finalText = sanitizedText
             // Emit the canonical text last, so the final snapshot the UI keeps
@@ -355,6 +355,8 @@ struct GenerationEngine: Sendable {
                 promptBudget: report.promptBudget,
                 firstTokenAt: report.firstTokenAt,
                 firstVisibleTokenAt: report.firstVisibleTokenAt,
+                engineTimings: report.engineTimings,
+                onDeviceRun: report.onDeviceRun,
                 teeVerification: verification,
                 isE2EEActive: report.isE2EEActive
             ))
@@ -389,7 +391,7 @@ struct GenerationEngine: Sendable {
             try await withThrowingTaskGroup(of: (Int, String, String).self) { group in
                 for idx in sortedIndices {
                     let tc = toolCalls[idx]!
-                    logger.debug("[ToolCall] '\(tc.name)' args=\(tc.arguments)")
+                    logger.debug("[ToolCall] '\(tc.name, privacy: .public)' args \(tc.arguments.count, privacy: .public) chars")
                     group.addTask {
                         let result = try await self.executeToolCall(name: tc.name, argsJSON: tc.arguments)
                         return (idx, tc.id, result)

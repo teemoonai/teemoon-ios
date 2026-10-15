@@ -21,7 +21,7 @@ final class ProviderLiveUITests: XCTestCase {
 
     func testNearAIGemma4SendsFromChat() throws {
         try ProductE2E.requireHostKey(forPreset: "nearai")
-        let app = ProductE2E.launchPreset("nearai", model: "google/gemma-4-31B-it")
+        let app = ProductE2E.launchPreset("nearai", model: "z-ai/glm-5.3-flash")
         XCTAssertTrue(ProductE2E.composer(app).waitForExistence(timeout: 15))
         _ = ProductE2E.waitUntilVerified(app, timeout: 25)
         try ProductE2E.sendLive(app, "ui-e2e-nearai-pong", test: self)
@@ -29,7 +29,7 @@ final class ProviderLiveUITests: XCTestCase {
 
     func testFireworksGptOss20BSendsFromChat() throws {
         try ProductE2E.requireHostKey(forPreset: "fireworks")
-        let app = ProductE2E.launchPreset("fireworks", model: "accounts/fireworks/models/gpt-oss-20b")
+        let app = ProductE2E.launchPreset("fireworks", model: "accounts/fireworks/models/glm-5p3-flash")
         XCTAssertTrue(ProductE2E.composer(app).waitForExistence(timeout: 15))
         try ProductE2E.sendLive(app, "ui-e2e-fireworks-pong", test: self)
     }

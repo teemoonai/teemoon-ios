@@ -390,6 +390,9 @@ struct ChatView: View {
                             showWhereSheet = true
                         }
                         .buttonStyle(.plain)
+                        // The Menu is what VoiceOver lands on; the chip's own label stays inside it unless said here.
+                        .accessibilityLabel(WhereChip.accessibilityLabel(for: providerStore.activeProvider))
+                        .accessibilityHint("opens where the model runs")
                         #endif
                         // WEB ANSWERS, second — never first. The Where chip
                         // answers "who is replying", which has no default and

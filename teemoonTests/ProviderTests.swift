@@ -489,3 +489,99 @@ struct NearAIHostIdentityTests {
         #expect(saved.keyValidationEndpoint == .openRouter)
     }
 }
+
+/// Fireworks took kimi-k2p6 off serverless on 2026-10-15 while it was the
+/// shipped default; 54617ce moved only the preset, so every saved Fireworks
+/// setup on it failed its next send until the user picked another model. The
+/// user chose "switch and tell": move it to kimi-k3 at launch and say so once,
+/// naming the price change (Android matches the string, build 3916).
+@Suite("ProviderStore heals retired Fireworks models")
+struct RetiredFireworksModelHealingTests {
+
+    private let k2p6 = "accounts/fireworks/models/kimi-k2p6"
+    private let k3 = "accounts/fireworks/models/kimi-k3"
+
+    @MainActor private func store(_ base: Provider, model: String, equipped: [String]? = nil) -> (ProviderStore, Provider) {
+        let store = ProviderStore(inMemory: true)
+        var p = base
+        p.id = UUID()
+        p.model = model
+        p.equippedModels = equipped
+        store.addProvider(p)
+        return (store, p)
+    }
+
+    @Test @MainActor func aSetupOnTheRetiredModelMovesToItsSuccessorAndSaysSo() {
+        let (store, p) = store(.fireworks, model: k2p6,
+                               equipped: [k2p6, "accounts/fireworks/models/glm-5p3", k3])
+        let moved = store.healRetiredFireworksModelsForTesting()
+        #expect(moved.map(\.id) == [p.id])
+        let healed = store.providers.first { $0.id == p.id }
+        #expect(healed?.model == k3)
+        // Replaced in place and de-duplicated: k3 was already equipped.
+        #expect(healed?.equippedModels == [k3, "accounts/fireworks/models/glm-5p3"])
+        #expect(store.mergeNotice == "kimi k2.6 is no longer on fireworks, so your fireworks setup now uses kimi k3 ($3.00/$15.00 per 1M tokens, was $0.95/$4.00).")
+    }
+
+    @Test @MainActor func onlyTheEquippedListCanBeHealedToo() {
+        let (store, p) = store(.fireworks, model: k3, equipped: [k2p6])
+        #expect(store.healRetiredFireworksModelsForTesting().map(\.id) == [p.id])
+        #expect(store.providers.first { $0.id == p.id }?.equippedModels == [k3])
+        #expect(store.mergeNotice != nil)
+    }
+
+    @Test @MainActor func aSetupOnAnotherModelIsUntouchedAndSaysNothing() {
+        let (store, p) = store(.fireworks, model: "accounts/fireworks/models/glm-5p3",
+                               equipped: ["accounts/fireworks/models/glm-5p3"])
+        #expect(store.healRetiredFireworksModelsForTesting().isEmpty)
+        #expect(store.providers.first { $0.id == p.id }?.model == "accounts/fireworks/models/glm-5p3")
+        #expect(store.mergeNotice == nil)
+    }
+
+    @Test @MainActor func theSameIdOnAnotherProviderIsUntouched() {
+        let (store, p) = store(.openRouter, model: k2p6, equipped: [k2p6])
+        #expect(store.healRetiredFireworksModelsForTesting().isEmpty)
+        #expect(store.providers.first { $0.id == p.id }?.model == k2p6)
+        #expect(store.mergeNotice == nil)
+    }
+
+    @Test func everySuccessorIsPricedAndServedTodayInTheTable() {
+        for r in ProviderStore.fireworksRetirements {
+            #expect(KnownModel.fireworksPrices[r.successor] != nil, "\(r.successor) has no price")
+            #expect(KnownModel.fireworksPrices[r.retired] == nil, "\(r.retired) is still in the table")
+        }
+    }
+}
+
+/// The audit of build 42: a Siri turn builds its own persisting ProviderStore,
+/// so the first launch after the update could be Siri's — the heal ran, the
+/// setup moved, and the notice lived and died in a store with no screen. The
+/// notice now waits on disk beside the config until the banner is dismissed.
+@Suite("ProviderStore keeps a heal notice for the next app open")
+struct PendingHealNoticeTests {
+
+    @MainActor @Test func aHealInAnotherStoreIsSaidOnTheNextOpenUntilDismissed() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(component: "pending-notice-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func open() -> ProviderStore { ProviderStore(config: ConfigStore(directory: dir, legacy: EmptyLegacyConfig())) }
+
+        let setup = open()
+        var p = Provider.fireworks
+        p.id = UUID()
+        p.model = "accounts/fireworks/models/kimi-k2p6"
+        setup.addProvider(p)
+
+        // Siri's store: its load heals and persists the move. Nobody sees it.
+        let siri = open()
+        #expect(siri.providers.first { $0.id == p.id }?.model == "accounts/fireworks/models/kimi-k3")
+
+        // The app opens: nothing left to move, and the notice is still said.
+        let app = open()
+        #expect(app.mergeNotice == "kimi k2.6 is no longer on fireworks, so your fireworks setup now uses kimi k3 ($3.00/$15.00 per 1M tokens, was $0.95/$4.00).")
+        // Opened again before dismissing: said once, not twice.
+        #expect(open().mergeNotice == app.mergeNotice)
+
+        app.dismissMergeNotice()
+        #expect(open().mergeNotice == nil)
+    }
+}

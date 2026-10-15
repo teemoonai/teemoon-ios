@@ -20,7 +20,11 @@ import XCTest
 
 final class ModelBrowserCaptureUITests: XCTestCase {
 
-    private static let model = "z-ai/glm-5.2"
+    /// From `TEST_RUNNER_SITE_E2EE_MODEL` (teemoon-web's model registry); was a
+    /// literal "z-ai/glm-5.2", which near.ai retired on 2026-09-12.
+    private static var model: String {
+        ProcessInfo.processInfo.environment["SITE_E2EE_MODEL"] ?? "z-ai/glm-5.3-flash"
+    }
 
     override func setUp() { continueAfterFailure = false }
 
@@ -32,10 +36,9 @@ final class ModelBrowserCaptureUITests: XCTestCase {
     }
 
     func testCaptureCloudModelBrowser() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
-        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = Self.model
-        app.launch()
+        // ProductE2E stages the host key files; a bare launch left the slot
+        // empty on a fresh simulator and the test skipped with no browser.
+        let app = ProductE2E.launchNearAI(model: Self.model)
 
         let chip = app.buttons["chat.whereChip"].firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "no where chip")
@@ -45,25 +48,36 @@ final class ModelBrowserCaptureUITests: XCTestCase {
         // The `get` row carries no accessibility identifier, so match its
         // label: the name with settings' caption under it. near.ai is the
         // e2ee tier — the one whose badge the site's table cannot represent.
-        let browse = app.staticTexts
-            .matching(NSPredicate(format: "label ==[c] %@", "near.ai"))
+        // Full detent first: at medium the near.ai row sits under the fold and
+        // a tap on its text landed on "connect a computer" instead.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.47))
+           .press(forDuration: 0.15,
+                  thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)))
+        Thread.sleep(forTimeInterval: 1.4)
+        let browse = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@",
+                                  "near.ai", "open models"))
             .firstMatch
         guard browse.waitForExistence(timeout: 8) else {
+            save(XCUIScreen.main.screenshot(), as: "59-model-browser-unexpected-state")
             throw XCTSkip("no near.ai row in get — the sheet is in some other state")
         }
         browse.tap()
         Thread.sleep(forTimeInterval: 2.5)
 
-        // The near.ai row opens the PROVIDER screen, not the catalogue — the
-        // door to the browser is the "all N models" row under the recommended
-        // one. N varies with the live catalogue, so match the prefix.
-        let allModels = app.staticTexts
-            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "all "))
-            .firstMatch
-        guard allModels.waitForExistence(timeout: 8) else {
-            throw XCTSkip("no 'all N models' row — provider screen is in some other state")
+        // The row used to open the PROVIDER screen, whose "all N models" row
+        // led to the catalogue. It now opens the browser directly (the where
+        // sheet's `browse near.ai` door). Accept either.
+        if !app.staticTexts["browse models"].waitForExistence(timeout: 4) {
+            let allModels = app.staticTexts
+                .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "all "))
+                .firstMatch
+            guard allModels.waitForExistence(timeout: 8) else {
+                save(XCUIScreen.main.screenshot(), as: "59-model-browser-unexpected-state")
+                throw XCTSkip("neither the browser nor an 'all N models' row — some other state")
+            }
+            allModels.tap()
         }
-        allModels.tap()
 
         // The live catalogue fetch is a network round trip; the curated list
         // paints first and is replaced, so capturing early gets the fallback.

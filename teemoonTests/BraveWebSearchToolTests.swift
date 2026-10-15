@@ -7,6 +7,23 @@ struct BraveWebSearchToolTests {
 
     // MARK: - parseSources
 
+    /// The search result ends with the citation ask, after the XML. With the ask only in the tool description,
+    /// near.ai's GLM 5.3 Flash linked 0 of 9 grounded answers over the real search loop (Fireworks about two in
+    /// three); with this line after the sources, 3 of 3 on both (measured from the Android port, 2026-10-02). It
+    /// follows the XML so the kit-pinned <source> bytes and the parsed sources are unchanged.
+    @Test func theCitationAskFollowsTheSourcesAndParsesNothing() {
+        let xml = """
+        <source index="1">
+        <url>https://example.com/page1</url>
+        <title>Example Page</title>
+        <content>Some content about the topic.</content>
+        </source>
+        """
+        let result = xml + BraveWebSearchTool.citationAsk
+        #expect(result.hasSuffix("use a markdown link: [Page Title](url)."))
+        #expect(BraveWebSearchTool.parseSources(from: result).map(\.url) == BraveWebSearchTool.parseSources(from: xml).map(\.url))
+    }
+
     @Test func parseSources_validXML() {
         let xml = """
         <source index="1">

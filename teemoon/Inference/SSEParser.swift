@@ -120,6 +120,8 @@ final class SSEStreamParser {
     var completionTokens: Int? = nil
     /// `usage.prompt_tokens` — how many input tokens the server evaluated.
     var promptTokens: Int? = nil
+    /// llama.cpp's own `timings` object, on its last chunk. Other servers send none.
+    var engineTimings: EngineTimings? = nil
 
     init(hasTools: Bool, tools: [RecoveryToolSpec] = []) {
         self.recoveryTools = tools
@@ -243,6 +245,10 @@ final class SSEStreamParser {
                 if let tokens = usage["prompt_tokens"] as? Int {
                     promptTokens = tokens
                 }
+            }
+
+            if let timings = json["timings"] as? [String: Any] {
+                engineTimings = EngineTimings(llamaCpp: timings) ?? engineTimings
             }
 
             guard let choices = json["choices"] as? [[String: Any]],

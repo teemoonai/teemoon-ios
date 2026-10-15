@@ -1508,9 +1508,14 @@ extension LiteRTLiveTests {
         }
         try #require(chunks.value > 0)
         isBackground.value = true                       // the app goes to background
-        let output = try await turn.value
+        // An abandoned turn ends as an INTERRUPTION (CancellationError), not an answer: ChatGeneration reads exactly
+        // that as "cut off from below" and records the thread for the re-ask on return. It returned the drained
+        // partial as a normal answer until 2026-10-04, so the re-ask never fired on a phone.
+        var interrupted = false
+        do { _ = try await turn.value } catch is CancellationError { interrupted = true }
         let elapsed = start.duration(to: .now)
-        print("[background] abandoned after \(elapsed) with \(output.content.count) chars")
+        print("[background] abandoned after \(elapsed), interrupted=\(interrupted)")
+        #expect(interrupted, "a backgrounded turn must end as an interruption, not as an answer")
         // Abandoned, not awaited: the poll fires within ~150 ms, so this returns
         // fast even though the (simulated-stuck) decode is still notionally running.
         #expect(elapsed < .seconds(10), "the turn did not abandon on backgrounding (\(elapsed))")

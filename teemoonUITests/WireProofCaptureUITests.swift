@@ -43,7 +43,14 @@ final class WireProofCaptureUITests: XCTestCase {
     /// near.ai's top E2EE flagship — the tier the wire proof is about. A
     /// proxied model would still encrypt in transit but is not the claim the
     /// site's callouts make about `X-Model-Pub-Key`.
-    private static let model = "z-ai/glm-5.2"
+    ///
+    /// From the runner's environment (`TEST_RUNNER_SITE_E2EE_MODEL`), which
+    /// teemoon-web's recapture script fills from its model registry: this was
+    /// a literal "z-ai/glm-5.2", and near.ai retiring 5.2 (2026-09-12) left the
+    /// rig shooting a model that no longer exists.
+    private static var model: String {
+        ProcessInfo.processInfo.environment["SITE_E2EE_MODEL"] ?? "z-ai/glm-5.3-flash"
+    }
 
     /// Short answer, obvious formatting, nothing to redact — and it must
     /// TRIGGER A WEB SEARCH.

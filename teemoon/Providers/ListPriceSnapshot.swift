@@ -2,7 +2,7 @@
 //  ListPriceSnapshot.swift
 //  teemoon
 //
-//  GENERATED from OpenRouter's public /api/v1/models on 2026-09-18 by the
+//  GENERATED from OpenRouter's public /api/v1/models on 2026-10-15 by the
 //  maintainers' release refresh — do not edit by hand; it is regenerated
 //  before every release.
 //
@@ -18,7 +18,7 @@ import Foundation
 
 enum ListPriceSnapshot {
 
-    static let snapshotDate = "2026-09-18"
+    static let snapshotDate = "2026-10-15"
 
     /// Vendor host → the namespace its ids live under below.
     static let hosts: [String: String] = [
@@ -31,36 +31,35 @@ enum ListPriceSnapshot {
 
     /// "namespace/model" → "$input/$output" per 1M tokens.
     static let prices: [String: String] = [
-        "anthropic/claude-3-haiku":                    "$0.25/$1.25",
         "anthropic/claude-fable-5":                    "$10.00/$50.00",
         "anthropic/claude-fable-5.1":                  "$10.00/$50.00",
         "anthropic/claude-haiku-4.5":                  "$1.00/$5.00",
-        "anthropic/claude-opus-4":                     "$15.00/$75.00",
+        "anthropic/claude-haiku-5.5":                  "$0.10/$0.50",
         "anthropic/claude-opus-4.1":                   "$15.00/$75.00",
         "anthropic/claude-opus-4.5":                   "$5.00/$25.00",
         "anthropic/claude-opus-4.6":                   "$5.00/$25.00",
         "anthropic/claude-opus-4.7":                   "$5.00/$25.00",
         "anthropic/claude-opus-4.8":                   "$5.00/$25.00",
         "anthropic/claude-opus-5":                     "$5.00/$25.00",
-        "anthropic/claude-sonnet-4":                   "$3.00/$15.00",
+        "anthropic/claude-opus-5.5":                   "$4.00/$20.00",
         "anthropic/claude-sonnet-4.5":                 "$3.00/$15.00",
         "anthropic/claude-sonnet-4.6":                 "$3.00/$15.00",
         "anthropic/claude-sonnet-5":                   "$2.00/$10.00",
+        "anthropic/claude-sonnet-5.5":                 "$2.00/$10.00",
         "deepseek/deepseek-chat":                      "$0.32/$0.89",
-        "deepseek/deepseek-chat-v3-0324":              "$0.25/$1.00",
+        "deepseek/deepseek-chat-v3-0324":              "$0.29/$1.14",
         "deepseek/deepseek-chat-v3.1":                 "$0.25/$0.95",
         "deepseek/deepseek-r1":                        "$0.70/$2.50",
         "deepseek/deepseek-r1-0528":                   "$0.50/$2.15",
-        "deepseek/deepseek-r1-distill-llama-70b":      "$0.80/$0.80",
         "deepseek/deepseek-v3.1-terminus":             "$0.27/$1.00",
-        "deepseek/deepseek-v3.2":                      "$0.27/$0.40",
+        "deepseek/deepseek-v3.2":                      "$0.26/$0.80",
         "deepseek/deepseek-v3.2-exp":                  "$0.27/$0.41",
-        "deepseek/deepseek-v4-flash":                  "$0.05/$0.09",
-        "deepseek/deepseek-v4-flash-0731":             "$0.07/$0.18",
+        "deepseek/deepseek-v4-flash":                  "$0.09/$0.18",
+        "deepseek/deepseek-v4-flash-0731":             "$0.02/$0.64",
         "deepseek/deepseek-v4-flash-vision-exp":       "$0.22/$0.65",
-        "deepseek/deepseek-v4-pro":                    "$0.57/$1.15",
-        "deepseek/deepseek-v4-pro-0813":               "$0.58/$1.73",
-        "deepseek/deepseek-v4.1-flash":                "$0.15/$0.60",
+        "deepseek/deepseek-v4-pro":                    "$0.41/$0.81",
+        "deepseek/deepseek-v4-pro-0813":               "$0.66/$1.98",
+        "deepseek/deepseek-v4.1-flash":                "$0.02/$0.72",
         "google/gemini-2.5-flash":                     "$0.30/$2.50",
         "google/gemini-2.5-flash-image":               "$0.30/$2.50",
         "google/gemini-2.5-flash-lite":                "$0.10/$0.40",
@@ -81,12 +80,14 @@ enum ListPriceSnapshot {
         "google/gemini-3.6-flash":                     "$0.75/$3.75",
         "google/gemini-3.7-flash":                     "$0.75/$3.75",
         "google/gemini-3.8-flash":                     "$0.75/$3.75",
+        "google/gemini-4-argon":                       "$2.00/$10.00",
+        "google/gemini-nano-banana-2.1":               "$1.50/$7.50",
         "google/gemma-2-27b-it":                       "$0.65/$0.65",
         "google/gemma-3-12b-it":                       "$0.05/$0.15",
         "google/gemma-3-27b-it":                       "$0.08/$0.45",
         "google/gemma-3-4b-it":                        "$0.05/$0.10",
         "google/gemma-4-26b-a4b-it":                   "$0.09/$0.30",
-        "google/gemma-4-31b-it":                       "$0.09/$0.34",
+        "google/gemma-4-31b-it":                       "$0.20/$0.40",
         "mistralai/codestral-2508":                    "$0.30/$0.90",
         "mistralai/devstral-2512":                     "$0.40/$2.00",
         "mistralai/ministral-14b-2512":                "$0.20/$0.20",
@@ -94,10 +95,12 @@ enum ListPriceSnapshot {
         "mistralai/ministral-8b-2512":                 "$0.15/$0.15",
         "mistralai/mistral-large":                     "$2.00/$6.00",
         "mistralai/mistral-large-2407":                "$2.00/$6.00",
+        "mistralai/mistral-large-2512":                "$0.50/$1.50",
+        "mistralai/mistral-large-4-0":                 "$0.68/$2.09",
         "mistralai/mistral-medium-3":                  "$0.40/$2.00",
         "mistralai/mistral-medium-3-5":                "$1.50/$7.50",
         "mistralai/mistral-medium-3.1":                "$0.40/$2.00",
-        "mistralai/mistral-nemo":                      "$0.02/$0.03",
+        "mistralai/mistral-nemo":                      "$0.03/$0.03",
         "mistralai/mistral-saba":                      "$0.20/$0.60",
         "mistralai/mistral-small-24b-instruct-2501":   "$0.05/$0.08",
         "mistralai/mistral-small-2603":                "$0.15/$0.60",
@@ -144,17 +147,23 @@ enum ListPriceSnapshot {
         "openai/gpt-5.5-pro":                          "$30.00/$180.00",
         "openai/gpt-5.6-luna":                         "$0.20/$1.20",
         "openai/gpt-5.6-luna-pro":                     "$0.20/$1.20",
-        "openai/gpt-5.6-sol":                          "$2.00/$10.00",
-        "openai/gpt-5.6-sol-pro":                      "$2.00/$10.00",
+        "openai/gpt-5.6-sol":                          "$4.00/$20.00",
+        "openai/gpt-5.6-sol-pro":                      "$4.00/$20.00",
         "openai/gpt-5.6-terra":                        "$2.00/$12.00",
         "openai/gpt-5.6-terra-pro":                    "$2.00/$12.00",
         "openai/gpt-6-astra":                          "$10.00/$50.00",
         "openai/gpt-6-astra-pro":                      "$10.00/$50.00",
+        "openai/gpt-6-luna":                           "$0.10/$0.50",
+        "openai/gpt-6-luna-pro":                       "$0.10/$0.50",
+        "openai/gpt-6-sol":                            "$2.00/$10.00",
+        "openai/gpt-6-sol-pro":                        "$2.00/$10.00",
+        "openai/gpt-6.1-sol":                          "$2.00/$10.00",
+        "openai/gpt-6.1-sol-pro":                      "$2.00/$10.00",
         "openai/gpt-audio":                            "$2.50/$10.00",
         "openai/gpt-audio-mini":                       "$0.60/$2.40",
         "openai/gpt-chat-latest":                      "$5.00/$30.00",
         "openai/gpt-oss-120b":                         "$0.15/$0.60",
-        "openai/gpt-oss-20b":                          "$0.03/$0.13",
+        "openai/gpt-oss-20b":                          "$0.02/$0.09",
         "openai/gpt-oss-safeguard-20b":                "$0.08/$0.30",
         "openai/o1":                                   "$15.00/$60.00",
         "openai/o1-pro":                               "$150.00/$600.00",

@@ -420,4 +420,28 @@ final class DownloadLifecycleUITests: XCTestCase {
             NSPredicate(format: "label CONTAINS[c] 'integrity'")).firstMatch
         XCTAssertTrue(integrity.waitForExistence(timeout: 5), "no integrity-failure caption on the row")
     }
+
+    /// G1: a phone model downloaded from Where finishes, and is the chat's model — the row leaves "downloading", the
+    /// chip names it and no longer says "not downloaded". The Hub is a local fake_hub.py serving the real
+    /// E2B file (its checksum IS the pin) unthrottled from this Mac: `TEST_RUNNER_UITEST_FAKE_HUB=http://127.0.0.1:8765`.
+    func testAPhoneModelDownloadFinishesAndIsTheChatsModel() throws {
+        guard let hub = ProcessInfo.processInfo.environment["UITEST_FAKE_HUB"] else { throw XCTSkip("needs fake_hub.py serving the real E2B file (UITEST_FAKE_HUB)") }
+        let app = launch(environment: ["UITEST_HUB_BASE_URL": hub], clean: true)
+        openWhere(app)
+        let start = resumeRow(app)
+        XCTAssertTrue(start.waitForExistence(timeout: 10), "where offers no download for the phone model")
+        start.tap()
+        // a few seconds from localhost; verifying 2.4 GB takes a few more
+        let chip = app.buttons["chat.whereChip"].firstMatch
+        let done = NSPredicate { _, _ in
+            let l = chip.label.lowercased()
+            return chip.exists && l.contains("gemma") && !l.contains("downloading") && !l.contains("not downloaded")
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: done, object: nil)], timeout: 240), .completed,
+                       "the download never finished into the chat's model (chip: \(chip.label))")
+        openWhere(app)
+        XCTAssertFalse(resumeRow(app).exists, "the row still offers the download")
+        XCTAssertTrue(readyRow(app).exists, "the finished model has no ready row")
+        shot("30-download-finished")
+    }
 }

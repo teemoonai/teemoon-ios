@@ -514,7 +514,29 @@ struct BraveWebSearchTool: Tool {
 
     // MARK: - Private fetch
 
-    private static let endpoint = "https://api.search.brave.com/res/v1/llm/context"
+    /// Brave's llm/context endpoint. A DEBUG `--uitesting` launch may point it at the
+    /// UI tests' embedded fake (`UITEST_BRAVE_ENDPOINT`, loopback only) so a search
+    /// and a key check run with no network and no real key — Android's journeys do the
+    /// same (seed_brave_endpoint). A shipping build cannot reach the override.
+    private static var endpoint: String {
+        #if DEBUG
+        let info = ProcessInfo.processInfo
+        if info.arguments.contains("--uitesting"),
+           let override = info.environment["UITEST_BRAVE_ENDPOINT"],
+           isLoopbackOverride(override) {
+            return override
+        }
+        #endif
+        return "https://api.search.brave.com/res/v1/llm/context"
+    }
+
+    /// The test override must PARSE to plain http on 127.0.0.1 with a port: a
+    /// prefix check passes `http://127.0.0.1:1@evil/`, whose host is `evil`.
+    static func isLoopbackOverride(_ string: String) -> Bool {
+        guard let c = URLComponents(string: string) else { return false }
+        return c.scheme == "http" && c.host == "127.0.0.1" && c.port != nil
+            && c.user == nil && c.password == nil
+    }
 
     private func fetchContext(for query: String, freshness: String? = nil, contextThresholdMode: String? = nil, count: Int? = nil) async throws -> String {
         guard var components = URLComponents(string: Self.endpoint) else {
@@ -611,8 +633,12 @@ struct BraveWebSearchTool: Tool {
                            requestBodyJSON: nil, messageHistory: nil,
                            responseBody: nil, underlyingError: nil)
         }
-        return context
+        // After the XML, so the pinned <source> bytes and parseSources are unchanged; the description alone is not
+        // followed by every host's model (BraveWebSearchToolTests).
+        return context + Self.citationAsk
     }
+
+    static let citationAsk = "\n\nWhen citing information from these sources, use a markdown link: [Page Title](url)."
 
     // MARK: - Context rendering
 

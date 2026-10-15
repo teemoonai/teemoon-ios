@@ -74,6 +74,8 @@ extension ChatGeneration {
                         timeToFirstToken: self.lastRequestDebugInfo?.timeToFirstToken,
                         thinkingTime: thought ?? self.lastRequestDebugInfo?.thinkingTime,
                         outputTokens: result.outputTokens ?? self.lastRequestDebugInfo?.outputTokens,
+                        engineTimings: result.engineTimings,
+                        onDeviceRun: result.onDeviceRun,
                         promptBudget: result.promptBudget ?? self.lastRequestDebugInfo?.promptBudget,
                         isE2EEActive: result.isE2EEActive,
                         teeVerification: result.teeVerification ?? self.lastRequestDebugInfo?.teeVerification
@@ -178,6 +180,8 @@ extension ChatGeneration {
                 url: existing.url,
                 requestHeaders: existing.requestHeaders,
                 requestBodyJSON: existing.requestBodyJSON,
+                // Carry every field: a dropped one defaults to nil silently.
+                sealedBodyJSON: existing.sealedBodyJSON,
                 responseBody: output.isEmpty ? nil : output,
                 toolCalls: finalToolCalls.isEmpty ? existing.toolCalls : finalToolCalls,
                 threadID: existing.threadID,
@@ -185,6 +189,8 @@ extension ChatGeneration {
                 timeToFirstToken: ttft,
                 thinkingTime: existing.thinkingTime,
                 outputTokens: existing.outputTokens ?? (output.isEmpty ? nil : output.count / 4),
+                engineTimings: existing.engineTimings,
+                onDeviceRun: existing.onDeviceRun,
                 promptBudget: existing.promptBudget,
                 isE2EEActive: landed?.isE2EEActive ?? existing.isE2EEActive,
                 teeVerification: landed?.teeVerification ?? existing.teeVerification

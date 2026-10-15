@@ -148,6 +148,41 @@ struct ChatGenerationTests {
         #expect(llm.lastError == nil)
     }
 
+    /// The developer card under E2EE shows what the wire saw. `finishGeneration`
+    /// rebuilds the debug info field by field, and from the 234442b extraction
+    /// until 7ca0b46 it dropped `sealedBodyJSON` — the field defaults to nil, so
+    /// nothing flagged it, and every FINISHED E2EE turn printed the pre-seal
+    /// plaintext under "request body encrypted". The wire itself stayed sealed.
+    @Test @MainActor
+    func finishedE2EETurnKeepsTheSealedBody() async throws {
+        let (thread, container) = try makeThread(userMessage: "hello")
+        defer { withExtendedLifetime(container) {} }
+
+        var report = TurnReport()
+        report.requestBodyJSON = #"{"messages":"plaintext"}"#
+        report.sealedBodyJSON = #"{"messages":"ciphertext"}"#
+        report.isE2EEActive = true
+        let transport = ScriptedTransport(turns: [TurnOutput(content: "sealed reply", report: report)])
+        let llm = ChatGeneration()
+        llm.makeLanguageModel = { _, _, prior, _, events in
+            TransportLanguageModel(transport: transport, priorMessages: prior, events: events)
+        }
+
+        var provider = Provider.braveAnswers
+        provider.endpoint = "https://api.example.com/v1"
+        _ = await llm.generate(
+            provider: provider,
+            thread: thread,
+            systemPrompt: "",
+            groundingAPIKey: nil,
+            apiKey: "sk-test"
+        )
+        #expect(llm.lastError == nil)
+        #expect(llm.lastRequestDebugInfo?.totalDuration != nil, "finishGeneration must have run")
+        #expect(llm.lastRequestDebugInfo?.sealedBodyJSON == report.sealedBodyJSON)
+        #expect(llm.lastRequestDebugInfo?.requestBodyJSON == report.requestBodyJSON)
+    }
+
     /// Stop pressed while nothing has arrived. `stop()` used to set a flag the
     /// consume loop read on the NEXT snapshot; with none coming — engine load,
     /// prefill, a decode queued behind an abandoned one — `running` never
@@ -227,6 +262,27 @@ struct ChatGenerationTests {
         _ = await turn.value
         #expect(stopped.interruptedThreadID == nil, "a user stop must not be auto-resumed")
         #expect(vm.interruptedUserMessage(in: thread, llm: stopped) == nil)
+    }
+
+    /// The cut-off reply is SAVED before the app returns — what streamed before iOS revoked the GPU lands as the
+    /// assistant message — and the question must still be handed back for the re-ask (iPhone 16 Pro, 2026-10-04:
+    /// the essay stopped at its title line and nothing re-asked, because the last message was no longer the user's).
+    @Test @MainActor
+    func anInterruptedTurnWithItsPartialReplySavedIsStillReasked() async throws {
+        let (thread, container) = try makeThread(userMessage: "write an essay")
+        defer { withExtendedLifetime(container) {} }
+        var provider = Provider.braveAnswers
+        provider.endpoint = "https://api.example.com/v1"
+        let llm = ChatGeneration()
+        llm.makeLanguageModel = { _, _, prior, _, events in
+            TransportLanguageModel(transport: InterruptedTransport(), priorMessages: prior, events: events)
+        }
+        _ = await llm.generate(provider: provider, thread: thread, systemPrompt: "",
+                               groundingAPIKey: nil, apiKey: "sk-test")
+        container.mainContext.insert(Message(role: .assistant, content: "The Humble Tuber: A History of the Potato", thread: thread))
+        try container.mainContext.save()
+        let again = ChatViewModel().interruptedUserMessage(in: thread, llm: llm)
+        #expect(again?.role == .user && again?.content == "write an essay", "the question behind a saved partial was not re-asked")
     }
 
     /// An empty reply with no error is invisible: the VM will not persist a

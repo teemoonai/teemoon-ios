@@ -82,8 +82,11 @@ final class LocalProviderUITests: XCTestCase {
         XCTAssertTrue(block.waitForExistence(timeout: 20))
         block.tap()
 
+        // Same 20 s as the title block above. On a loaded hosted runner the tap
+        // synthesised at t=60 s once (2026-09-19) and 10 s was not enough after
+        // it; the wait is a timeout, so a fast machine still finishes in 14 s.
         let hero = app.descendants(matching: .any)["attestation.selfHosted.hero"].firstMatch
-        XCTAssertTrue(hero.waitForExistence(timeout: 10),
+        XCTAssertTrue(hero.waitForExistence(timeout: 20),
                       "the self-hosted sheet should lead with its own hero, not the ladder")
 
         // No proof to go deeper into, so no depth control.

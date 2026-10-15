@@ -146,7 +146,7 @@ enum ProductE2E {
     }
 
     static func launchOllama(
-        endpoint: String = "https://ringzero.tailnet-name.ts.net:11434/v1",
+        endpoint: String = ProcessInfo.processInfo.environment["TEEMOON_OLLAMA_ENDPOINT"] ?? "https://ringzero.tailnet-name.ts.net:11434/v1",
         model: String = "gemma4:e4b",
         grounding: Bool = false
     ) -> XCUIApplication {

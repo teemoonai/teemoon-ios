@@ -39,45 +39,21 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         XCTAssertTrue(closeSheet.waitForExistence(timeout: 5), "close button missing")
         closeSheet.tap()
 
-        // 2. Switch the model to DeepSeek V4 Flash through the real Settings flow.
-        let gear = app.buttons["chat.settings"].firstMatch
-        XCTAssertTrue(gear.waitForExistence(timeout: 5), "settings gear missing")
-        gear.tap()
-        let providersRow = app.buttons["settings.providers"].exists
-            ? app.buttons["settings.providers"].firstMatch
-            : app.staticTexts["providers"].firstMatch
-        XCTAssertTrue(providersRow.waitForExistence(timeout: 5), "settings: providers row missing")
-        providersRow.tap()
-        // Rows are labeled by MODEL display name; editing is a leading swipe.
-        let nearRow = app.staticTexts["near.ai GLM 5.3 Flash"].firstMatch
-        XCTAssertTrue(nearRow.waitForExistence(timeout: 5), "providers: near.ai GLM 5.3 Flash row missing")
-        nearRow.swipeRight()
-        let editButton = app.buttons["edit"].firstMatch
-        XCTAssertTrue(editButton.waitForExistence(timeout: 5), "edit swipe action missing")
-        editButton.tap()
-        let modelField = app.textFields["model"].firstMatch
-        XCTAssertTrue(modelField.waitForExistence(timeout: 5), "edit form: model field missing")
-        modelField.tap()
-        // Clear the field, then type the new id.
-        let current = (modelField.value as? String) ?? ""
-        modelField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 5))
-        modelField.typeText("deepseek-ai/DeepSeek-V4-Flash")
-        takeShot(app, name: "2-model-field-51")
-        let save = app.buttons["save"].firstMatch
-        XCTAssertTrue(save.waitForExistence(timeout: 5), "save button missing")
-        save.tap()
-        // Discriminating check: the save must actually land in the store —
-        // the providers row now reads GLM 5.1. If this fails, the bug is in
-        // the edit/save wiring, not in attestation invalidation.
-        let nearRow51 = app.staticTexts["near.ai GLM 5.1"].firstMatch
-        XCTAssertTrue(nearRow51.waitForExistence(timeout: 5),
-                      "SAVE DID NOT LAND: providers row still shows the old model")
-        takeShot(app, name: "2b-row-shows-51")
-        // Back out of settings to the chat.
-        let backOut = app.navigationBars.buttons.firstMatch
-        if backOut.exists { backOut.tap() }
-        if app.buttons["done"].firstMatch.exists { app.buttons["done"].firstMatch.tap() }
-        app.swipeDown(velocity: .fast)   // dismiss settings sheet if still up
+        // 2. Switch the model through where → cloud → browse near.ai → search → pick (settings has no providers list
+        //    to edit since places & keys; the where sheet is the door a user takes)
+        ProductE2E.whereChip(app).tap()
+        app.buttons["cloud"].firstMatch.tap()
+        let browse = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "open models in enclaves")).firstMatch
+        for _ in 0..<3 where !browse.waitForExistence(timeout: 3) { app.swipeUp() }
+        XCTAssertTrue(browse.exists, "no near.ai row to browse from")
+        browse.tap()
+        let search = app.searchFields["search models"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 20), "the model browser did not open")
+        search.tap(); search.typeText("qwen 3.6")
+        let pick = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "qwen 3.6")).firstMatch
+        XCTAssertTrue(pick.waitForExistence(timeout: 30), "the browser offers no Qwen 3.6")
+        pick.tap()
+        takeShot(app, name: "2-switched")
 
         // 3. Reopen the attestation sheet: it must speak about DeepSeek V4 Flash and
         //    must NEVER mention GLM-5.2 again — poll for 12 s, because the
@@ -89,7 +65,7 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         let mentions52 = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS[c] %@", "glm-5.3"))
         let mentions51 = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "deepseek"))
+            NSPredicate(format: "label CONTAINS[c] %@", "qwen"))
         let deadline = Date().addingTimeInterval(12)
         var sawOldModel = false
         while Date() < deadline {
@@ -101,9 +77,9 @@ final class ModelSwitchAttestationUITests: XCTestCase {
             _ = mentions51.firstMatch.waitForExistence(timeout: 1)
         }
         XCTAssertFalse(sawOldModel,
-            "STALE ATTESTATION: sheet mentioned GLM-5.3 after switching to DeepSeek V4 Flash")
+            "STALE ATTESTATION: sheet mentioned GLM-5.3 after switching to Qwen 3.6")
         XCTAssertTrue(mentions51.firstMatch.exists,
-            "sheet never started speaking about DeepSeek V4 Flash")
+            "sheet never started speaking about Qwen 3.6")
         takeShot(app, name: "4-final")
     }
 
@@ -173,10 +149,10 @@ final class ModelSwitchAttestationUITests: XCTestCase {
     /// (and vice versa). The near.ai node's compose-manager action log holds
     /// multiple models' compose_up entries; `latestComposeUp` takes the LAST one
     /// regardless of model, so the wrong model-layer YAML → wrong artifact/name.
-    func testDeepSeekFlashDoesNotShowQwen() throws {
+    func testGlm53FlashSheetNamesOnlyGlm() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--uitesting"]
-        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "deepseek-ai/DeepSeek-V4-Flash"
+        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "z-ai/glm-5.3-flash"   // DeepSeek V4 Flash left near.ai (2026-10)
         app.launch()
 
         let chip = ProductE2E.titleBlock(app)
@@ -193,30 +169,28 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         }
         while Date() < deadline {
             let now = dump().lowercased()
-            if now.contains("deepseek") || now.contains("qwen") { break }
+            if now.contains("glm") || now.contains("qwen") { break }
             _ = app.staticTexts.firstMatch.waitForExistence(timeout: 1)
         }
         sleep(3)
         let labels = dump()
         let att = XCTAttachment(string: labels)
         att.name = "STATIC-TEXTS"; att.lifetime = .keepAlways; add(att)
-        takeShot(app, name: "deepseek-flash-sheet")
+        takeShot(app, name: "glm-flash-sheet")
 
         let lower = labels.lowercased()
-        XCTAssertTrue(lower.contains("deepseek"),
-                      "sheet never named DeepSeek (labels:\n\(labels))")
+        XCTAssertTrue(lower.contains("glm"),
+                      "sheet never named GLM (labels:\n\(labels))")
         XCTAssertFalse(lower.contains("qwen"),
-                       "BUG REPRODUCED: DeepSeek Flash sheet is branded Qwen (labels:\n\(labels))")
+                       "the GLM 5.3 Flash sheet names a Qwen (labels:\n\(labels))")
     }
 
-    /// Verification for the reused/combined-node scoping fix: Gemma is served by
-    /// vLLM on a node it SHARES with DeepSeek/Qwen (SGLang). Before scoping, the
-    /// Gemma sheet surfaced the co-located `lmsysorg/sglang` server. The sheet
-    /// must now render Gemma's own `vllm/vllm-openai` engine image and NOT sglang.
-    func testGemmaShowsVllmImageNotSglang() throws {
+    /// The combined-node scoping fix, on today's fleet: Qwen3.8-27B's expert sheet shows ITS serving engine and none
+    /// of the other own-fleet models. (Written for Gemma 4 31B, which near.ai served beside DeepSeek/Qwen until 2026-10.)
+    func testQwen38SheetShowsItsOwnImage() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--uitesting"]
-        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "google/gemma-4-31B-it"
+        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "Qwen/Qwen3.8-27B"   // Gemma 4 31B left near.ai (2026-10)
         app.launch()
 
         let chip = ProductE2E.titleBlock(app)
@@ -225,11 +199,11 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["who can read this?"].waitForExistence(timeout: 5),
                       "attestation sheet did not open")
 
-        // Wait for the live record to load and name Gemma in the hero.
+        // Wait for the live record to load and name the model in the hero.
         let hero = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "gemma")).firstMatch
+            NSPredicate(format: "label CONTAINS[c] %@", "27b")).firstMatch
         XCTAssertTrue(hero.waitForExistence(timeout: 45),
-                      "attestation never loaded / never named Gemma (network / model id?)")
+                      "attestation never loaded / never named Qwen3.8-27B (network / model id?)")
 
         // Expert rung exposes the per-image known-code rows.
         let expert = app.buttons["expert"].firstMatch
@@ -244,29 +218,39 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         }
         // Scroll the sheet so every image row is realized into the tree.
         var seen = haystack()
-        takeShot(app, name: "gemma-0-top")
+        takeShot(app, name: "qwen38-0-top")
         for i in 1...8 {
             app.swipeUp(velocity: .slow); sleep(1)
             seen += "\n" + haystack()
-            takeShot(app, name: "gemma-\(i)")
+            takeShot(app, name: "qwen38-\(i)")
         }
 
         let tree = XCTAttachment(string: app.debugDescription)
         tree.name = "ACCESSIBILITY-TREE"; tree.lifetime = .keepAlways; add(tree)
 
-        XCTAssertTrue(seen.contains("vllm"),
-                      "Gemma sheet never showed a vLLM image row (tree:\n\(seen))")
-        XCTAssertFalse(seen.contains("sglang"),
-                       "BUG: Gemma sheet still surfaces the co-located SGLang server (tree:\n\(seen))")
+        XCTAssertTrue(seen.contains("vllm") || seen.contains("sglang"),
+                      "the Qwen3.8 sheet shows no serving engine (tree:\n\(seen))")
+        // ABOVE "the running recipe" only: the recipe section lists every image the signed recipe declares and the
+        // audits of them — fleet-wide by design, so other models' services are named there legitimately. The
+        // tokens are ones a hex digest cannot contain ("35b" matched a gpu signing address).
+        let scoped = seen.components(separatedBy: "the running recipe").first ?? seen
+        let other = ["glm", "qwen3.6", "35b-a3b"].first { scoped.contains($0) }
+        var context = ""
+        if let other, let r = scoped.range(of: other) {
+            let lo = scoped.index(r.lowerBound, offsetBy: -160, limitedBy: scoped.startIndex) ?? scoped.startIndex
+            let hi = scoped.index(r.upperBound, offsetBy: 160, limitedBy: scoped.endIndex) ?? scoped.endIndex
+            context = String(scoped[lo..<hi])
+        }
+        XCTAssertNil(other, "the Qwen3.8 sheet names another model of the fleet — \(other ?? ""): …\(context)…")
     }
 
-    /// Counterpart to the Gemma test: Qwen 3.6-27B is SGLang-served on the SAME
+    /// Counterpart to the Qwen3.8 test: Qwen 3.6 is SGLang-served on the SAME
     /// combined node as Gemma (vLLM) and DeepSeek. The sheet must still show the
     /// sglang engine and must NOT surface the co-located Gemma vLLM image.
     func testQwen36ShowsSglangNotVllm() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--uitesting"]
-        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "Qwen/Qwen3.6-27B-FP8"
+        app.launchEnvironment["UITEST_SEED_NEARAI_MODEL"] = "Qwen/Qwen3.6-35B-A3B-FP8"   // the 27B left near.ai (2026-10)
         app.launch()
 
         let chip = ProductE2E.titleBlock(app)
@@ -296,10 +280,16 @@ final class ModelSwitchAttestationUITests: XCTestCase {
         let tree = XCTAttachment(string: app.debugDescription)
         tree.name = "ACCESSIBILITY-TREE"; tree.lifetime = .keepAlways; add(tree)
 
-        XCTAssertTrue(seen.contains("sglang"),
-                      "Qwen sheet never showed an sglang engine row (tree:\n\(seen))")
-        XCTAssertFalse(seen.contains("vllm-openai"),
-                       "BUG: Qwen sheet surfaced the co-located Gemma vLLM image (tree:\n\(seen))")
+        // The name is history: the 27B this was written for ran sglang beside a co-located Gemma vLLM, and the bug was
+        // the sheet showing Gemma's engine. Both left near.ai (2026-10); the 35B-A3B that replaced them is served by
+        // vLLM itself — the signed recipe's "handles your message" names vllm/vllm-openai as what runs the model — so
+        // "vllm" is now the truthful answer, and the check is the one the 3.8 case makes: an engine is named, and
+        // nothing above the fleet-wide recipe names another model.
+        XCTAssertTrue(seen.contains("vllm") || seen.contains("sglang"),
+                      "the Qwen3.6 sheet shows no serving engine (tree:\n\(seen))")
+        let scoped = seen.components(separatedBy: "the running recipe").first ?? seen
+        let other = ["glm", "qwen3.8", "27b"].first { scoped.contains($0) }
+        XCTAssertNil(other, "the Qwen3.6 sheet names another fleet model (\(other ?? "")) above the recipe (tree:\n\(scoped))")
     }
 
     /// Capture-only: GLM-5.1 runs a `:local` in-enclave build patched from a

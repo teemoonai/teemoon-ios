@@ -355,7 +355,7 @@ final class ChatGeneration {
             toolCallsBag: toolCallsBag, resultBag: resultBag
         )
 
-        logger.debug("Done — \(snapshotCount) snapshots, output='\(self.output.prefix(120))'")
+        logger.debug("Done — \(snapshotCount, privacy: .public) snapshots, output \(self.output.count, privacy: .public) chars")
         return output
     }
 }

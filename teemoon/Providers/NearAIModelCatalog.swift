@@ -137,7 +137,7 @@ enum NearAIModelCatalog {
         if l.contains("-max") || l.contains(".max") { return .proxied }
         // Vendor namespaces near.ai only proxies. `deepseek/…` is proxied,
         // `deepseek-ai/…` is a near.ai node — keep the Python mirror in step.
-        if l.hasPrefix("x-ai/") || l.hasPrefix("deepseek/") { return .proxied }
+        if l.hasPrefix("x-ai/") || l.hasPrefix("deepseek/") || l.hasPrefix("typesafe/") { return .proxied }
         return .teeOwn
     }
 

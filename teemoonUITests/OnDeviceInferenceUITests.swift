@@ -30,9 +30,9 @@ final class OnDeviceInferenceUITests: XCTestCase {
 
     override func setUp() { continueAfterFailure = false }
 
-    private func launchSeeded() -> XCUIApplication {
+    private func launchSeeded(developerMode: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
+        app.launchArguments = ["--uitesting"] + (developerMode ? ["-developerModeEnabled", "YES"] : [])
         app.launchEnvironment["UITEST_SEED_ONDEVICE_MODEL"] = Self.model
         // native.log is read after the run. TEEMOON_SPECULATIVE is forwarded
         // only when the runner has it (the benchmark's baseline arm sets "0");
@@ -192,10 +192,15 @@ final class OnDeviceInferenceUITests: XCTestCase {
 
     /// Plain chat must stay fast and must NOT drag in the tool machinery.
     func testPlainChatAnswersWithoutSearching() throws {
-        let app = launchSeeded()
+        // developer mode ON: the assertion reads the debug card, which `ask` documents as drawn only then — the test
+        // passed only on a phone whose owner happened to leave developer mode on
+        let app = launchSeeded(developerMode: true)
         let card = ask(app, "Say hello in exactly one word.", timeout: 120)
         print("[uitest] plain-chat debug card: \(card)")
-        XCTAssertFalse(card.isEmpty, "no debug card content")
+        // What the case is about: an answer, and no search. The debug card is a bonus (see `ask`): it is also gated on
+        // a per-thread toggle, so asserting it made this pass or fail by the phone's state, not the app's behaviour.
+        XCTAssertTrue(visibleText(app).lowercased().contains("hello"), "no answer on screen")
+        XCTAssertFalse(ProductE2E.sourcesChip(app).exists, "a plain greeting searched the web")
     }
 }
 

@@ -225,17 +225,14 @@ struct ModelCatalogTests {
     /// The incident family regressed a second way on 2026-08-31: the fleet
     /// refresh dropped the undated `deepseek-v4-flash` and `deepseek-v4-pro`
     /// keys, so the fallback had nothing to inherit from and both dated rows
-    /// went blank again for a month. Those ids are now keyed in full, and the
-    /// first two expectations pin that they never depend on an undated twin.
+    /// went blank again for a month. Those dated ids were keyed in full until
+    /// Fireworks took them off serverless (2026-10-15); a dated id that is
+    /// still served must be keyed in full the same way, never left to inherit.
     @Test func aDatedSnapshotInheritsItsFamilysPrice() {
-        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/deepseek-v4-flash-0731")
-                == "$0.22/$0.66")
-        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/deepseek-v4-pro-0813")
-                == "$1.32/$3.96")
-        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/glm-5p2-0731")
+        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/glm-5p3-0731")
                 == "$1.40/$4.40")
         // Longer date forms too — Fireworks has used both.
-        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/glm-5p2-20260731")
+        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/glm-5p3-20260731")
                 == "$1.40/$4.40")
         // A dated snapshot of something NOT in the table stays blank. The
         // stripping must not become a way to borrow a neighbour's number.
@@ -470,7 +467,9 @@ struct FireworksAdapterTests {
         #expect(kimi.displayName == "Kimi K2.6")
         #expect(kimi.vendor == "Moonshot")
         #expect(kimi.contextWindow == "262k")
-        #expect(kimi.price == "$0.95/$4.00")     // the one shipped field: no pricing API
+        #expect(kimi.price == "")                // off serverless 2026-10-15: no row, no borrowed number
+        let minimax = try #require(models.first { $0.id == "accounts/fireworks/models/minimax-m3" })
+        #expect(minimax.price == "$0.30/$1.20")  // the one shipped field: no pricing API
     }
 
     /// Capabilities are MODELED, not guessed: gpt-oss-20b reports no tool

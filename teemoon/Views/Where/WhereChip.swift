@@ -287,7 +287,13 @@ struct WhereChip: View {
     }
 
 
-    private var accessibilityLabel: String {
+    private var accessibilityLabel: String { Self.accessibilityLabel(for: provider) }
+
+    /// What VoiceOver says for the chip. Static so the `Menu` ChatView wraps the
+    /// chip in can say it too: the Menu is the element VoiceOver lands on, and a
+    /// label set on its content label does not travel up to it — the system audit
+    /// found the chip announced as an unnamed button (Android's I7 port, 2026-10-04).
+    static func accessibilityLabel(for provider: Provider?) -> String {
         guard let provider else { return "choose where" }
         return "\(WhereProviderPresentation.modelLabel(for: provider)), \(WhereProviderPresentation.placeCaption(for: provider))"
     }

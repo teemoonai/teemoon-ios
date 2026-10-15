@@ -60,8 +60,8 @@ struct LocalLanguageModel: LanguageModel {
 
     /// Deliberately far below what a hosted model gets.
     ///
-    /// Every token is decoded serially on the phone's GPU at ~82 tok/s, so
-    /// 2048 tokens is ~25 seconds of work — per round, and with tool rounds that
+    /// Every token is decoded serially on the phone's GPU at ~40–60 tok/s, so
+    /// 2048 tokens is ~40 seconds of work — per round, and with tool rounds that
     /// compounds into minutes of saturated GPU: not merely slow, but hot enough
     /// to take Wi-Fi and the app down with it.
     ///

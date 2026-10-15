@@ -115,6 +115,57 @@ final class TranscriptHandoffTests: XCTestCase {
         return nil
     }
 
+    // MARK: - The turn-start move
+
+    /// The reserve pushing the end down at a send is ONE eased glide, and the
+    /// throttled pin does not re-issue it. Device trace 2026-10-07 (iPhone 16
+    /// Pro, send into a long thread): the 475pt move ran as seven 120ms linear
+    /// glides, one restarted at every 40ms pin because `shouldRetarget` keys
+    /// on the distance LEFT — velocity 3950, 2550, 1700, 1100, 700, 480, 300
+    /// pt/s over 400ms, an exponential approach with a kink at each restart.
+    /// Reported as "looks 30fps". A wrap still takes the linear glide.
+    ///
+    /// The stream is mounted once per turn and never re-pushed, so the end
+    /// cannot be moved from here; the offset is moved instead. The pin sees
+    /// only the delta between the two.
+    func testATurnStartMoveIsOneEasedGlideTheThrottledPinDoesNotRestart() {
+        let existing = rows(20)
+        let (window, _, collection) =
+            host(transcript(items: existing, generating: true, interrupted: false, streaming: true))
+        // The display link never fires here, so the open's own glide stays
+        // in flight: outlive it and stop it, then arrive at the end.
+        Thread.sleep(forTimeInterval: 0.3)
+        collection.abandonGlide()
+        collection.contentOffset.y = collection.maxContentOffsetY
+        settle(window)
+        XCTAssertNil(collection.glide)
+
+        // A reserve's worth from the end.
+        collection.contentOffset.y = collection.maxContentOffsetY - 475
+        collection.setNeedsLayout()
+        settle(window, passes: 1)
+        guard let started = collection.glide else { return XCTFail("the move did not glide") }
+        XCTAssertTrue(started.eased, "a reserve-sized move must ease")
+        XCTAssertEqual(started.duration, PinningCollectionView.jumpGlideDuration)
+        XCTAssertEqual(started.to, collection.maxContentOffsetY, accuracy: 0.5)
+
+        // Past the 40ms pin floor, the next passes must leave that glide alone.
+        Thread.sleep(forTimeInterval: 0.05)
+        collection.setNeedsLayout()
+        settle(window, passes: 2)
+        XCTAssertEqual(collection.glide, started, "the throttled pin re-issued the glide")
+
+        // A wrap is still the linear 120ms glide.
+        Thread.sleep(forTimeInterval: 0.3)
+        collection.abandonGlide()
+        collection.contentOffset.y = collection.maxContentOffsetY - 23
+        collection.setNeedsLayout()
+        settle(window, passes: 1)
+        guard let wrap = collection.glide else { return XCTFail("the wrap did not glide") }
+        XCTAssertFalse(wrap.eased)
+        XCTAssertEqual(wrap.duration, PinningCollectionView.followGlideDuration)
+    }
+
     // MARK: - The regression
 
     /// A reader parked in the HISTORY — above the answer being written —

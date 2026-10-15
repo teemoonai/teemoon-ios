@@ -126,6 +126,14 @@ struct ContentView: View {
             // UI-test seeding: boot straight into a configured near.ai provider
             // so end-to-end tests can drive the real attestation flow without
             // onboarding. DEBUG-only, gated on --uitesting.
+            // A whole multi-tier setup, for capture rigs (UITestSetupSeed.swift).
+            if isUITesting,
+               !Self.didSeedForUITests,
+               let json = ProcessInfo.processInfo.environment["UITEST_SEED_SETUP"],
+               let setup = UITestSetupSeed.parse(json),
+               setup.apply(to: providerStore, presetLookup: { Self.seedPresets[$0.lowercased()] }) {
+                Self.didSeedForUITests = true
+            }
             if isUITesting,
                !Self.didSeedForUITests {
                 let env = ProcessInfo.processInfo.environment
@@ -209,8 +217,14 @@ struct ContentView: View {
                 let model = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MODEL"] ?? "local-model"
                 os_log(.error, "[uitest] seeding LOCAL provider endpoint=%{public}@ model=%{public}@",
                        endpoint, model)
-                var seeded = Provider(name: "local", endpoint: endpoint, model: model,
-                                      requiresAPIKey: false)
+                // B4: a label naming a vendor ("Fireworks") is how the error card finds its console
+                var seeded = Provider(name: ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_NAME"] ?? "local",
+                                      endpoint: endpoint, model: model, requiresAPIKey: false)
+                // B9: a server that answers one question at a time, as Brave
+                // Answers' preset does — the same `maxMessages` path, on the fake.
+                if let max = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MAX_MESSAGES"].flatMap(Int.init) {
+                    seeded.maxMessages = max
+                }
                 // A second equipped model on the same endpoint, so Where has two
                 // rows a test can switch between without a second server.
                 if let other = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MODEL_B"],
@@ -257,6 +271,30 @@ struct ContentView: View {
                 } else {
                     os_log(.error, "[uitest] no host-file brave grounding key")
                 }
+            }
+            // A placeholder key, never a host file: for tests that point UITEST_BRAVE_ENDPOINT at the fake
+            if isUITesting, ProcessInfo.processInfo.environment["UITEST_SEED_GROUNDING"] == "placeholder" {
+                try? settings.connectBraveGrounding(apiKey: "uitest-brave-key")
+            }
+            if isUITesting {
+                // EVERY PRESET'S KEY SLOT that this launch did not seed starts empty. The provider store is ephemeral
+                // under --uitesting, but keys live in the Keychain BY ENDPOINT, and a signed simulator keeps it: a
+                // near.ai key an earlier test seeded made near.ai read "52 models" instead of "add key" in the next
+                // test's where sheet (2026-10-04).
+                let seededEndpoints = Set(providerStore.providers.map(\.endpoint))
+                for preset in Provider.presets where !seededEndpoints.contains(preset.endpoint) {
+                    try? providerStore.setCredential("", forEndpoint: preset.endpoint, legacyID: preset.id)
+                }
+            }
+            if isUITesting, !["1", "placeholder"].contains(ProcessInfo.processInfo.environment["UITEST_SEED_GROUNDING"] ?? "") {
+                // NOT seeding grounding means a test runs KEYLESS — and a signed
+                // simulator keeps its Keychain between runs, so a key an earlier
+                // grounded run stored answered here instead: the keyless offer
+                // tests failed on a second local run and passed on a fresh
+                // simulator (2026-10-04). Clear the slot, as the provider seed does.
+                try? Keychain.delete(for: BraveWebSearchTool.keychainKey)
+                settings.braveGroundingEnabled = false
+                os_log(.error, "[uitest] brave grounding cleared (not seeded)")
             }
             #endif
             // No first-run gate. An empty provider list is an ordinary state

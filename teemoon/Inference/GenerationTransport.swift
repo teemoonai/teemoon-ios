@@ -150,6 +150,13 @@ struct TurnReport: Sendable {
     var firstTokenAt: Date?
     var firstVisibleTokenAt: Date?
 
+    /// Prefill/decode figures the runtime timed itself. Never estimate prefill
+    /// from ttft: over HTTP that also holds the network and the server's queue.
+    var engineTimings: EngineTimings?
+
+    /// Backend, drafter, and this turn's engine load. Only LiteRT sets it.
+    var onDeviceRun: OnDeviceRun?
+
     /// Input-token accounting for this turn, when the server reported it.
     ///
     /// nil under E2EE — the wire carries hex ciphertext, roughly twice the

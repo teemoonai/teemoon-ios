@@ -69,6 +69,10 @@ struct LastRequestDebugInfo {
     /// working the whole time and the card had no way to say so.
     var thinkingTime: TimeInterval? = nil
     let outputTokens: Int?
+    /// The runtime's own prefill/decode timing, when it reported one.
+    var engineTimings: EngineTimings? = nil
+    /// What ran this turn on the device. nil for every turn that left the phone.
+    var onDeviceRun: OnDeviceRun? = nil
     /// Input-token accounting, when the server reported it. Surfaced so a server
     /// that silently discarded most of the prompt says so instead of leaving a
     /// confident wrong answer as the only evidence. See `PromptBudget`.
@@ -91,10 +95,91 @@ struct LastRequestDebugInfo {
     /// 1874 tok/s from a home Ollama box: 124 tokens, almost all of them reasoning,
     /// over the 0.1s it took to emit "Ho." The same numbers over the real window are
     /// about 27 tok/s, which is what that machine actually does.
+    ///
+    /// The window opens on a token that is already decoded, so it spans n − 1 of
+    /// them; dividing all n by it overstates short replies (5 tokens: +25%).
+    /// Decode only — prefill is ttft's figure, not this one's.
     var tokensPerSecond: Double? {
-        guard let tokens = outputTokens else { return nil }
+        if let rate = engineTimings?.decodeRate, rate > 0 { return rate }
+        guard let tokens = outputTokens, tokens > 1 else { return nil }
         let window = (thinkingTime ?? 0) + (generationTime ?? 0)
         guard window > 0 else { return nil }
-        return Double(tokens) / window
+        return Double(tokens - 1) / window
+    }
+
+    /// `prefill 2140tok · 1412tok/s` — only from a runtime that timed it, and not
+    /// on-device, where `speedLine` already carries the rate.
+    var prefillSummary: String? {
+        guard onDeviceRun == nil, let t = engineTimings, t.prefillTokens > 0, t.prefillRate > 0 else { return nil }
+        var parts = ["prefill \(t.prefillTokens)tok", String(format: "%.0ftok/s", t.prefillRate)]
+        if t.cachedTokens > 0 { parts.append("\(t.cachedTokens) cached") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The card's timing chain, in the order it happened:
+    /// `4.4s · ttft 3.4s · think 2.0s · gen 1.0s · 24tok · 52tok/s`.
+    ///
+    /// On-device the rate is not here: `speedLine` leads with it, and a figure
+    /// printed twice reads as two measurements. A cloud turn keeps this chain exactly.
+    var timingLine: String? {
+        let parts: [String] = [
+            totalDuration.map    { $0.debugFormatted },
+            timeToFirstToken.map { "ttft \($0.debugFormatted)" },
+            thinkingTime.map     { "think \($0.debugFormatted)" },
+            generationTime.map   { "gen \($0.debugFormatted)" },
+            outputTokens.map     { "\($0)tok" },
+            onDeviceRun == nil ? tokensPerSecond.map { String(format: "%.0ftok/s", $0) } : nil,
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// On-device only, and the card's FIRST row:
+    /// `decode 52tok/s · prefill 610tok/s · gpu + speculative`. A screenshot of
+    /// this card is how a phone's speed gets reported, so the two rates lead and
+    /// the backend says what produced them — `+ speculative` only when the drafter
+    /// was actually on. Prefill is the runtime's own figure or nothing; the decode
+    /// rate is the chain's. Android prints the same row from the same facts.
+    var speedLine: String? {
+        guard let run = onDeviceRun else { return nil }
+        var parts: [String] = []
+        if let rate = tokensPerSecond { parts.append(String(format: "decode %.0ftok/s", rate)) }
+        if let t = engineTimings, t.prefillRate > 0 { parts.append(String(format: "prefill %.0ftok/s", t.prefillRate)) }
+        parts.append(run.speculative ? "\(run.backend) + speculative" : run.backend)
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// What ran an on-device turn — the facts the debug card prints beside the
+/// runtime's own rates. Android prints the same row from the same two facts;
+/// keep the shape if you change it.
+struct OnDeviceRun: Sendable, Equatable {
+    /// The accelerator the engine was built on: `gpu`, `cpu` (`npu` on Android).
+    var backend: String
+    /// Whether the engine was built WITH speculative decoding — the bundle's
+    /// drafter present and nothing disabled it — not merely whether the file
+    /// could have supported it.
+    var speculative: Bool
+}
+
+/// Timing a runtime measured itself: LiteRT's benchmark info, llama.cpp's `timings`.
+struct EngineTimings: Sendable, Equatable {
+    /// Prompt tokens actually evaluated this turn — cache hits excluded.
+    var prefillTokens: Int
+    var prefillRate: Double
+    var decodeRate: Double
+    /// Prompt tokens reused from the server's cache (llama.cpp `cache_n`).
+    var cachedTokens: Int = 0
+}
+
+extension EngineTimings {
+    /// llama-server's `timings` (tools/server/server-task.cpp, `result_timings::to_json`).
+    init?(llamaCpp json: [String: Any]) {
+        func int(_ key: String) -> Int? { (json[key] as? NSNumber)?.intValue }
+        func double(_ key: String) -> Double? { (json[key] as? NSNumber)?.doubleValue }
+        guard let prefillTokens = int("prompt_n"),
+              let prefillRate = double("prompt_per_second"),
+              let decodeRate = double("predicted_per_second") else { return nil }
+        self.init(prefillTokens: prefillTokens, prefillRate: prefillRate,
+                  decodeRate: decodeRate, cachedTokens: int("cache_n") ?? 0)
     }
 }

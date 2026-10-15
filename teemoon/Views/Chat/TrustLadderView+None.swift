@@ -45,6 +45,9 @@ extension TrustLadderView {
                 Image(systemName: "lock.iphone")
                     .font(.system(size: 40, weight: .semibold))
                     .foregroundStyle(teeVerified)
+                    // decorative: the title under it says the same thing, and VoiceOver read the raw symbol
+                    // name ("lock.laptopcomputer") — the accessibility audit's finding, 2026-10-05
+                    .accessibilityHidden(true)
                 Text("nothing leaves this phone")
                     .font(.title.weight(.bold))
                     .fixedSize(horizontal: false, vertical: true)
@@ -110,6 +113,9 @@ extension TrustLadderView {
                 Image(systemName: "lock.laptopcomputer")
                     .font(.system(size: 40, weight: .semibold))
                     .foregroundStyle(teeVerified)
+                    // decorative: the title under it says the same thing, and VoiceOver read the raw symbol
+                    // name ("lock.laptopcomputer") — the accessibility audit's finding, 2026-10-05
+                    .accessibilityHidden(true)
                 Text("on your own machine")
                     .font(.title.weight(.bold))
                     .fixedSize(horizontal: false, vertical: true)
@@ -159,6 +165,9 @@ extension TrustLadderView {
                 Image(systemName: "lock.open")
                     .font(.system(size: 40, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    // decorative: the title under it says the same thing, and VoiceOver read the raw symbol
+                    // name ("lock.laptopcomputer") — the accessibility audit's finding, 2026-10-05
+                    .accessibilityHidden(true)
                 Text("not end-to-end encrypted")
                     .font(.title.weight(.bold))
                     .fixedSize(horizontal: false, vertical: true)
@@ -246,7 +255,7 @@ extension TrustLadderView {
                                      onSelect: selectEncryptedModel)
                 }
             }
-            .sheet(isPresented: $showNearAIKeyForm) {
+            .sheet(isPresented: $showNearAIKeyForm, onDismiss: refreshNearAIKey) {
                 if case .addNearAIKey(let existing) = cta, let existing {
                     AddEditProviderView(mode: .edit(existing))
                 } else {
@@ -259,6 +268,13 @@ extension TrustLadderView {
 
     /// nil hides the CTA — nothing actionable.
     var nearAIProvider: Provider? { providerStore.nearAIProvider }
+
+    /// Re-snapshot the credential the CTA is resolved from. Called on
+    /// appearance and whenever the key form closes — the form is the one thing
+    /// on this screen that can make the answer change under it.
+    func refreshNearAIKey() {
+        nearAIHasKey = nearAIProvider.map { providerStore.hasCredential(for: $0) } ?? false
+    }
 
     /// Applies the pick: point the near.ai provider at the chosen model,
     /// make it active, and re-verify — the sheet re-renders into the live

@@ -52,11 +52,16 @@ final class NetworkPathObserver {
         // with wi-fi switched off. DEBUG-only, argument-gated.
         #if DEBUG
         let forceExpensive = ProcessInfo.processInfo.arguments.contains("-simulateExpensivePath")
+        // The same door for "no path at all" (C9): a simulator cannot be put in
+        // airplane mode, so the offline captions were only ever seen by hand.
+        let forceOffline = ProcessInfo.processInfo.arguments.contains("-simulateOfflinePath")
         #else
         let forceExpensive = false
+        let forceOffline = false
         #endif
+        if forceOffline { isSatisfied = false }
         monitor.pathUpdateHandler = { [weak self] path in
-            let satisfied = path.status == .satisfied
+            let satisfied = path.status == .satisfied && !forceOffline
             let expensive = path.isExpensive || forceExpensive
             let cellular = path.usesInterfaceType(.cellular)
             let constrained = path.isConstrained

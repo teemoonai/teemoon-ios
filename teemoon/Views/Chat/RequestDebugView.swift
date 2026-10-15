@@ -32,40 +32,6 @@ extension View {
 struct RequestDebugView: View {
     let info: LastRequestDebugInfo
 
-    /// Injectable so the on-device `load` figure can be LOOKED at.
-    ///
-    /// It read `LocalEngineResidency.shared` directly, and a canvas builds no
-    /// engine — so the one row that had never been reviewed was the row this card
-    /// gained most recently, and seeing it meant a cold generation on a device.
-    /// Defaulted, so no production call site changes.
-    var residency: LocalEngineResidency = .shared
-
-    /// What building the on-device engine cost, when there is one.
-    ///
-    /// ON-DEVICE ONLY (`info.url == nil` is exactly that case). Measured 2.3–4.0 s
-    /// cold against 0.86 s warm on an iPhone 16 Pro, which is usually the whole
-    /// explanation for a slow first answer — and it existed only in a log line.
-    ///
-    /// Lives on the HEADER row, beside `on-device`, not in the timing chain below.
-    /// Two reasons, and they agree:
-    ///
-    /// - It is a SESSION fact, not a turn fact. One build serves every turn until
-    ///   it's evicted, so listing it among this turn's numbers implies this turn
-    ///   paid it, which is false from the second message onward. The header is
-    ///   already where session-scoped facts live (`on-device`, `E2EE`).
-    /// - The timing chain is six values joined by separators and was already near
-    ///   the card's width; a seventh wrapped it to two lines. The header had room.
-    ///
-    /// A home model's load can't appear here: Ollama loads inside the request and
-    /// never reports what it cost, so there is no figure to show.
-    private var engineLoadPart: String? {
-        guard info.url == nil, let load = residency.lastLoad
-        else { return nil }
-        let seconds = Double(load.took.components.seconds)
-            + Double(load.took.components.attoseconds) / 1e18
-        return "load \(seconds.debugFormatted)"
-    }
-
     /// Full debug dump copied to the clipboard. Credentials are redacted here
     /// and NOT on screen — see `DebugHeaderRedaction.copyValue`.
     var debugText: String {
@@ -74,19 +40,9 @@ struct RequestDebugView: View {
         // app, where `accounts/fireworks/models/deepseek-v4-flash` is the only form
         // that can be pasted back into a request.
         parts.append("=== \(info.providerName)\(info.modelID.isEmpty ? "" : " \(info.modelID)") Debug ===")
-        let timingParts: [String] = [
-            info.totalDuration.map    { $0.debugFormatted },
-            info.timeToFirstToken.map { "ttft \($0.debugFormatted)" },
-            // Between ttft and gen, which is the order it happens in — and the
-            // number that explains a "slow" answer from a warm model. Absent when
-            // the model didn't think, so a non-reasoning row doesn't grow a "0s".
-            info.thinkingTime.map     { "think \($0.debugFormatted)" },
-            info.generationTime.map   { "gen \($0.debugFormatted)" },
-            info.outputTokens.map     { "\($0)tok" },
-            info.tokensPerSecond.map  { String(format: "%.0ftok/s", $0) },
-            engineLoadPart
-        ].compactMap { $0 }
-        if !timingParts.isEmpty { parts.append(timingParts.joined(separator: " · ")) }
+        if let speed = info.speedLine { parts.append(speed) }
+        if let timing = info.timingLine { parts.append(timing) }
+        if let prefill = info.prefillSummary { parts.append(prefill) }
         if let url = info.url {
             parts.append("\n--- URL ---\n\(DebugHeaderRedaction.copyURLString(url.absoluteString))")
         }
@@ -158,11 +114,6 @@ struct RequestDebugView: View {
                 Text(info.url == nil ? "on-device" : "HTTP 200")
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                if let engineLoadPart {
-                    Text(engineLoadPart)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
                 if info.isE2EEActive {
                     Text("E2EE")
                         .font(.system(.caption2, design: .monospaced, weight: .semibold))
@@ -176,17 +127,7 @@ struct RequestDebugView: View {
             if let url = info.url {
                 InlineDebugRow(label: "url", value: url.absoluteString, scrollable: true)
             }
-            if info.totalDuration != nil || info.timeToFirstToken != nil {
-                let parts: [String] = [
-                    info.totalDuration.map    { $0.debugFormatted },
-                    info.timeToFirstToken.map { "ttft \($0.debugFormatted)" },
-                    // Between ttft and gen, the order it happens in. Absent when the
-                    // model didn't think, so a plain row doesn't sprout a "think 0s".
-                    info.thinkingTime.map     { "think \($0.debugFormatted)" },
-                    info.generationTime.map   { "gen \($0.debugFormatted)" },
-                    info.outputTokens.map     { "\($0)tok" },
-                    info.tokensPerSecond.map  { String(format: "%.0ftok/s", $0) }
-                ].compactMap { $0 }
+            if let timing = info.timingLine {
                 Divider().padding(.leading, 12)
                 // ONE LINE, always. The chain is a shape as much as a set of numbers:
                 // six values in a row read as one measurement of one request, and the
@@ -197,13 +138,28 @@ struct RequestDebugView: View {
                 // A floor, not free rein: 0.75 of caption2 is still legible, and if a
                 // future part cannot fit inside that, the truncation is the signal
                 // that the chain has outgrown the row.
-                Text(parts.joined(separator: " · "))
+                // ON-DEVICE the speed row LEADS, and the two rows are ONE Text so
+                // they share one scale: the longer row sets the size for both, and
+                // nothing renders at two sizes. Cloud keeps its single chain.
+                Text(info.speedLine.map { "\($0)\n\(timing)" } ?? timing)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                    .lineLimit(info.speedLine == nil ? 1 : 2)
                     .minimumScaleFactor(0.75)
+                    // Without this the hosting cell proposes one line's height
+                    // and the second row is swallowed into a "…" (seen in a render).
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
+                // Its own line: prefill is a second measurement, not a seventh part.
+                if let prefill = info.prefillSummary {
+                    Text(prefill)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 6)
+                }
             }
             // Loud, and above the request: the answer above this card may be a
             // reply to a question the server threw away, and nothing else on
@@ -451,19 +407,11 @@ func compactRequestBody(_ json: String) -> String {
     }
 }
 
-/// ON-DEVICE, cold — the state the `load` figure exists for, and the one that had
-/// never been looked at.
-///
-/// `url == nil` is what makes a request on-device (there is no endpoint), and the
-/// header then reads `on-device · load 3.1s`. Every number is measured on an
-/// iPhone 16 Pro by `measuresWhatAColdStartCosts`: a 3.1 s engine build inside a
-/// 4.4 s turn whose first token took 3.4 s, against 0.86 s warm. That is the whole
-/// explanation for a slow first answer, and it lived only in a log line until this
-/// row.
-///
-/// Injecting the residency is the only way to render it: the real one is a mirror
-/// of an engine cache, and a canvas builds no engine. `nil` there — the warm case,
-/// or before anything has been built this session — simply drops the part.
+/// ON-DEVICE. `url == nil` is what makes a request on-device (there is no
+/// endpoint). The stats are two rows at one size: the speed row leads, then the
+/// chain without its rate — a screenshot of this card is how a phone's speed gets
+/// reported, and Android prints the same two rows. NO engine load on the card:
+/// the engine is built when the model is chosen, not per message (user, 2026-10-15).
 /// A THINKING model on a warm machine — the card that prompted the question
 /// of why a warm model took six seconds.
 ///
@@ -524,13 +472,10 @@ func compactRequestBody(_ json: String) -> String {
                 totalDuration: 4.412,
                 timeToFirstToken: 3.402,
                 outputTokens: 24,
+                engineTimings: EngineTimings(prefillTokens: 212, prefillRate: 610, decodeRate: 52),
+                onDeviceRun: OnDeviceRun(backend: "gpu", speculative: true),
                 isE2EEActive: false,
                 teeVerification: nil
-            ),
-            residency: .previewing(
-                [],
-                lastLoad: (file: URL(fileURLWithPath: "/models/gemma-4-e2b-it-litert-lm.task"),
-                           took: .milliseconds(3_140))
             )
         )
         .padding()

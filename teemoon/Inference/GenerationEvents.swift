@@ -26,6 +26,10 @@ struct RequestResult: Sendable {
     /// The gap between them is the model thinking — see `SSEStreamParser.firstDeltaAt`.
     var firstTokenAt: Date? = nil
     var firstVisibleTokenAt: Date? = nil
+    /// See `TurnReport.engineTimings`.
+    var engineTimings: EngineTimings? = nil
+    /// See `TurnReport.onDeviceRun`.
+    var onDeviceRun: OnDeviceRun? = nil
     /// TEE signature verification result. nil when provider doesn't support attestation.
     let teeVerification: ResponseVerification?
     /// Whether this request/response was encrypted with application-layer E2EE.

@@ -114,8 +114,13 @@ struct Provider: Codable, Identifiable, Equatable {
     static func isPrivateHost(_ host: String) -> Bool {
         if host == "localhost" || host == "::1"
             || host.hasSuffix(".local") || host.hasSuffix(".ts.net") { return true }
-        let octets = host.split(separator: ".").compactMap { UInt8($0) }
-        guard octets.count == 4 else { return false }   // not an IPv4 literal
+        // EVERY label must be an octet, not just four of them. `compactMap`
+        // DROPS what it cannot parse, so `10.0.0.1.attacker.com` kept four
+        // octets and read as 10.0.0.0/8 — a public host an attacker registers,
+        // classified as the user's own machine. Compare the counts.
+        let labels = host.split(separator: ".")
+        let octets = labels.compactMap { UInt8($0) }
+        guard labels.count == 4, octets.count == 4 else { return false }   // not an IPv4 literal
         let (a, b) = (octets[0], octets[1])
         switch a {
         case 127:                              return true   // 127.0.0.0/8 loopback

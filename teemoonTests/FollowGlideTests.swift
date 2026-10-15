@@ -16,6 +16,12 @@ struct FollowGlideTests {
         #expect(!FollowGlide.shouldStart(delta: 4, mode: .throttled))
     }
 
+    @Test func aReserveSizedDeltaIsAJump_aWrapBurstIsNot() {
+        #expect(FollowGlide.isJump(delta: 475))
+        #expect(!FollowGlide.isJump(delta: 46))
+        #expect(!FollowGlide.isJump(delta: wrap))
+    }
+
     @Test func midGlideNoiseDoesNotRetarget_aBurstDoes() {
         #expect(!FollowGlide.shouldRetarget(delta: wrap))
         #expect(FollowGlide.shouldRetarget(delta: 46))

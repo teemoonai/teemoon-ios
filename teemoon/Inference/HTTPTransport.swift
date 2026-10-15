@@ -299,6 +299,7 @@ struct HTTPTransport: GenerationTransport {
                 isE2EEActive: isE2EEActive,
                 firstTokenAt: parser.firstDeltaAt,
                 firstVisibleTokenAt: parser.firstVisibleAt,
+                engineTimings: parser.engineTimings,
                 promptBudget: promptBudget,
                 verify: verify
             )

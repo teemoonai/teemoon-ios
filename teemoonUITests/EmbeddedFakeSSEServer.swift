@@ -41,6 +41,18 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
     /// Override the completion status. ≥400 returns a JSON error and no stream.
     /// Mutable so a test can send once (500), then flip back to 200 for retry.
     var statusCode: Int = 200
+    /// A model that cannot call tools: any request carrying a `tools` array is
+    /// refused with HTTP 400, everything else streams. The "turn off & retry"
+    /// test needs exactly this — the retry only answers if it went out bare.
+    var rejectToolsWith400 = false
+    /// Every completion request's body, in order — journeys that assert what
+    /// reached the wire (the system prompt, the search tool) read it.
+    private let bodiesLock = NSLock()
+    private var _requestBodies: [String] = []
+    var requestBodies: [String] { bodiesLock.lock(); defer { bodiesLock.unlock() }; return _requestBodies }
+    /// Every request line, in order ("GET /api/ps HTTP/1.1") — what the app asked, for a failure message.
+    private var _requestLines: [String] = []
+    var requestLines: [String] { bodiesLock.lock(); defer { bodiesLock.unlock() }; return _requestLines }
 
     /// If non-empty, each POST streams the next string (last one repeats).
     /// Distinct bodies let a two-turn test prove the second reply is new.
@@ -134,8 +146,15 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
                 return self.receiveRequest(conn, buffer: buffer)
             }
             let body = String(decoding: buffer[bodyStart..<(bodyStart + contentLength)], as: UTF8.self)
+            let path = requestLine.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+            self.bodiesLock.lock(); self._requestLines.append(requestLine); self.bodiesLock.unlock()
+            if self.ollama, path.hasPrefix("/api/") { return self.ollamaAPI(conn, path: path, body: body) }
+            if path.contains("/llm/context") { return self.braveContext(conn) }
             if requestLine.hasPrefix("POST") {
-                if self.statusCode >= 400 {
+                self.bodiesLock.lock(); self._requestBodies.append(body); self.bodiesLock.unlock()
+                if self.rejectToolsWith400, body.contains("\"tools\"") {
+                    self.sendError(conn, status: 400)
+                } else if self.statusCode >= 400 {
                     self.sendError(conn, status: self.statusCode)
                 } else {
                     self.streamCompletion(conn, requestBody: body)
@@ -154,7 +173,90 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
         conn.send(content: Data(response.utf8), completion: .contentProcessed { _ in conn.cancel() })
     }
 
+    /// A host that refuses the key it is given: `/models` answers 401.
+    var rejectsKey = false
+
+    // MARK: fake Brave (`GET …/llm/context`) — point the app at `braveEndpoint` via UITEST_BRAVE_ENDPOINT
+    var braveEndpoint: String { "http://127.0.0.1:\(port)/res/v1/llm/context" }
+    /// Every key Brave is asked to accept is refused (401, as a typo is).
+    var braveRejects = false
+    private(set) var braveRequests = 0
+
+    // MARK: fake Ollama (`/api/…`), off unless `ollama` is set
+    var ollama = false
+    private let ollamaLock = NSLock()
+    private var _ollamaModels = ["fake-model"]
+    private var _ollamaWarm: Set<String> = ["fake-model"]
+    var ollamaModels: [String] { ollamaLock.lock(); defer { ollamaLock.unlock() }; return _ollamaModels }
+    func setOllamaWarm(_ names: Set<String>) { ollamaLock.lock(); _ollamaWarm = names; ollamaLock.unlock() }
+    func addOllamaModel(_ name: String) { ollamaLock.lock(); if !_ollamaModels.contains(name) { _ollamaModels.append(name) }; ollamaLock.unlock() }
+    /// Off: a warm-up (`/api/generate`) no longer loads the model, so a journey can watch it go cold.
+    var ollamaWarmsOnGenerate = true
+    var ollamaDeleteFails = false
+    /// A pull that can never succeed: an error before any bytes, as for a model that does not exist.
+    var ollamaPullFails = false
+    /// A pull's length: steps × delay. The default is quick; a test that stops a pull mid-way makes it long.
+    var ollamaPullSteps = 20
+    var ollamaPullStepDelay: TimeInterval = 0.15
+
+    private func send(_ conn: NWConnection, status: Int = 200, contentType: String = "application/json", body: String) {
+        let reason = status == 200 ? "OK" : "Error"
+        let response = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(contentType)\r\n"
+            + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
+        conn.send(content: Data(response.utf8), completion: .contentProcessed { _ in conn.cancel() })
+    }
+
+    private func braveContext(_ conn: NWConnection) {
+        braveRequests += 1
+        if braveRejects { send(conn, status: 401, body: #"{"error":{"code":"SUBSCRIPTION_TOKEN_INVALID","status":401}}"#); return }
+        send(conn, body: #"{"grounding":{"generic":[{"url":"https://example.org/weather","title":"Example weather","snippets":["Sunny, 24°C in Paris this afternoon."]}]},"sources":{"1":{"title":"Example weather","hostname":"example.org"}}}"#)
+    }
+
+    private func ollamaAPI(_ conn: NWConnection, path: String, body: String) {
+        let name = body.range(of: #""(model|name)"\s*:\s*"([^"]+)""#, options: .regularExpression).flatMap { r -> String? in
+            let m = String(body[r]); return m.split(separator: "\"").last.map(String.init)   // "model":"x" → [model, :, x]
+        }
+        ollamaLock.lock(); let models = _ollamaModels; let warm = _ollamaWarm; ollamaLock.unlock()
+        func list(_ names: [String]) -> String { names.map { #"{"name":"\#($0)","model":"\#($0)","size":1000000,"details":{"family":"llama","parameter_size":"1B","quantization_level":"Q4_K_M"}}"# }.joined(separator: ",") }
+        switch true {
+        case path.hasPrefix("/api/version"): send(conn, body: #"{"version":"0.12.0"}"#)
+        case path.hasPrefix("/api/tags"): send(conn, body: #"{"models":["# + list(models) + "]}")
+        case path.hasPrefix("/api/show"): send(conn, body: #"{"capabilities":["completion"]}"#)
+        case path.hasPrefix("/api/ps"): send(conn, body: #"{"models":["# + list(Array(warm)) + "]}")
+        case path.hasPrefix("/api/generate"):
+            if ollamaWarmsOnGenerate, let name { ollamaLock.lock(); _ollamaWarm.insert(name); ollamaLock.unlock() }
+            send(conn, body: #"{"done":true}"#)
+        case path.hasPrefix("/api/delete"):
+            if ollamaDeleteFails { send(conn, status: 500, body: #"{"error":"permission denied"}"#); return }
+            if let name { ollamaLock.lock(); _ollamaModels.removeAll { $0 == name }; _ollamaWarm.remove(name); ollamaLock.unlock() }
+            send(conn, body: "{}")
+        case path.hasPrefix("/api/pull"):
+            let fails = ollamaPullFails, steps = ollamaPullSteps, delay = ollamaPullStepDelay
+            DispatchQueue.global().async { [weak self] in
+                let head = "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n"
+                conn.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
+                // a client that hung up (a stopped pull) ends the pull here, as Ollama's does — the model never lands
+                let gone = NSLock(); var hungUp = false
+                func line(_ l: String) { conn.send(content: Data((l + "\n").utf8), completion: .contentProcessed { e in if e != nil { gone.lock(); hungUp = true; gone.unlock() } }) }
+                func isGone() -> Bool { gone.lock(); defer { gone.unlock() }; return hungUp || conn.state != .ready }
+                line(#"{"status":"pulling manifest"}"#)
+                if fails { line(#"{"error":"pull model manifest: file does not exist"}"#); conn.send(content: nil, isComplete: true, completion: .contentProcessed { _ in conn.cancel() }); return }
+                let total = 10_000_000
+                for i in 1...steps {
+                    if isGone() { return }
+                    line(#"{"status":"pulling abc123","digest":"sha256:abc123","total":\#(total),"completed":\#(total * i / steps)}"#); Thread.sleep(forTimeInterval: delay)
+                }
+                if isGone() { return }
+                if let name { self?.addOllamaModel(name) }
+                line(#"{"status":"success"}"#)
+                conn.send(content: nil, isComplete: true, completion: .contentProcessed { _ in conn.cancel() })
+            }
+        default: send(conn, status: 404, body: #"{"error":"not found"}"#)
+        }
+    }
+
     private func sendModels(_ conn: NWConnection) {
+        if rejectsKey { sendError(conn, status: 401); return }
         let data = modelIDs.map { #"{"id": "\#($0)", "object": "model", "owned_by": "test"}"# }
             .joined(separator: ", ")
         let body = #"{"object": "list", "data": [\#(data)]}"#

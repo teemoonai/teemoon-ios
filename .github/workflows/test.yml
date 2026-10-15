@@ -101,10 +101,22 @@ jobs:
           fi
           echo "destination: $DEST"
           # No CODE_SIGNING_ALLOWED=NO here either — see teemoon-tests.
+          # -resultBundlePath so a failure is diagnosable: the run that went
+          # red on 2026-09-19 uploaded nothing, and the failing screen was
+          # never seen. The bundle carries XCUI's screenshots and the log.
           xcodebuild test \
             -project teemoon.xcodeproj \
             -scheme teemoon \
             -destination "$DEST" \
             -skipMacroValidation \
+            -resultBundlePath "$RUNNER_TEMP/ui-e2e.xcresult" \
             -only-testing:teemoonUITests/ProductE2ETests \
             -only-testing:teemoonUITests/LocalProviderUITests
+
+      - name: Upload the result bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-xcresult
+          path: ${{ runner.temp }}/ui-e2e.xcresult
+          retention-days: 14

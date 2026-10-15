@@ -49,6 +49,10 @@ struct ModelDetailView: View {
     @State private var copiedID = false
     @State private var live: KnownModel? = nil
     @State private var offers: [ModelOffer] = []
+    /// One fetch per push. `.task` re-runs on every appearance, and neither
+    /// `live` nor `offers` can stand in for "already asked" — a model with no
+    /// offers would re-ask forever.
+    @State private var fetched = false
 
     /// The live entry once it lands, else what we opened with.
     private var shown: KnownModel { live ?? model }
@@ -207,6 +211,8 @@ struct ModelDetailView: View {
         }
         .formStyle(.grouped)
         .task {
+            guard !fetched else { return }
+            fetched = true
             // Both at once: the card is worth less with either half missing,
             // and the providers table is a second request.
             async let fresh: KnownModel? = liveLoader?() ?? nil

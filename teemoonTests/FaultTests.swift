@@ -1251,7 +1251,7 @@ struct AttestationStateFaultTests {
             timeToFirstToken: 1.0, outputTokens: 100,
             isE2EEActive: false, teeVerification: nil
         )
-        #expect(info.tokensPerSecond == 50.0)
+        #expect(info.tokensPerSecond == 49.5)    // 99 tokens after the first, over 2s
     }
 
     @Test func debugInfo_tokensPerSecond_nilWhenNoTokens() {

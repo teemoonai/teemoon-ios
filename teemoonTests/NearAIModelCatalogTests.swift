@@ -63,6 +63,9 @@ struct NearAIModelCatalogTests {
     @Test func proxiedVendorNamespacesAreNotOwnFleet() {
         #expect(NearAIModelCatalog.classify("x-ai/grok-4.6") == .proxied)
         #expect(NearAIModelCatalog.classify("deepseek/deepseek-v4.1-flash") == .proxied)
+        // update_providers.py, 2026-10-02: typesafe/jev-1.13 is proxied live; filed own-fleet offline it read
+        // end-to-end encrypted until the live tiers arrived.
+        #expect(NearAIModelCatalog.classify("typesafe/jev-1.13") == .proxied)
         // The own-fleet DeepSeek node keeps its namespace.
         #expect(NearAIModelCatalog.classify("deepseek-ai/DeepSeek-V4-Flash") == .teeOwn)
         #expect(NearAIModelCatalog.classify("z-ai/glm-5.3-flash") == .teeOwn)

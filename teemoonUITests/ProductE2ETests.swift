@@ -121,6 +121,32 @@ final class ProductE2ETests: XCTestCase {
                       "retry never produced a reply")
     }
 
+    /// "this model can't search the web — turn off & retry": the retry must go
+    /// out WITHOUT the search tool, or a model that refuses tools refuses it
+    /// again. Keyless, makeGroundingTools still attaches web_search (the offer's
+    /// trigger), so switching search off alone re-sent the same schema — found
+    /// by Android's B4 journey (2026-10-04).
+    ///
+    /// Search is switched on through the ARGUMENT domain, not the grounding seed:
+    /// the seed needs a host Brave key and writes the sim's own defaults, so a run
+    /// that tapped "turn off" left the next one with no button to find.
+    func testTurnOffSearchAndRetryAnswersWithoutTheTool() {
+        server.rejectToolsWith400 = true
+        server.replies = ["search-off-ok-zeta"]
+        let app = ProductE2E.launch(
+            arguments: ["--uitesting", "-braveGroundingEnabled", "YES"],
+            environment: ["UITEST_SEED_LOCAL_ENDPOINT": server.baseURL, "UITEST_SEED_LOCAL_MODEL": "fake-model"])
+        ProductE2E.sendAndWait(app, "weather-please")
+        XCTAssertTrue(ProductE2E.elementContaining(app, "HTTP 400").waitForExistence(timeout: 10),
+                      "a tool-refusing model did not produce the 400 card")
+        let turnOff = ProductE2E.elementContaining(app, "turn off & retry")
+        XCTAssertTrue(turnOff.waitForExistence(timeout: 5), "a 400 with search on offered no 'turn off & retry'")
+        turnOff.tap()
+        XCTAssertTrue(ProductE2E.waitUntilSettled(app, timeout: 20), "the search-off retry did not settle")
+        XCTAssertTrue(ProductE2E.elementContaining(app, "search-off-ok-zeta").waitForExistence(timeout: 10),
+                      "the retry went out with the search tool still attached and was refused again")
+    }
+
     /// Native `tool_calls` from the wire, engine executes `web_search`
     /// (keyless — offer card), follow-up reply lands, markup stays off screen.
     func testScriptedToolRoundFollowsUpWithoutLeakingMarkup() {
@@ -549,6 +575,65 @@ final class ProductE2ETests: XCTestCase {
         ProductE2E.typeIntoComposer(app, "still-open")
         XCTAssertTrue(app.buttons["chat.send"].isEnabled,
                       "mismatch must leave send enabled with the debug panel on")
+    }
+
+    /// The not-encrypted sheet's last button offers a near.ai key when there
+    /// isn't one, and the switch when there is. It presents the key form
+    /// ITSELF, so the sheet is still mounted underneath while the key is
+    /// saved — and the answer it was drawn from was read once, on appearance
+    /// (build 36-38: the button still said "add a near.ai key" until the
+    /// ladder was closed and reopened).
+    func testAddingAKeyFlipsTheEncryptedModelCTAWithoutReopeningTheSheet() {
+        let app = ProductE2E.launch(environment: [
+            "UITEST_SEED_PRESET": "nearai",
+            // A keyed setup with nothing stored — the CTA's "add a key" state.
+            "UITEST_SEED_NO_KEY": "1",
+            // Nothing to attest, so the ladder draws its none branch, which is
+            // the only screen that carries this button.
+            "UITEST_SEED_ATTESTATION": "none",
+        ])
+        let title = ProductE2E.titleBlock(app)
+        XCTAssertTrue(title.waitForExistence(timeout: 15), "title block missing")
+        title.tap()
+        XCTAssertTrue(app.staticTexts["who can read this?"].waitForExistence(timeout: 5),
+                      "the not-encrypted sheet did not open")
+
+        let addKey = app.descendants(matching: .any)["trust.addNearAIKey"].firstMatch
+        XCTAssertTrue(addKey.waitForExistence(timeout: 10),
+                      "a keyless near.ai setup should be offered the key form, not the picker")
+        scrollToHittable(addKey, in: app)
+        addKey.tap()
+
+        // The field's label is the SwiftUI prompt, which lands as the
+        // placeholder ("api key — required"), not as an accessibility label.
+        let field = app.secureTextFields
+            .matching(NSPredicate(format: "placeholderValue BEGINSWITH %@", "api key"))
+            .firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "the key form did not open")
+        field.tap()
+        field.typeText("uitest-not-a-real-key")
+        let save = app.buttons["save"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 5), "save missing")
+        save.tap()
+
+        // The regression: the sheet behind the form keeps its own snapshot of
+        // "is there a key", so the button has to be told the form closed.
+        let switchCTA = app.descendants(matching: .any)["trust.switchToNearAI"].firstMatch
+        XCTAssertTrue(switchCTA.waitForExistence(timeout: 10),
+                      "the button should offer the switch once the key is saved, without reopening the sheet")
+        XCTAssertFalse(app.descendants(matching: .any)["trust.addNearAIKey"].firstMatch.exists,
+                       "the key form should not still be offered after a key was saved")
+        ProductE2E.attachScreenshot(app, name: "cta-after-key-saved", to: self)
+    }
+
+    /// XCUI does not scroll to reach an element; the CTA is the last row of a
+    /// long sheet.
+    private func scrollToHittable(_ element: XCUIElement, in app: XCUIApplication, swipes: Int = 6) {
+        var left = swipes
+        while !element.isHittable && left > 0 {
+            app.swipeUp()
+            left -= 1
+        }
     }
 
     func testEverydaySheetOpensFromTitleBlock() {

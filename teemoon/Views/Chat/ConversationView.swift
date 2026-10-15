@@ -533,6 +533,13 @@ struct ConversationView: View {
                             error: error,
                             onDisableWebSearch: toolLikely400 ? {
                                 settings.braveGroundingEnabled = false
+                                // TURNING SEARCH OFF IS NOT ENOUGH ON ITS OWN. Keyless,
+                                // makeGroundingTools still attaches web_search (it is the
+                                // offer's trigger), so the retry re-sent the same schema and
+                                // the model refused it with the same 400: the button could
+                                // never work. Declining the thread drops the keyless tool
+                                // here (Android's B4 journey found it, 2026-10-04).
+                                llm.declineOffer(inThread: threadID, messageIDs: messages.map(\.id))
                                 Haptics.play()
                                 if let m = lastUserMessage { onRetry?(m) }
                             } : nil,
@@ -816,9 +823,12 @@ struct ConversationView: View {
     /// rewritten, only rehosted.
     private var uiKitTranscript: some View {
         let shape = self.shape
+        // One policy pass per body pass: both lists come out of the same call,
+        // and it walks every message id to produce them.
+        let lists = itemLists(shape)
         return TranscriptView(
-            transcript: transcriptItems(shape),
-            tail: tailItems,
+            transcript: lists.transcript,
+            tail: tailItems(lists),
             threadID: threadID,
             isGenerating: isGenerating,
             interrupted: llm.scrollInterrupted,
@@ -923,10 +933,6 @@ struct ConversationView: View {
 
     // MARK: Items
 
-    private func transcriptItems(_ shape: Shape) -> [TranscriptItem] {
-        itemLists(shape).transcript
-    }
-
     /// Which list each row belongs to is `TranscriptItemsPolicy`'s call;
     /// the newest message's offer is the tail's, not the transcript's.
     private func itemLists(_ shape: Shape) -> TranscriptItemsPolicy.Lists {
@@ -941,11 +947,11 @@ struct ConversationView: View {
     /// Everything transient, in its own section so none of it diffs the
     /// conversation. Order matches the eager VStack the SwiftUI transcript
     /// keeps below its lazy stack.
-    private var tailItems: [TranscriptItem] {
+    private func tailItems(_ lists: TranscriptItemsPolicy.Lists) -> [TranscriptItem] {
         var items: [TranscriptItem] = []
         // The newest reply's offer, first — right under the reply, and out of
         // the hand-off's way (`TranscriptItemsPolicy`).
-        if let offer = itemLists(shape).tailOffer {
+        if let offer = lists.tailOffer {
             items.append(offer)
         }
         // The streaming view is NOT here — it is mounted as a trailing subview
@@ -1068,6 +1074,8 @@ struct ConversationView: View {
                 error: error,
                 onDisableWebSearch: toolLikely400 ? {
                     settings.braveGroundingEnabled = false
+                    // as above: decline the thread, or the keyless tool rides the retry
+                    llm.declineOffer(inThread: threadID, messageIDs: messages.map(\.id))
                     Haptics.play()
                     if let m = messages.last(where: { $0.role == .user }) { onRetry?(m) }
                 } : nil,

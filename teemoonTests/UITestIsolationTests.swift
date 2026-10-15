@@ -60,4 +60,19 @@ final class UITestIsolationTests: XCTestCase {
         XCTAssertEqual(before, after,
                        "an in-memory ProviderStore wrote to the shared config file")
     }
+
+    /// `UITEST_SEED_CONFIG` plants a file the store will LOAD — so it must never
+    /// be the real config, and a launch without `--uitesting` must never plant.
+    @MainActor func testAPlantedConfigNeverLandsOnTheRealConfig() throws {
+        XCTAssertNil(TeemoonApp.uiTestPlantedConfig(arguments: ["teemoon"], environment: ["UITEST_SEED_CONFIG": "corrupt"]),
+                     "planted without --uitesting")
+        for kind in ["corrupt", "duplicates"] {
+            let planted = try XCTUnwrap(TeemoonApp.uiTestPlantedConfig(arguments: ["teemoon", "--uitesting"],
+                                                                       environment: ["UITEST_SEED_CONFIG": kind]))
+            let real = ConfigStore.defaultDirectory?.appendingPathComponent(ConfigStore.fileName)
+            let url = planted.fileURL
+            XCTAssertNotEqual(url?.standardizedFileURL, real?.standardizedFileURL, "\(kind) was planted on the real config")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url?.path ?? ""), "\(kind) planted nothing")
+        }
+    }
 }

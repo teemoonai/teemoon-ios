@@ -66,7 +66,9 @@ extension Provider {
         id:                   UUID(uuidString: "A0000000-0000-0000-0000-000000000004")!,
         name:                 "Fireworks",
         endpoint:             "https://api.fireworks.ai/inference/v1/chat/completions",
-        model:                "accounts/fireworks/models/kimi-k2p6",
+        // kimi-k2p6 left serverless 2026-10-15; k3 is its successor and the
+        // OpenRouter preset already leads with it.
+        model:                "accounts/fireworks/models/kimi-k3",
         supportsModelBrowsing: true,
         presetDescription:    "fast, low-cost inference for open models. large catalog — kimi, deepseek, qwen, glm, and more.",
         // fireworks.ai/api-keys → app.fireworks.ai/settings/users/api-keys
@@ -340,19 +342,13 @@ extension KnownModel {
 
     static let fireworksPrices: [String: String] = [
         "accounts/fireworks/models/kimi-k3":                       "$3.00/$15.00",
-        "accounts/fireworks/models/kimi-k2p7-code":                "$0.95/$4.00",
-        "accounts/fireworks/models/kimi-k2p6":                     "$0.95/$4.00",
+        "accounts/fireworks/models/ember-1":                       "$3.00/$15.00",
         // 975B MoE (41B active) from Thinking Machines Lab, multimodal.
         "accounts/fireworks/models/inkling":                       "$1.00/$4.05",
-        "accounts/fireworks/models/deepseek-v4p1-flash":           "$0.22/$0.66",
-        "accounts/fireworks/models/deepseek-v4-flash-0731":        "$0.22/$0.66",
-        "accounts/fireworks/models/deepseek-v4-flash-vision-exp":  "$0.22/$0.66",
-        "accounts/fireworks/models/deepseek-v4-pro-0813":          "$1.32/$3.96",
+        "accounts/fireworks/models/deepseek-v4p1-flash":           "$0.30/$1.20",
         "accounts/fireworks/models/glm-5p3":                       "$1.40/$4.40",
         "accounts/fireworks/models/glm-5p3-flash":                 "$0.15/$0.50",
-        "accounts/fireworks/models/glm-5p2":                       "$1.40/$4.40",
         "accounts/fireworks/models/qwen3p8-max":                   "$2.00/$6.00",
-        "accounts/fireworks/models/muse-glimmer-30b":              "$0.35/$1.50",
         "accounts/fireworks/models/minimax-m3":                    "$0.30/$1.20",
         "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b": "$0.05/$0.20",
         "accounts/fireworks/models/nemotron-3-ultra-nvfp4":        "$0.60/$2.40",

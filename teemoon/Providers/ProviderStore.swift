@@ -79,7 +79,10 @@ final class ProviderStore {
     /// and an unexplained disappearance.
     var mergeNotice: String?
 
-    func dismissMergeNotice() { mergeNotice = nil }
+    func dismissMergeNotice() {
+        mergeNotice = nil
+        writePendingNotice(nil)
+    }
 
     /// Preview/test seam: these states are only reachable through a corrupt file
     /// or a duplicated store, neither of which a preview can produce — so the
@@ -333,6 +336,10 @@ final class ProviderStore {
         mergeDuplicateMachines()
         // Same argument, for the records a re-entered key used to create.
         mergeDuplicateEndpoints()
+        // A Fireworks model that left serverless fails every send until moved.
+        if loadFailure == nil { healRetiredFireworksModels() }
+        // A heal another store made (a Siri turn) is said here, until dismissed.
+        mergeNotice = Self.joinNotices(mergeNotice, readPendingNotice())
         // …unless there was nothing to merge, in which case a migration still
         // has to be written down. Skipped when the load failed: overwriting data
         // we could not read is the one move that makes the failure permanent.

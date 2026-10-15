@@ -180,8 +180,15 @@ final class ChatViewModel {
     func interruptedUserMessage(in thread: Thread?, llm: ChatGeneration) -> Message? {
         guard let thread, llm.interruptedThreadID == thread.id, !llm.running else { return nil }
         llm.interruptedThreadID = nil
-        guard let last = thread.sortedMessages.last, last.role == .user else { return nil }
-        return last
+        // THE CUT-OFF REPLY MAY ALREADY BE SAVED after the question: what streamed before iOS revoked the GPU is
+        // persisted as the assistant message, so requiring the LAST message to be the user's never matched — the
+        // user came back to an essay cut off at its title line and nothing re-asked (iPhone 16 Pro, 2026-10-04,
+        // testBackgroundingMidAnswerAbandonsAndResumes). Re-ask the last question when only replies follow it;
+        // retry(from:) deletes those replies before asking again.
+        let sorted = thread.sortedMessages
+        guard let i = sorted.lastIndex(where: { $0.role == .user }),
+              sorted[(i + 1)...].allSatisfy({ $0.role == .assistant }) else { return nil }
+        return sorted[i]
     }
 
     func retry(

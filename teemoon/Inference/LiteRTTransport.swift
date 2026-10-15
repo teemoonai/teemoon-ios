@@ -91,6 +91,16 @@ struct LiteRTTransport: GenerationTransport {
     let backgroundedForTest: (@Sendable () -> Bool)?
 
     /// A delay that still delays when the current task is cancelled.
+    enum WaitStep: Equatable { case collect, abandon, wait }
+
+    /// The turn wait loop's next step. An answer that already finished is kept
+    /// even if the app just left the foreground: check it BEFORE background.
+    static func waitStep(finishedCleanly: Bool?, backgrounded: Bool, dead: Bool) -> WaitStep {
+        if finishedCleanly == true { return .collect }
+        if backgrounded || dead { return .abandon }
+        return finishedCleanly == nil ? .wait : .collect
+    }
+
     static func uncancellableSleep(milliseconds: Int) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(milliseconds)) {
@@ -125,11 +135,13 @@ struct LiteRTTransport: GenerationTransport {
         /// engine built for the old one — the request would be honoured in name
         /// and ignored in fact.
         struct Key: Hashable { let path: URL; let contextTokens: Int }
-        private var engines: [Key: LiteRTLM.Engine] = [:]
+        /// An engine and how it was built — the backend, the drafter, the cost.
+        struct Resident { let engine: LiteRTLM.Engine; let run: OnDeviceRun }
+        private var engines: [Key: Resident] = [:]
         /// Builds in flight. A warm-up and a turn asking for the same engine
         /// share one build; the actor suspends at `initialize()`, so without
         /// this the second caller found no engine and built another.
-        private var building: [Key: Task<LiteRTLM.Engine, Error>] = [:]
+        private var building: [Key: Task<Resident, Error>] = [:]
 
         func evictAll() async {
             guard !engines.isEmpty else { return }
@@ -163,17 +175,23 @@ struct LiteRTTransport: GenerationTransport {
             }
         }
 
-        func engine(for path: URL, contextTokens: Int, sizeMB: Int) async throws -> LiteRTLM.Engine {
+        /// The engine, and how it was built (the card prints the backend and
+        /// whether the drafter was on).
+        func engine(for path: URL, contextTokens: Int, sizeMB: Int) async throws -> (LiteRTLM.Engine, OnDeviceRun) {
             let key = Key(path: path, contextTokens: contextTokens)
-            if let existing = engines[key] { return existing }
-            if let inFlight = building[key] { return try await inFlight.value }
+            if let existing = engines[key] { return (existing.engine, existing.run) }
+            if let inFlight = building[key] {
+                let built = try await inFlight.value
+                return (built.engine, built.run)
+            }
             let task = Task { try await self.build(key: key, path: path, sizeMB: sizeMB) }
             building[key] = task
             defer { building[key] = nil }
-            return try await task.value
+            let built = try await task.value
+            return (built.engine, built.run)
         }
 
-        private func build(key: Key, path: URL, sizeMB: Int) async throws -> LiteRTLM.Engine {
+        private func build(key: Key, path: URL, sizeMB: Int) async throws -> Resident {
             guard FileManager.default.fileExists(atPath: path.path) else {
                 throw LocalInferenceError.modelNotDownloaded(path.lastPathComponent)
             }
@@ -194,11 +212,12 @@ struct LiteRTTransport: GenerationTransport {
             await publish()
             try LocalMemory.check(needMB: sizeMB + LocalMemory.headroomMB)
 
+            // Metal. The whole reason to evaluate this runtime is its GPU
+            // path; measuring the CPU one would answer a different question.
+            let backend: LiteRTLM.Backend = .gpu
             let config = try LiteRTLM.EngineConfig(
                 modelPath: path.path,
-                // Metal. The whole reason to evaluate this runtime is its GPU
-                // path; measuring the CPU one would answer a different question.
-                backend: .gpu,
+                backend: backend,
                 maxNumTokens: key.contextTokens,
                 cacheDir: FileManager.default.temporaryDirectory.path
             )
@@ -218,12 +237,12 @@ struct LiteRTTransport: GenerationTransport {
             let took = start.duration(to: .now)
             logger.info("[litert] engine ready in \(took.description, privacy: .public)")
             DiagLog.note("[litert] engine ready in \(took.description)")
-            engines[key] = engine
-            // The cost, not just the fact — this is what the developer-mode card
-            // shows, and the log line was the only place it existed.
-            await MainActor.run { LocalEngineResidency.shared.recordLoad(of: path, took: took) }
+            let resident = Resident(engine: engine, run: OnDeviceRun(
+                backend: { switch backend { case .gpu: "gpu"; case .cpu: "cpu" } }(),
+                speculative: speculative == true))
+            engines[key] = resident
             await publish()
-            return engine
+            return resident
         }
     }
 
@@ -372,7 +391,7 @@ struct LiteRTTransport: GenerationTransport {
     /// replies: the model saw the schema and declined, or it never saw one. Only
     /// this distinguishes them, and the second is a bug no prompt would fix.
     func renderedPreface(tools overrideTools: [any AnyLanguageModel.Tool]? = nil) async throws -> String {
-        let engine = try await EngineCache.shared.engine(
+        let (engine, _) = try await EngineCache.shared.engine(
             for: modelPath, contextTokens: contextTokens, sizeMB: estimatedSizeMB
         )
         let shims = await LiteRTToolBridge.bridged(tools: overrideTools ?? tools) { _, _, _ in }
@@ -429,7 +448,7 @@ struct LiteRTTransport: GenerationTransport {
         defer { bgPoll.cancel() }
 
         DiagLog.note("[litert] turn: acquiring engine")
-        let engine = try await EngineCache.shared.engine(
+        let (engine, run) = try await EngineCache.shared.engine(
             for: modelPath, contextTokens: contextTokens, sizeMB: estimatedSizeMB
         )
         DiagLog.note("[litert] turn: engine ready, building conversation")
@@ -647,7 +666,13 @@ struct LiteRTTransport: GenerationTransport {
         let outcome: Result<String, any Error> = await withTaskCancellationHandler {
             defer { drained.value = true }
             while true {
-                if backgrounded.value || dead.value {
+                var ended: Result<String, any Error>?
+                if finished.value {
+                    do { ended = .success(try await consumer.value) } catch { ended = .failure(error) }
+                }
+                let step = Self.waitStep(finishedCleanly: ended.map { if case .success = $0 { true } else { false } },
+                                         backgrounded: backgrounded.value, dead: dead.value)
+                if step == .abandon {
                     abandoned.value = true               // silence the leaked decode
                     dead.value = true                    // its engine is poisoned; rebuild next turn
                     requestStop(backgrounded.value
@@ -658,10 +683,10 @@ struct LiteRTTransport: GenerationTransport {
                     // stopped turn, NOT an "empty response" error.
                     return shown.value.isEmpty ? .failure(CancellationError()) : .success(shown.value)
                 }
-                if finished.value {
-                    do { return .success(try await consumer.value) }
-                    catch {
-                        return stoppedByUs.value ? .success(shown.value) : .failure(error)
+                if step == .collect, let ended {
+                    switch ended {
+                    case .success(let text): return .success(text)
+                    case .failure(let error): return stoppedByUs.value ? .success(shown.value) : .failure(error)
                     }
                 }
                 // `Task.sleep` throws at entry once the turn is cancelled, so
@@ -697,11 +722,25 @@ struct LiteRTTransport: GenerationTransport {
             logger.error("[litert] stopped turn drained; native stopped=\(!dead.value, privacy: .public)")
             DiagLog.note("[litert] stopped turn drained; native stopped=\(!dead.value) chars=\(answer.count)")
         }
+        // ABANDONED, NOT FINISHED. A turn stopped because the app went to the background must reach ChatGeneration as
+        // the CancellationError it reads as an interruption from below — that is what records the thread for the
+        // re-ask on return. Returned as a normal answer instead, the drained partial (788 chars, an essay cut at its
+        // title) was saved as the reply and nothing re-asked (iPhone 16 Pro, 2026-10-04,
+        // testBackgroundingMidAnswerAbandonsAndResumes). What streamed is still on screen; the re-ask replaces it.
+        if abandoned.value, backgrounded.value {
+            DiagLog.note("[litert] backgrounded turn abandoned — handing back an interruption, not an answer")
+            throw CancellationError()
+        }
 
         // LiteRT reports the prefill/decode split directly.
         var decodeTokens: Int?
+        var timings: EngineTimings?
         if let info = try? conversation.getBenchmarkInfo() {
             decodeTokens = info.lastDecodeTokenCount
+            timings = EngineTimings(
+                prefillTokens: info.lastPrefillTokenCount,
+                prefillRate: Double(info.lastPrefillTokensPerSecond),
+                decodeRate: Double(info.lastDecodeTokensPerSecond))
             logger.info("""
                 [litert] ttft=\(info.timeToFirstTokenInSecond, privacy: .public)s \
                 prefill=\(info.lastPrefillTokenCount, privacy: .public)tok \
@@ -752,6 +791,8 @@ struct LiteRTTransport: GenerationTransport {
                 ],
                 requestBodyJSON: Self.prettyMessages(messages),
                 isE2EEActive: false,
+                engineTimings: timings,
+                onDeviceRun: run,
                 // Calls LiteRT ran inside its own loop. The engine never saw
                 // them, so without this the panel lists no tools for a turn that
                 // visibly searched.

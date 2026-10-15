@@ -167,7 +167,7 @@ final class PinningCollectionView: UICollectionView {
     /// A linear follow-glide is in flight. layoutSubviews must not snap
     /// over it — that would turn every wrap back into a 22pt teleport.
     private var isGliding = false
-    private var glide: FollowGlide?
+    private(set) var glide: FollowGlide?
     private var glideLink: CADisplayLink?
 
     /// The floor from constraint 3, in seconds. Worst case ~25 pins/s —
@@ -186,6 +186,11 @@ final class PinningCollectionView: UICollectionView {
     /// notification keeps this to a condition on the glide that already
     /// exists, with no observer and no second animation path.
     static let resizeGlideDuration: CFTimeInterval = 0.25
+
+    /// How long a reserve-sized move takes (`FollowGlide.jumpThreshold`): the
+    /// turn start pushing the end down so the prompt rides near the top. Eased
+    /// and issued ONCE — the throttled pin moves its target, never restarts it.
+    static let jumpGlideDuration: CFTimeInterval = 0.25
 
     /// The offset at which the last line of content sits on the bottom edge of
     /// the viewport. Insets included: the composer is a `safeAreaInset`, so the
@@ -340,8 +345,11 @@ final class PinningCollectionView: UICollectionView {
             // -1,-9,-16,-22,-26,-30,-32,-33,-33,-32,-30,-26 and then -11,
             // -25, +15 — an overshoot and a snap back. Moving `to` keeps the
             // curve and its clock, where restarting the glide would not.
-            if glide?.eased == true, let inFlight = glide, abs(inFlight.to - target) > 1 {
-                glide?.to = target
+            if let inFlight = glide, inFlight.eased {
+                // NEVER FALL THROUGH TO THE LINEAR RETARGET: its threshold is
+                // the distance left, so it re-issued every eased glide at
+                // every 40ms pin.
+                if abs(inFlight.to - target) > 1 { glide?.to = target }
             } else if mode == .throttled, FollowGlide.shouldRetarget(delta: delta) {
                 // The link owns the offset. Retarget only if we have fallen
                 // more than a line behind (a burst of wraps during the glide).
@@ -374,7 +382,11 @@ final class PinningCollectionView: UICollectionView {
             return
         }
         if FollowGlide.shouldStart(delta: delta, mode: mode) {
-            startGlide(to: target)
+            if FollowGlide.isJump(delta: delta) {
+                startGlide(to: target, duration: Self.jumpGlideDuration, eased: true)
+            } else {
+                startGlide(to: target)
+            }
             return
         }
 
@@ -432,6 +444,11 @@ final class PinningCollectionView: UICollectionView {
         glide = FollowGlide(from: from, to: target,
                             start: CACurrentMediaTime(),
                             duration: duration, eased: eased)
+        #if DEBUG
+        StreamTrace.event("[glide] from=\(Int(from)) to=\(Int(target)) "
+            + "dur=\(Int(duration * 1000)) eased=\(eased ? 1 : 0) "
+            + "restart=\(isGliding ? 1 : 0)")
+        #endif
         isGliding = true
         if glideLink == nil {
             let link = CADisplayLink(target: self, selector: #selector(stepGlide(_:)))

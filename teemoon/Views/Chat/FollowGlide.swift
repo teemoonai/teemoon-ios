@@ -40,6 +40,15 @@ struct FollowGlide: Equatable {
         delta > retargetThreshold
     }
 
+    /// Above this the glide is eased, fixed-length and never re-issued. A
+    /// turn-start move is a reserve, not a wrap; restarting the linear glide
+    /// against it at every 40ms pin reads as judder (TranscriptHandoffTests).
+    static let jumpThreshold: CGFloat = 80
+
+    static func isJump(delta: CGFloat) -> Bool {
+        delta > jumpThreshold
+    }
+
     func progress(at now: CFTimeInterval) -> CGFloat {
         guard duration > 0 else { return 1 }
         return min(1, max(0, CGFloat((now - start) / duration)))

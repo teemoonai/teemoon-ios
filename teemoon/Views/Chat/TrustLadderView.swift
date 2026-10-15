@@ -38,8 +38,10 @@ struct TrustLadderView: View {
     @State var timedOut = false
     @State var showEncryptedModelPicker = false
     @State var showNearAIKeyForm = false
-    /// Read once per appearance, not on every body pass: `hasCredential` is a
-    /// Keychain round trip.
+    /// A snapshot, not a binding: `hasCredential` is a Keychain round trip, so
+    /// it is not read on every body pass. Anything that can add or remove the
+    /// key while this screen is up must call `refreshNearAIKey()` — the key
+    /// form it presents does, or the CTA keeps offering a key that now exists.
     @State var nearAIHasKey = false
     @State var pickedEncryptedModel = ""
 
@@ -213,9 +215,7 @@ struct TrustLadderView: View {
                 }
             }
             #endif
-            .task {
-                nearAIHasKey = nearAIProvider.map { providerStore.hasCredential(for: $0) } ?? false
-            }
+            .task { refreshNearAIKey() }
             .task(id: session.attestationState) {
                 timedOut = false
                 guard session.awaitsFirstRecord else { return }
