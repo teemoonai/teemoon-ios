@@ -63,6 +63,13 @@ enum TLSAttestation: Equatable, Sendable {
 
 struct TLSAttestationVerifier {
 
+    /// The probe quote goes through DCAP like the record's quotes: a quote that
+    /// is only parsed binds a fingerprint anyone could have written.
+    var quoteCheck: @Sendable (String) async -> DCAPVerification = { hex in
+        await DCAPVerifier(collateral: IntelPCSCollateralProvider())
+            .verify(quoteHex: hex, nowSecs: UInt64(Date().timeIntervalSince1970))
+    }
+
     /// Fetches attestation with `include_tls_fingerprint=true` over a fresh
     /// TLS connection to `directBaseURL`, captures that connection's server
     /// certificate, and verifies the TLS-termination bindings.
@@ -103,7 +110,22 @@ struct TLSAttestationVerifier {
             quoteHex: quote, signingAddress: address, signingAlgo: report.signingAlgo ?? "ecdsa",
             tlsCertFingerprintHex: fingerprint, liveCertDER: certDER, nonceHex: nonce)
         if case .failed(let why) = result { logger.warning("[tls] \(why, privacy: .public)") }
-        return result
+        guard result == .verified else { return result }
+        let verdict = Self.withQuoteCheck(result, dcap: await quoteCheck(quote))
+        if case .failed(let why) = verdict { logger.warning("[tls] \(why, privacy: .public)") }
+        return verdict
+    }
+
+    /// Bindings first, then DCAP on the same quote. A DCAP hard failure (bad
+    /// quote, collateral unreachable, TCB outside the allow-list) fails the
+    /// check, as it does for the record's quotes.
+    static func withQuoteCheck(_ bindings: TLSAttestation, dcap: DCAPVerification) -> TLSAttestation {
+        guard bindings == .verified else { return bindings }
+        guard dcap.isHardFailure else { return .verified }
+        switch dcap {
+        case .failed(let reason): return .failed("TLS attestation quote failed DCAP verification (\(reason))")
+        case .verified(let tcb, _, _): return .failed("TLS attestation quote TCB status \(tcb.rawValue) is not accepted")
+        }
     }
 
     /// Builds the probe request. DELIBERATELY UNAUTHENTICATED — no

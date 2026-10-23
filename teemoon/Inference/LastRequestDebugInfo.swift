@@ -77,10 +77,23 @@ struct LastRequestDebugInfo {
     /// that silently discarded most of the prompt says so instead of leaving a
     /// confident wrong answer as the only evidence. See `PromptBudget`.
     var promptBudget: PromptBudget? = nil
+    /// Where the send's time went, from the tap. See `TurnPhases`.
+    var phases: TurnPhases? = nil
     /// Whether application-layer E2EE was active for this request.
     let isE2EEActive: Bool
     /// TEE signature verification result for this response (nil if not applicable).
-    let teeVerification: ResponseVerification?
+    var teeVerification: ResponseVerification?
+    /// Each request's level, in order (`RequestResult.effortLevels`).
+    var effortLevels: [String?] = []
+
+    /// The turn's reasoning level: "effort high", "thinking on".
+    var effortLevel: String? {
+        ReasoningEffort.turnLevel(levels: effortLevels) ?? ReasoningEffort.sentLevel(inBodyJSON: requestBodyJSON)
+            ?? requestHeaders?["thinking"].map { "thinking \($0)" }
+    }
+
+    /// The copied text's effort line, the same words.
+    var effortLine: String? { effortLevel }
 
     /// Time spent producing VISIBLE text.
     var generationTime: TimeInterval? {
@@ -130,6 +143,13 @@ struct LastRequestDebugInfo {
             outputTokens.map     { "\($0)tok" },
             onDeviceRun == nil ? tokensPerSecond.map { String(format: "%.0ftok/s", $0) } : nil,
         ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// The card's row (the maintainer): the timing chain, then `effort low · cache 92%`.
+    /// The copied text keeps `timingLine` and its own effort and phase lines.
+    var cardTimingLine: String? {
+        let parts = [timingLine, effortLevel, phases?.cacheLine].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

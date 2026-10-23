@@ -2,22 +2,18 @@
 //  TEESignatureVerifier.swift
 //  teemoon
 //
-//  Verifies per-response ECDSA signatures from the near.ai TEE.
+//  Verifies per-response signatures from near.ai.
 //
-//  Protocol (from nearai/nearai-cloud-verifier):
-//    POST /v1/chat/completions  →  SSE stream with `id` field (e.g. "chatcmpl-abc123")
-//    GET  /v1/signature/{id}?model={model}&signing_algo=ecdsa
-//    →  { "text": "req_sha256:resp_sha256", "signature": "0x...",
-//          "signing_address": "0xABCD...", "signing_algo": "ecdsa" }
+//  Protocol (nearai/inference-sdk core/chat.py):
+//    GET /v1/signature/{id}?model={model}&signing_algo=ed25519|ecdsa
+//    →  { "text", "signature", "signing_address", "signing_algo",
+//         "signature_kind": "provider_tee" | "gateway" }
 //
-//  Verification (all three required for `.verified`):
-//  1. Content binding — `text` is "[model:]req_sha256:resp_sha256"; teemoon
-//     recomputes both hashes from the bytes it actually sent/received and
-//     they must match. Stops "any response quoting a trusted address."
-//  2. ecrecover — the signer address is RECOVERED from the EIP-191
-//     personal_sign signature over `text` (EthereumSignature), removing
-//     reliance on the server-asserted signing_address string.
-//  3. The recovered address matches the attested signing address.
+//  `.verified` needs all of: the exact text for the kind (provider_tee
+//  carries the request's model prefix, gateway does not); the signer
+//  recovered (ecdsa) or checked (ed25519) from the signature itself; and
+//  that signer being a model-node key bound to its quote's report_data.
+//  A gateway signature is at most `.gatewayTrustOnly`.
 //
 //  Recipe validated live against near.ai (chat_verifier.py parity): the
 //  request hash covers the exact request body bytes; the response hash
@@ -81,12 +77,19 @@ struct TEEMessageSignature: Decodable {
     /// Ethereum-style address of the signing key ("0x...")
     let signingAddress: String
     let signingAlgo: String
+    /// Absent on older servers; the SDK reads absent as `provider_tee`.
+    let signatureKind: String?
+
+    enum Kind: String { case providerTEE = "provider_tee", gateway, unknown }
+
+    var kind: Kind { Kind(rawValue: (signatureKind ?? "provider_tee").lowercased()) ?? .unknown }
 
     enum CodingKeys: String, CodingKey {
         case text
         case signature
         case signingAddress = "signing_address"
         case signingAlgo    = "signing_algo"
+        case signatureKind  = "signature_kind"
     }
 }
 
@@ -108,11 +111,13 @@ enum ResponseVerification: Sendable {
     }
 
     enum UnverifiedReason: Sendable {
-        /// The signing address matched no attested key, but the signature was
-        /// served by a gateway whose TDX quote verified. The response is
-        /// trustworthy *if you trust the gateway* — weaker than per-response
-        /// cryptographic proof, and rendered distinctly.
+        /// A valid `gateway`-kind signature by the attested, quote-bound
+        /// gateway key. Proves the gateway relayed these bytes, not that the
+        /// model wrote them; rendered distinctly, never as verified.
         case gatewayTrustOnly(signingAddress: String)
+        /// A valid model-node signature whose key is not bound to a quote
+        /// (no GPU quote, or report_data does not carry the address).
+        case signerUnattested(signingAddress: String)
         /// Signing address mismatch — possible tampering or wrong attestation.
         case signatureMismatch(expected: String, got: String)
         /// The signed request/response hashes do not match the content
@@ -129,118 +134,174 @@ enum ResponseVerification: Sendable {
 
 enum TEESignatureVerifier {
 
-    /// Fetches and verifies the ECDSA signature for a completed chat response.
-    ///
-    /// - Parameters:
-    ///   - chatID:      The `id` field captured from the SSE stream.
-    ///   - ctx:         The TEE context with URLs, model, auth, and attestation data.
-    ///   - exchange:    The request/response content this signature must cover.
-    ///                  When nil (legacy callers), content binding is skipped.
+    /// Fetches the signature for a completed chat response and evaluates it.
+    /// Asks for ed25519 first when the model key is attested: a model-node
+    /// signature then checks against the key the model quote binds. A
+    /// gateway signature is refetched as ecdsa, the only gateway key attested.
     static func verify(chatID: String, ctx: TEEContext, exchange: SignedExchange? = nil) async -> ResponseVerification {
         let att = ctx.attestation
-        // The gateway (cloud-api.near.ai) proxies completions to a GPU node TEE.
-        // The GPU node signs the response with its own ECDSA key, and the gateway
-        // exposes that signature at /v1/signature/{id}.
-        // Accept signatures from either the gateway or GPU node — both are
-        // legitimate TEE signers. The GPU node may sign even when its attestation
-        // wasn't fetched (gpuSigningAddress is nil).
-        var trustedAddresses: Set<String> = []
-        if let gwAddr = att.signingAddress, !gwAddr.isEmpty {
-            trustedAddresses.insert(gwAddr.lowercased())
-        }
-        if let gpuAddr = att.gpuSigningAddress, !gpuAddr.isEmpty {
-            trustedAddresses.insert(gpuAddr.lowercased())
-        }
-        guard !trustedAddresses.isEmpty else { return .unverified(.signatureUnavailable) }
+        let attestedSigners = [att.signingAddress, att.gpuSigningAddress].compactMap { $0 }.filter { !$0.isEmpty }
+        guard !attestedSigners.isEmpty || att.modelEd25519PubKey != nil else { return .unverified(.signatureUnavailable) }
+        guard let exchange else { return .unverified(.contentMismatch(detail: "no captured exchange to bind")) }
 
         // Wait 2s — the TEE stores signatures asynchronously after stream completion.
         try? await Task.sleep(nanoseconds: 2_000_000_000)
 
-        logger.debug("Verifying chatID=\(chatID)")
-        let sigURL = ctx.baseURL.appendingPathComponent("signature/\(chatID)")
+        let first = att.modelEd25519PubKey != nil ? "ed25519" : "ecdsa"
+        var fetched = await fetch(chatID: chatID, ctx: ctx, algo: first)
+        if case .success(let sig) = fetched, sig.kind == .gateway, sig.signingAlgo.lowercased() != "ecdsa" {
+            fetched = await fetch(chatID: chatID, ctx: ctx, algo: "ecdsa")
+        }
+        switch fetched {
+        case .success(let sig): return evaluate(sig, attestation: att, exchange: exchange)
+        case .failure(let verdict): return verdict
+        }
+    }
+
+    private enum Fetched { case success(TEEMessageSignature), failure(ResponseVerification) }
+
+    private static func fetch(chatID: String, ctx: TEEContext, algo: String) async -> Fetched {
+        guard var components = URLComponents(url: ctx.baseURL.appendingPathComponent("signature/\(chatID)"),
+                                             resolvingAgainstBaseURL: false) else {
+            return .failure(.unverified(.signatureUnavailable))
+        }
+        components.queryItems = [URLQueryItem(name: "model", value: ctx.model),
+                                 URLQueryItem(name: "signing_algo", value: algo)]
+        guard let sigURL = components.url else { return .failure(.unverified(.signatureUnavailable)) }
         var request = URLRequest(url: sigURL, timeoutInterval: 10)
         if !ctx.apiKey.isEmpty {
             request.setValue("Bearer \(ctx.apiKey)", forHTTPHeaderField: "Authorization")
         }
 
-        logger.debug("Fetching signature from \(request.url?.absoluteString ?? "nil", privacy: .public)")
         // 2 attempts: immediately, then after 4s.
         for attempt in 1...2 {
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                let body = String(data: data, encoding: .utf8) ?? ""
-                logger.debug("Attempt \(attempt): HTTP \(status) — \(body.prefix(200))")
+                logger.debug("Attempt \(attempt): HTTP \(status) algo=\(algo, privacy: .public)")
                 if status == 404 {
                     if attempt == 1 { try? await Task.sleep(nanoseconds: 4_000_000_000) }
                     continue
                 }
-                let sig = try JSONDecoder().decode(TEEMessageSignature.self, from: data)
-
-                // Content binding: the signed hashes must match the request/
-                // response content teemoon observed. A mismatch is decisive
-                // regardless of who signed — the signature covers different
-                // content than this exchange.
-                if let exchange {
-                    guard let binding = ContentBinding.check(text: sig.text, exchange: exchange) else {
-                        return .unverified(.contentMismatch(detail: "unrecognized signed-text format"))
+                // A 2xx `{error_code, message}` envelope is "not available", not a parse failure.
+                guard let sig = try? JSONDecoder().decode(TEEMessageSignature.self, from: data) else {
+                    if (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error_code"] != nil {
+                        return .failure(.unverified(.signatureUnavailable))
                     }
-                    guard binding.isBound else {
-                        let what = binding.requestHashMatches ? "response" : (binding.responseHashMatches ? "request" : "request and response")
-                        logger.warning("[TEE] content binding failed — signed \(what, privacy: .public) hash does not match observed content")
-                        return .unverified(.contentMismatch(detail: "signed \(what) hash does not match observed content"))
-                    }
+                    return .failure(.unverified(.fetchFailed(URLError(.cannotParseResponse))))
                 }
-
-                // ecrecover: the signer identity comes from the signature
-                // itself, not the server-asserted signing_address string.
-                let got: String
-                if sig.signingAlgo.lowercased() == "ecdsa" {
-                    guard let recovered = EthereumSignature.recoverAddress(text: sig.text, signatureHex: sig.signature) else {
-                        let expected = trustedAddresses.joined(separator: " or ")
-                        return .unverified(.signatureMismatch(expected: expected, got: "unrecoverable signature"))
-                    }
-                    got = recovered
-                } else {
-                    // Non-ECDSA signing algo — fall back to the asserted address.
-                    got = sig.signingAddress.lowercased()
-                }
-                if trustedAddresses.contains(got) {
-                    return .verified(.init(signingAddress: got))
-                }
-                // Mismatch — the signing key may have rotated (TEE restart/redeploy),
-                // or the GPU node isn't directly reachable (TLS error).
-                // Try re-fetching from the GPU node first, then fall back to the gateway.
-                if let gpuURL = ctx.gpuNodeURL {
-                    logger.info("Address mismatch, re-fetching GPU attestation from \(gpuURL.host ?? "", privacy: .public)")
-                    if let freshAddr = await AttestationService.fetchSigningAddress(from: gpuURL, apiKey: ctx.apiKey),
-                       freshAddr.lowercased() == got {
-                        logger.info("Key rotation confirmed — new GPU signing address matches")
-                        return .verified(.init(signingAddress: got))
-                    }
-                    // GPU node unreachable — try fetching via the gateway.
-                    logger.info("GPU node unreachable, trying gateway attestation for model signing address")
-                    if let freshAddr = await AttestationService.fetchSigningAddress(from: ctx.baseURL, apiKey: ctx.apiKey),
-                       freshAddr.lowercased() == got {
-                        logger.info("Gateway-proxied GPU signing address matches")
-                        return .verified(.init(signingAddress: got))
-                    }
-                }
-                // The signature came through the attested gateway — if the gateway's
-                // TDX quote was verified, the gateway TEE is trustworthy and the
-                // signing address it reports is authentic even if we can't directly
-                // attest the GPU node (e.g. TLS not publicly accessible).
-                if att.quoteVerification?.isVerified == true {
-                    logger.info("Signing address unattested; falling back to gateway trust — GPU node not directly reachable")
-                    return .unverified(.gatewayTrustOnly(signingAddress: got))
-                }
-                let expected = trustedAddresses.joined(separator: " or ")
-                return .unverified(.signatureMismatch(expected: expected, got: got))
+                return .success(sig)
             } catch {
-                return .unverified(.fetchFailed(error))
+                return .failure(.unverified(.fetchFailed(error)))
             }
         }
         logger.info("Signature unavailable after retries")
-        return .unverified(.signatureUnavailable)
+        return .failure(.unverified(.signatureUnavailable))
+    }
+
+    /// Pure verdict for one signature. `.verified` only for a model-node
+    /// (`provider_tee`) signature whose signer is a key bound to its quote;
+    /// a gateway signature is never more than `.gatewayTrustOnly`. Never
+    /// trust `signing_address` without checking the signature against it.
+    static func evaluate(_ sig: TEEMessageSignature, attestation att: AttestationRecord,
+                         exchange: SignedExchange) -> ResponseVerification {
+        let kind = sig.kind
+        guard kind != .unknown else {
+            return .unverified(.signatureMismatch(expected: "a provider_tee or gateway signature",
+                                                  got: "signature_kind \(sig.signatureKind ?? "")"))
+        }
+        if let mismatch = SignedText.mismatch(text: sig.text, kind: kind, exchange: exchange) {
+            logger.warning("[TEE] content binding failed — \(mismatch, privacy: .public)")
+            return .unverified(.contentMismatch(detail: mismatch))
+        }
+
+        let signer: String
+        switch sig.signingAlgo.lowercased() {
+        case "ecdsa":
+            guard let recovered = EthereumSignature.recoverAddress(text: sig.text, signatureHex: sig.signature) else {
+                return .unverified(.signatureMismatch(expected: "a valid ecdsa signature", got: "unrecoverable signature"))
+            }
+            signer = recovered
+        case "ed25519":
+            // Only the model's Ed25519 key is attested (and quote-bound); a
+            // gateway Ed25519 key never is.
+            guard kind == .providerTEE, let key = att.modelEd25519PubKey, key.count == 32,
+                  att.e2eeKeyBoundToModelTEE == true,
+                  sig.signingAddress.lowercased() == key.hexString,
+                  Ed25519Signature.isValid(text: sig.text, signatureHex: sig.signature, publicKey: key) else {
+                return .unverified(.signatureMismatch(expected: "a valid ed25519 signature by the attested model key",
+                                                      got: sig.signingAddress.lowercased()))
+            }
+            return .verified(.init(signingAddress: key.hexString))
+        default:
+            return .unverified(.signatureMismatch(expected: "ecdsa or ed25519",
+                                                  got: "unsupported signing_algo \(sig.signingAlgo)"))
+        }
+
+        switch kind {
+        case .providerTEE:
+            if let model = att.gpuSigningAddress?.lowercased(), signer == model,
+               att.gpuSigningKeyBoundToHardware == true {
+                return .verified(.init(signingAddress: signer))
+            }
+            if att.gpuSigningKeyBoundToHardware != true, att.gpuSigningAddress?.lowercased() == signer {
+                return .unverified(.signerUnattested(signingAddress: signer))
+            }
+            return .unverified(.signatureMismatch(expected: att.gpuSigningAddress?.lowercased() ?? "an attested model key",
+                                                  got: signer))
+        case .gateway:
+            if let gw = att.signingAddress?.lowercased(), signer == gw,
+               att.signingKeyBoundToHardware == true, att.quoteVerification?.isVerified == true {
+                return .unverified(.gatewayTrustOnly(signingAddress: signer))
+            }
+            return .unverified(.signatureMismatch(expected: att.signingAddress?.lowercased() ?? "an attested gateway key",
+                                                  got: signer))
+        case .unknown:
+            return .unverified(.signatureMismatch(expected: "a known signature_kind", got: "unknown"))
+        }
+    }
+}
+
+/// The exact text each signature kind must sign (near.ai inference-sdk
+/// `core/chat.py`): `provider_tee` = "<request model>:<req sha256>:<resp sha256>",
+/// `gateway` = "<req sha256>:<resp sha256>". Compared whole, never split.
+enum SignedText {
+    static func expected(kind: TEEMessageSignature.Kind, exchange: SignedExchange) -> [String] {
+        let resp = sha256Hex(Data(exchange.responseText.utf8))
+        return exchange.requestBodyCandidates.compactMap { body in
+            let req = sha256Hex(body)
+            switch kind {
+            case .gateway: return "\(req):\(resp)"
+            case .providerTEE:
+                guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                      let model = obj["model"] as? String, !model.isEmpty else { return nil }
+                return "\(model):\(req):\(resp)"
+            case .unknown: return nil
+            }
+        }
+    }
+
+    /// nil when `text` is exactly what `kind` must sign for this exchange.
+    static func mismatch(text: String, kind: TEEMessageSignature.Kind, exchange: SignedExchange) -> String? {
+        if expected(kind: kind, exchange: exchange).contains(text) { return nil }
+        guard let binding = ContentBinding.check(text: text, exchange: exchange) else {
+            return "unrecognized signed-text format"
+        }
+        if binding.isBound { return "signed text has the wrong prefix for a \(kind.rawValue) signature" }
+        let what = binding.requestHashMatches ? "response" : (binding.responseHashMatches ? "request" : "request and response")
+        return "signed \(what) hash does not match observed content"
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum Ed25519Signature {
+    static func isValid(text: String, signatureHex: String, publicKey: Data) -> Bool {
+        let hex = signatureHex.hasPrefix("0x") ? String(signatureHex.dropFirst(2)) : signatureHex
+        guard let sig = try? Data(hexString: hex), sig.count == 64,
+              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey) else { return false }
+        return key.isValidSignature(sig, for: Data(text.utf8))
     }
 }

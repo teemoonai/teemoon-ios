@@ -127,11 +127,7 @@ extension ConfidentialSession {
                     return
                 }
                 logger.warning("[refresh] adopting record model=\(record.model ?? "nil", privacy: .public) nonce=\(String((record.gatewayNonce ?? "").prefix(4)), privacy: .public) composePath=\(record.modelComposePath ?? "nil", privacy: .public)")
-                self?.attestation = record
-                self?.verifyImageProvenance(for: record)
-                self?.verifyDCAP(for: record)
-                self?.verifyGPU(for: record)
-                self?.verifyTLS(for: provider)
+                self?.adopt(record, for: provider)
             } catch {
                 logger.error("Attestation fetch failed: \(error)")
                 guard !Task.isCancelled, let self, self.attestedContext == context else { return }
@@ -142,6 +138,16 @@ extension ConfidentialSession {
                 self.attestationFetchFailed = true
             }
         }
+    }
+
+    /// Never split this with an await: `verdictsPending` only sees a launched
+    /// task, so a record without its verifiers would let a send through.
+    func adopt(_ record: AttestationRecord, for provider: Provider) {
+        attestation = record
+        verifyImageProvenance(for: record)
+        verifyDCAP(for: record)
+        verifyGPU(for: record)
+        verifyTLS(for: provider)
     }
 
     /// Resets all attestation-derived display state on a provider/model switch

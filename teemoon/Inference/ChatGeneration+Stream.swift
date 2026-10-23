@@ -20,7 +20,8 @@ extension ChatGeneration {
         toolCallsBag: LockedBox<[ToolCallRecord]>,
         resultBag: LockedBox<RequestResult?>
     ) -> StreamCallbacks {
-        StreamCallbacks(
+        let origin = turnOrigin
+        return StreamCallbacks(
             onSourcesFound: { [weak self] sources in
                 Task { @MainActor [weak self] in
                     self?.groundingSources.append(contentsOf: sources)
@@ -78,7 +79,9 @@ extension ChatGeneration {
                         onDeviceRun: result.onDeviceRun,
                         promptBudget: result.promptBudget ?? self.lastRequestDebugInfo?.promptBudget,
                         isE2EEActive: result.isE2EEActive,
-                        teeVerification: result.teeVerification ?? self.lastRequestDebugInfo?.teeVerification
+                        teeVerification: result.teeVerification ?? self.lastRequestDebugInfo?.teeVerification,
+                        effortLevels: result.effortLevels.isEmpty
+                            ? (self.lastRequestDebugInfo?.effortLevels ?? []) : result.effortLevels
                     )
                 }
             },
@@ -95,8 +98,36 @@ extension ChatGeneration {
                     StreamTrace.event("awaitingModel turn=\(turn) awaiting=\(awaiting ? 1 : 0)")
                     #endif
                 }
+            },
+            onAwaitingResponse: { [weak self] turn, sentAt in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let sentAt {
+                        if (self.providerWait?.turn ?? Int.min) < turn {
+                            self.providerWait = ProviderWait(turn: turn, sentAt: sentAt, providerName: providerName)
+                        }
+                    } else if self.providerWait?.turn == turn {
+                        self.providerWait = nil
+                    }
+                }
+            },
+            onVerified: { [weak self] verification in
+                Task { @MainActor [weak self] in
+                    self?.applyLateVerification(verification, threadID: threadID, origin: origin)
+                }
             }
         )
+    }
+
+    /// The reply-signature verdict, after the turn closed. Only the card of the
+    /// same send takes it; the session's counters always do.
+    func applyLateVerification(_ verification: ResponseVerification, threadID: UUID, origin: Date?) {
+        if var info = lastRequestDebugInfo, info.threadID == threadID, turnOrigin == origin {
+            info.teeVerification = verification
+            if let origin { info.phases?.append(.verified, at: Date(), origin: origin) }
+            lastRequestDebugInfo = info
+        }
+        onReplyVerified?(verification)
     }
 
     /// Local, remote, or the test hook. nil when the on-device weights
@@ -107,7 +138,8 @@ extension ChatGeneration {
         priorMessages: [WireMessage],
         teeContext: TEEContext?,
         callbacks: StreamCallbacks,
-        threadID: UUID
+        threadID: UUID,
+        effort: ReasoningEffort? = nil
     ) -> (any LanguageModel)? {
         if let makeLanguageModel {
             return makeLanguageModel(provider, apiKey, priorMessages, teeContext, callbacks)
@@ -124,12 +156,14 @@ extension ChatGeneration {
                 return nil
             }
             return LocalLanguageModel(
-                model: ref, priorMessages: priorMessages, events: callbacks
+                model: ref, priorMessages: priorMessages, events: callbacks,
+                enableThinking: effort == .thinkHarder
             )
         }
         return ConfidentialLanguageModel(
             provider: provider, apiKey: apiKey, priorMessages: priorMessages,
-            context: teeContext, events: callbacks
+            context: teeContext, events: callbacks, effort: effort,
+            affinityID: SessionAffinity.id(for: threadID)
         )
     }
 
@@ -192,8 +226,19 @@ extension ChatGeneration {
                 engineTimings: existing.engineTimings,
                 onDeviceRun: existing.onDeviceRun,
                 promptBudget: existing.promptBudget,
+                phases: turnOrigin.map { origin in
+                    var phases = TurnPhases(origin: origin,
+                               events: (gateEndedAt.map { [PhaseEvent(kind: .gate, at: $0)] } ?? []) + (landed?.phaseEvents ?? []),
+                               promptTokens: landed?.promptTokens, cachedTokens: landed?.cachedTokens)
+                    phases.firstMessage = turnIsFirstMessage
+                    phases.cacheReporting = TurnPhases.cacheReporting(
+                        host: existing.url?.host, onDevice: existing.onDeviceRun != nil,
+                        isE2EE: landed?.isE2EEActive ?? existing.isE2EEActive)
+                    return phases
+                },
                 isE2EEActive: landed?.isE2EEActive ?? existing.isE2EEActive,
-                teeVerification: landed?.teeVerification ?? existing.teeVerification
+                teeVerification: landed?.teeVerification ?? existing.teeVerification,
+                effortLevels: existing.effortLevels
             )
         }
         // NEVER FAIL SILENTLY.

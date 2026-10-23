@@ -71,21 +71,9 @@ struct LocalLanguageModel: LanguageModel {
     /// ~6.7 s.
     static let defaultMaxTokens = 1024
 
-    /// Thinking stays ON for local models, despite being the single most
-    /// expensive thing they do.
-    ///
-    /// Measured on device, 3 trials each, "How much is oil now?" with the real
-    /// web-search tool attached:
-    ///
-    ///     enable_thinking=false → tool called 0/3 · 1.0 s
-    ///     enable_thinking=true  → tool called 3/3 · 6.7 s
-    ///
-    /// Turning it off made a grounded query 35× faster and completely useless:
-    /// the model answered from stale knowledge, once hallucinating "$45 per
-    /// barrel", and in one run *named* `web_search` in prose instead of calling
-    /// it. For a small model the think block is not preamble to the decision,
-    /// it IS the decision. 6.7 s is the honest price of a correct answer.
-    static let defaultEnableThinking = true
+    /// Off: what every on-device turn ran before 1.0.6, and Android's explicit off.
+    /// Think Harder turns it on (`ReasoningControl.onDevice`).
+    static let defaultEnableThinking = false
 
     init(
         model: LocalModelRef,
@@ -114,7 +102,8 @@ struct LocalLanguageModel: LanguageModel {
             modelPath: model.bundleFile,
             estimatedSizeMB: model.sizeMB,
             tools: tools,
-            events: events
+            events: events,
+            thinking: enableThinking
         )
     }
 

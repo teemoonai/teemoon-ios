@@ -113,7 +113,9 @@ struct GenerationEngine: Sendable {
         tools: [any Tool],
         initialMessages: [WireMessage],
         prompt: String,
-        urlSession: URLSession
+        urlSession: URLSession,
+        effort: ReasoningEffort? = nil,
+        affinityID: String? = nil
     ) {
         self.init(
             events: events,
@@ -122,7 +124,7 @@ struct GenerationEngine: Sendable {
             prompt: prompt,
             transport: HTTPTransport(
                 provider: provider, apiKey: apiKey, teeContext: teeContext,
-                tools: tools, urlSession: urlSession
+                tools: tools, urlSession: urlSession, effort: effort, affinityID: affinityID
             ),
             groundsItsOwnAnswers: provider.capabilities.contains(.builtInGrounding)
         )
@@ -167,6 +169,10 @@ struct GenerationEngine: Sendable {
         var toolRoundsRun = 0
         var toldSearchesAreOver = false
         var turnIndex = 0
+        var phaseEvents: [PhaseEvent] = []
+        var promptTokens: Int?
+        var cachedTokens: Int?
+        var effortLevels: [String?] = []
 
         while true {
             let includeTools = !tools.isEmpty && !textToolCallRoundHappened && remainingToolRounds > 0
@@ -202,9 +208,12 @@ struct GenerationEngine: Sendable {
             let producedText = LockedBox<Bool>(false)
             events.onAwaitingModel(thisTurn, true)
             defer { events.onAwaitingModel(thisTurn, false) }
+            events.onAwaitingResponse(thisTurn, Date())
+            defer { events.onAwaitingResponse(thisTurn, nil) }
             let turn = try await transport.runTurn(
                 messages: messages,
-                includeTools: includeTools
+                includeTools: includeTools,
+                onResponse: { events.onAwaitingResponse(thisTurn, nil) }
             ) { partial in
                 if !partial.isEmpty, !producedText.value {
                     producedText.value = true
@@ -212,6 +221,15 @@ struct GenerationEngine: Sendable {
                 }
                 onText(prefix + visible(partial))
             }
+            let r = turn.report
+            effortLevels.append(ReasoningEffort.sentLevel(inBodyJSON: r.requestBodyJSON)
+                                ?? r.requestHeaders?["thinking"].map { "thinking \($0)" })
+            for (kind, at) in [(PhaseEvent.Kind.sent, r.sentAt), (.response, r.responseAt),
+                               (.firstToken, r.firstTokenAt), (.firstAnswer, r.firstVisibleTokenAt)] {
+                if let at { phaseEvents.append(PhaseEvent(kind: kind, at: at)) }
+            }
+            if let p = r.promptTokens { promptTokens = (promptTokens ?? 0) + p }
+            if let c = r.cachedTokens { cachedTokens = (cachedTokens ?? 0) + c }
 
             // Tool round: execute, append follow-up messages, loop.
             //
@@ -224,6 +242,7 @@ struct GenerationEngine: Sendable {
             // on-device models are the likeliest to do it, since there is no
             // server-side template deciding when tool syntax is even legal.
             if !turn.toolCalls.isEmpty, remainingToolRounds > 0 {
+                let toolStart = Date()
                 let roundRecords = try await executeToolRound(
                     toolCalls: turn.toolCalls,
                     completionTokens: turn.completionTokens,
@@ -231,6 +250,11 @@ struct GenerationEngine: Sendable {
                     priorRecords: allToolRecords
                 )
                 allToolRecords += roundRecords.records
+                let toolBytes = roundRecords.results.reduce(0) { $0 + $1.content.utf8.count }
+                // ~4 bytes a token: a size signal for the card, not a count.
+                phaseEvents.append(PhaseEvent(kind: .tool, at: Date(),
+                                              durationMs: Int(Date().timeIntervalSince(toolStart) * 1000),
+                                              bytes: toolBytes, tokens: toolBytes / 4))
                 appendFollowUpMessages(
                     to: &messages, assistantContent: turn.content,
                     toolCalls: turn.toolCalls, toolResults: roundRecords.results,
@@ -323,24 +347,23 @@ struct GenerationEngine: Sendable {
             let records = allToolRecords
             let report = turn.report
             let outputTokens = turn.completionTokens
+            phaseEvents.append(PhaseEvent(kind: .done, at: Date()))
             // Await the check here so the turn's result includes it. A
             // detached Task forced ChatViewModel to poll `lastRequestDebugInfo`
             // for 8s after generate returned.
-            let verification = await report.verify?()
-            if let verification {
-                switch verification {
-                case .verified(let sig):
-                    logger.info("[TEE] Signature verified — signing address: \(sig.signingAddress, privacy: .public)")
-                case .unverified(.gatewayTrustOnly(let addr)):
-                    logger.warning("[TEE] Accepted via gateway trust only — signer \(addr, privacy: .public) not individually attested")
-                case .unverified(.signatureMismatch(let expected, let got)):
-                    logger.warning("[TEE] Signature MISMATCH — expected \(expected, privacy: .public), got \(got, privacy: .public)")
-                case .unverified(.contentMismatch(let detail)):
-                    logger.warning("[TEE] Content binding MISMATCH — \(detail, privacy: .public)")
-                case .unverified(.signatureUnavailable):
-                    logger.info("[TEE] Signature not yet available")
-                case .unverified(.fetchFailed(let err)):
-                    logger.error("[TEE] Signature fetch failed: \(err)")
+            var verification: ResponseVerification?
+            if let late = events.onVerified, let verify = report.verify {
+                // The text is final; do not hold the turn open for the check.
+                Task {
+                    guard let v = await verify() else { return }
+                    Self.log(v)
+                    late(v)
+                }
+            } else {
+                verification = await report.verify?()
+                if let verification {
+                    phaseEvents.append(PhaseEvent(kind: .verified, at: Date()))
+                    Self.log(verification)
                 }
             }
             events.onSuccess(RequestResult(
@@ -355,12 +378,35 @@ struct GenerationEngine: Sendable {
                 promptBudget: report.promptBudget,
                 firstTokenAt: report.firstTokenAt,
                 firstVisibleTokenAt: report.firstVisibleTokenAt,
+                phaseEvents: phaseEvents,
+                promptTokens: promptTokens,
+                cachedTokens: cachedTokens,
                 engineTimings: report.engineTimings,
                 onDeviceRun: report.onDeviceRun,
                 teeVerification: verification,
-                isE2EEActive: report.isE2EEActive
+                isE2EEActive: report.isE2EEActive,
+                effortLevels: effortLevels
             ))
             return
+        }
+    }
+
+    private static func log(_ verification: ResponseVerification) {
+        switch verification {
+        case .verified(let sig):
+            logger.info("[TEE] Signature verified — signing address: \(sig.signingAddress, privacy: .public)")
+        case .unverified(.gatewayTrustOnly(let addr)):
+            logger.warning("[TEE] Accepted via gateway trust only — signer \(addr, privacy: .public) not individually attested")
+        case .unverified(.signerUnattested(let addr)):
+            logger.warning("[TEE] Signer \(addr, privacy: .public) is not bound to a model quote")
+        case .unverified(.signatureMismatch(let expected, let got)):
+            logger.warning("[TEE] Signature MISMATCH — expected \(expected, privacy: .public), got \(got, privacy: .public)")
+        case .unverified(.contentMismatch(let detail)):
+            logger.warning("[TEE] Content binding MISMATCH — \(detail, privacy: .public)")
+        case .unverified(.signatureUnavailable):
+            logger.info("[TEE] Signature not yet available")
+        case .unverified(.fetchFailed(let err)):
+            logger.error("[TEE] Signature fetch failed: \(err)")
         }
     }
 

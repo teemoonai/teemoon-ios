@@ -112,6 +112,9 @@ struct NrasVectors: Encodable {
     let nrasResponse: String
     /// What `overallVerdict` answers for the recorded response.
     let overallVerdict: Bool
+    /// NVIDIA's JWKS at capture time (trimmed) and the clock every case runs at (unix seconds).
+    let jwks: String
+    let verifiedAt: Double
     /// One `NRASService.verify` run: the inputs, and what production ANSWERED ("verified" | "failed" | "inconclusive").
     struct Case: Encodable {
         let note: String
@@ -321,7 +324,7 @@ enum ConformanceAttestationVectors {
         let responseObj = try JSONSerialization.jsonObject(with: fixture.responseData)
         let response = String(decoding: try JSONSerialization.data(withJSONObject: responseObj, options: [.sortedKeys]), as: UTF8.self)
         let verdict = try #require(NRASService.overallVerdict(Data(response.utf8)))
-        // The tampered JWT: the overall verdict claim flipped to false, signature untouched (TLS trust model).
+        // The tampered JWT: the overall verdict claim flipped to false, signature untouched, so ES384 fails.
         guard case .array(let pair) = fixture.nrasResponse[0], case .string(let jwt) = pair[1] else { throw KitError("unexpected NRAS fixture shape") }
         var claims = try #require(NRASService.decodeJWTClaims(jwt))
         claims["x-nvidia-overall-att-result"] = false
@@ -330,17 +333,19 @@ enum ConformanceAttestationVectors {
         let segments = jwt.split(separator: ".")
         let tampered = "[[\"JWT\",\"\(segments[0]).\(b64url).\(segments[2])\"]]"
 
+        let jwksObj = try JSONSerialization.jsonObject(with: fixture.jwksData)
+        let jwks = String(decoding: try JSONSerialization.data(withJSONObject: jwksObj, options: [.sortedKeys]), as: UTF8.self)
         func run(_ note: String, nonce: String?, response: String?, contains: String?) async -> NrasVectors.Case {
-            let service = NRASService(http: StubNRAS(response: response.map { Data($0.utf8) }))
+            let service = fixture.service(response: response.map { Data($0.utf8) }, jwks: Data(jwks.utf8))
             let result = await service.verify(payloadJSON: fixture.nvidiaPayload, expectedNonceHex: nonce)
             return .init(note: note, expectedNonceHex: nonce, response: response, outcome: nrasKind(result), reasonContains: contains)
         }
-        return NrasVectors(nvidiaPayload: fixture.nvidiaPayload, requestNonce: fixture.requestNonce, nrasResponse: response, overallVerdict: verdict, cases: [
+        return NrasVectors(nvidiaPayload: fixture.nvidiaPayload, requestNonce: fixture.requestNonce, nrasResponse: response, overallVerdict: verdict, jwks: jwks, verifiedAt: fixture.verifiedAt, cases: [
             await run("real evidence, real NVIDIA response, matching nonce", nonce: fixture.requestNonce, response: response, contains: nil),
             await run("nonce mismatch — must fail before contacting NRAS (the stub is unreachable)", nonce: String(repeating: "00", count: 32), response: nil, contains: "nonce"),
             await run("no recorded request nonce — freshness cannot be proven", nonce: nil, response: response, contains: "nonce"),
             await run("NRAS unreachable — fail closed but soft", nonce: fixture.requestNonce, response: nil, contains: "unreachable"),
-            await run("overall verdict claim flipped to false", nonce: fixture.requestNonce, response: tampered, contains: "FAIL"),
+            await run("overall verdict claim flipped to false — the ES384 signature no longer verifies", nonce: fixture.requestNonce, response: tampered, contains: "signature"),
             await run("malformed NRAS response", nonce: fixture.requestNonce, response: "{}", contains: nil),
         ])
     }
@@ -457,7 +462,9 @@ struct ConformanceAttestationRoundTripTests {
         #expect(v.overallVerdict)
         #expect(NRASService.overallVerdict(Data(v.nrasResponse.utf8)) == true)
         for c in v.cases {
-            let service = NRASService(http: StubNRASCheck(response: c.response.map { Data($0.utf8) }))
+            let when = Date(timeIntervalSince1970: v.verifiedAt)
+            let service = NRASService(http: StubNRASCheck(response: c.response.map { Data($0.utf8) }),
+                                      keys: NRASServiceTests.StaticKeys(data: Data(v.jwks.utf8)), now: { when })
             let result = await service.verify(payloadJSON: v.nvidiaPayload, expectedNonceHex: c.expectedNonceHex)
             #expect(ConformanceAttestationVectors.nrasKind(result) == c.outcome, "\(c.note)")
             if let needle = c.reasonContains { #expect(result.reason?.contains(needle) == true, "\(c.note)") }

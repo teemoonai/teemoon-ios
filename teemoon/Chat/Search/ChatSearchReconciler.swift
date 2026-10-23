@@ -59,6 +59,8 @@ struct ChatSearchReconciler {
 
         if !stale.isEmpty {
             try await index.remove(messageIDs: Array(stale))
+            // A delete hook that never ran left its text in the WAL and free pages too.
+            try await index.purgeDeleted()
         }
         if !missing.isEmpty {
             try await index.index(records(for: missing, in: context))

@@ -26,6 +26,10 @@ struct RequestResult: Sendable {
     /// The gap between them is the model thinking — see `SSEStreamParser.firstDeltaAt`.
     var firstTokenAt: Date? = nil
     var firstVisibleTokenAt: Date? = nil
+    /// Every request, tool round and the end of the stream, in wall-clock time. See `TurnPhases`.
+    var phaseEvents: [PhaseEvent] = []
+    var promptTokens: Int? = nil
+    var cachedTokens: Int? = nil
     /// See `TurnReport.engineTimings`.
     var engineTimings: EngineTimings? = nil
     /// See `TurnReport.onDeviceRun`.
@@ -34,6 +38,8 @@ struct RequestResult: Sendable {
     let teeVerification: ResponseVerification?
     /// Whether this request/response was encrypted with application-layer E2EE.
     let isE2EEActive: Bool
+    /// The effort each request of the turn sent, in order; nil where it sent none.
+    var effortLevels: [String?] = []
 }
 
 /// All callbacks the generation engine uses to communicate with ChatGeneration.
@@ -60,6 +66,15 @@ struct StreamCallbacks: Sendable {
     /// progress signal is not something a stub transport should have to care
     /// about.
     var onAwaitingModel: @Sendable (_ turn: Int, _ awaiting: Bool) -> Void = { _, _ in }
+
+    /// A request went out at `sentAt` and has no response headers yet; nil
+    /// when they arrive or the turn ends. Same turn-index rule as above.
+    var onAwaitingResponse: @Sendable (_ turn: Int, _ sentAt: Date?) -> Void = { _, _ in }
+
+    /// When set, the reply-signature check runs AFTER the turn ends and its
+    /// verdict arrives here, so the composer is not held for it (it sleeps 2 s
+    /// before fetching). nil keeps the old shape: verdict inside `onSuccess`.
+    var onVerified: (@Sendable (ResponseVerification) -> Void)? = nil
 }
 
 /// Minimal lock-guarded box for handing a value out of a @Sendable callback.

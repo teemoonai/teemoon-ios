@@ -43,6 +43,13 @@ struct SharedURLCacheTests {
         #expect(inUse?.diskCapacity == 0)
     }
 
+    /// Chat, attestation, Brave and key checks run on `.chat` since 1.0.6.
+    @Test("the chat session has no cache at all")
+    func chatSessionHasNoCache() {
+        #expect(URLSession.chat.configuration.urlCache == nil)
+        #expect(URLSession.chat.configuration.requestCachePolicy == .reloadIgnoringLocalCacheData)
+    }
+
     @Test("a cacheable authenticated response is not stored")
     func authenticatedResponseIsNotCached() async throws {
         URLProtocol.registerClass(CacheableStubProtocol.self)
@@ -51,7 +58,7 @@ struct SharedURLCacheTests {
         var request = URLRequest(url: URL(string: "https://cache-tripwire.invalid/v1/attestation/report?nonce=1")!)
         request.setValue("Bearer tripwire-secret-do-not-persist", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await URLSessionHTTP().data(for: request)
+        let (data, response) = try await URLSessionHTTP(session: .shared).data(for: request)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         #expect(!data.isEmpty)
 

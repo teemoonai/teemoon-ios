@@ -102,6 +102,7 @@ struct RequestLLMIntent: AppIntent {
         // this detached, never-persisted thread — kept so a future persisting
         // intent isn't silently unindexed.
         await MainActor.run { ChatSearchService.shared.didWrite(message) }
+        llm.onReplyVerified = { [weak session] verification in session?.recordVerification(verification) }
         var output = await llm.generate(
             provider: provider,
             thread: thread,

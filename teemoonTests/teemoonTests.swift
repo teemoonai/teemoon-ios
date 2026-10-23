@@ -430,7 +430,7 @@ private final class DelayedScriptedTransport: GenerationTransport, @unchecked Se
 
 /// `LanguageModel` wrapper so `ChatGeneration.generate` can run a stub
 /// `GenerationTransport` through the same engine production uses.
-private struct TransportLanguageModel: LanguageModel {
+struct TransportLanguageModel: LanguageModel {
     typealias UnavailableReason = Never
 
     let transport: any GenerationTransport

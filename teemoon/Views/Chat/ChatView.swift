@@ -73,6 +73,7 @@ struct ChatView: View {
     /// When the degraded-send alert is raised by a message RETRY (not a fresh
     /// send), the message to retry — so the same gate covers both paths.
     @State private var pendingRetryMessage: Message?
+    @State private var pendingRetryEffort: ReasoningEffort = .chatDefault
     @FocusState.Binding var isPromptFocused: Bool
     @Binding var showChats: Bool
     @Binding var showSettings: Bool
@@ -228,7 +229,7 @@ struct ChatView: View {
         NavigationStack {
             Group {
                 if let currentThread {
-                    ConversationView(messages: currentThread.sortedMessages, threadID: currentThread.id, generatingThreadID: viewModel.generatingThreadID, onRetry: retry, onSetUpWebSearch: {
+                    ConversationView(messages: llm.superseding.visible(currentThread.sortedMessages), threadID: currentThread.id, generatingThreadID: viewModel.generatingThreadID, onRetry: { retry(from: $0) }, onThinkHarder: thinkHarder, thinkHarderAvailable: { canThinkHarder }, onSetUpWebSearch: {
                         // Same destination as the composer chip's unconfigured
                         // tap. Two entry points, one screen — if they diverged,
                         // the card would be teaching a route the chip doesn't use.
@@ -830,7 +831,7 @@ struct ChatView: View {
     private func generateBypassing() {
         if let message = pendingRetryMessage {
             pendingRetryMessage = nil
-            performRetry(from: message, acceptedDegrade: true)
+            performRetry(from: message, acceptedDegrade: true, effort: pendingRetryEffort)
         } else {
             performGenerate(acceptedDegrade: true)
         }
@@ -857,7 +858,7 @@ struct ChatView: View {
                 showE2EEDegradedAlert = true
             } else if let message = pending {
                 pendingRetryMessage = nil
-                performRetry(from: message)
+                performRetry(from: message, effort: pendingRetryEffort)
             } else {
                 performGenerate()
             }
@@ -867,7 +868,22 @@ struct ChatView: View {
     /// C1: a message RETRY must pass the same send-gate as a fresh send — the
     /// message row must not be a hole that resends the whole thread into a
     /// compromised/unverified enclave.
-    private func retry(from message: Message) {
+    /// Asks the reply's question again at high effort, in place of the reply.
+    /// Offered only where the active provider has a higher level to ask for. Read when the menu
+    /// opens: a server's kind can be learned (the Where sheet's probe) after the reply was drawn.
+    private var canThinkHarder: Bool {
+        guard let provider = providerStore.activeProvider else { return false }
+        return ReasoningEffort.canThinkHarder(ReasoningControl.resolve(provider: provider, store: providerStore),
+                                              provider: provider)
+    }
+
+    private func thinkHarder(_ reply: Message) {
+        guard let thread = currentThread,
+              let question = ChatViewModel.question(answeredBy: reply, in: thread) else { return }
+        retry(from: question, effort: .thinkHarder)
+    }
+
+    private func retry(from message: Message, effort: ReasoningEffort = .chatDefault) {
         let prep = viewModel.prepareSend(
             hasProvider: providerStore.activeProvider != nil,
             hasKey: activeProviderHasKey,
@@ -877,11 +893,13 @@ struct ChatView: View {
         )
         if prep == .confirmE2EE || prep == .blockedE2EE {
             pendingRetryMessage = message
+            pendingRetryEffort = effort
         }
-        presentSend(prep) { performRetry(from: message) }
+        presentSend(prep) { performRetry(from: message, effort: effort) }
     }
 
-    private func performRetry(from message: Message, acceptedDegrade: Bool = false) {
+    private func performRetry(from message: Message, acceptedDegrade: Bool = false,
+                              effort: ReasoningEffort = .chatDefault) {
         viewModel.retry(
             from: message,
             currentThread: &currentThread,
@@ -890,7 +908,8 @@ struct ChatView: View {
             providers: providerStore,
             session: confidentialSession,
             llm: llm,
-            acceptedDegrade: acceptedDegrade
+            acceptedDegrade: acceptedDegrade,
+            effort: effort
         )
     }
 }

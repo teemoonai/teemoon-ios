@@ -112,4 +112,14 @@ struct TLSAttestationVerifierTests {
         "ZXN0aW5nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEq3l2p0y8b8Z0m0m0mHkR" +
         "5c9r0k7Q0k5w3rF9wF1t8s5x2s0y0v6a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q" +
         "7wIDAQABMAoGCCqGSM49BAMCA0gAMEUCIQD0"
+
+    // 1.0.6: the probe quote was only parsed; now it is DCAP-verified too.
+    @Test func dcapFailureFailsAVerifiedBinding() {
+        #expect(TLSAttestationVerifier.withQuoteCheck(.verified, dcap: .failed("signature invalid")).isHardFailure)
+        #expect(TLSAttestationVerifier.withQuoteCheck(.verified,
+            dcap: .verified(tcbStatus: .revoked, mrConfigIdHex: "", reportDataHex: "")).isHardFailure)
+        #expect(TLSAttestationVerifier.withQuoteCheck(.verified,
+            dcap: .verified(tcbStatus: .outOfDate, mrConfigIdHex: "", reportDataHex: "")) == .verified)
+        #expect(TLSAttestationVerifier.withQuoteCheck(.inconclusive("x"), dcap: .failed("y")) == .inconclusive("x"))
+    }
 }

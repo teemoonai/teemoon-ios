@@ -28,9 +28,9 @@ enum DCAPVerification: Sendable, Equatable {
     var isVerified: Bool { if case .verified = self { return true }; return false }
 }
 
-/// Intel TCB status, mapped from dcap-qvl. `upToDate` is ideal; `outOfDate`
-/// variants mean the hardware is genuine but behind on patches (degrade, don't
-/// reject — matching near.ai's own verifier); `revoked` fails.
+/// Intel TCB status, mapped from dcap-qvl. Only `upToDate` and `outOfDate` are
+/// accepted (`isAccepted`); `OutOfDateConfigurationNeeded` maps to
+/// `configurationNeeded` and fails with the rest.
 enum DCAPTcbStatus: String, Sendable, Equatable {
     case upToDate
     case outOfDate
@@ -40,6 +40,8 @@ enum DCAPTcbStatus: String, Sendable, Equatable {
 
     /// Whether this status should count as fully trusted (green) vs. degraded.
     var isFullyTrusted: Bool { self == .upToDate }
+    /// The SDK's default allow-list. Anything else fails the quote.
+    var isAccepted: Bool { self == .upToDate || self == .outOfDate }
 
     init(rawStatus: String) {
         switch rawStatus.lowercased().replacingOccurrences(of: "_", with: "") {

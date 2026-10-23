@@ -330,8 +330,8 @@ final class ConfidentialSession {
         }
         #endif
         if let key = attestation?.modelEd25519PubKey { return key }
+        // Poll, never `await attestationTask?.value`: a hung fetch would outlast the deadline.
         let deadline = ContinuousClock.now + timeout
-        _ = await attestationTask?.value
         while ContinuousClock.now < deadline {
             if let key = attestation?.modelEd25519PubKey { return key }
             try? await Task.sleep(for: .milliseconds(250))
@@ -343,7 +343,6 @@ final class ConfidentialSession {
     /// failed, so callers can react to the outcome instead of polling fields.
     func attestationOutcome(waitingUpTo timeout: Duration) async {
         let deadline = ContinuousClock.now + timeout
-        _ = await attestationTask?.value
         while ContinuousClock.now < deadline {
             if attestation != nil || attestationFetchFailed { return }
             try? await Task.sleep(for: .milliseconds(250))

@@ -603,3 +603,43 @@ struct LiteRTContextBudgetTests {
                 "context of \(transport.contextTokens) cannot hold a grounded follow-up")
     }
 }
+
+// MARK: - Reply signature after the turn (1.0.6)
+
+/// near.ai's check sleeps 2 s before it fetches; the turn used to stay open
+/// for it, holding the stop button and the composer past the last token.
+@Suite("Late reply signature")
+struct LateReplySignatureTests {
+    @Test func theTurnEndsBeforeASlowCheckAndTheVerdictStillArrives() async throws {
+        var report = TurnReport()
+        report.verify = {
+            try? await Task.sleep(for: .milliseconds(800))
+            return .verified(.init(signingAddress: "0xabc"))
+        }
+        let transport = StubTransport(turns: [TurnOutput(content: "answer", report: report)])
+        let late = LockedBox<ResponseVerification?>(nil)
+        let inline = LockedBox<Bool>(false)
+        var events = StreamCallbacks(
+            onSourcesFound: { _ in }, onQueriesFound: { _ in }, onToolExecutionEnded: {},
+            onSuccess: { r in inline.value = r.teeVerification != nil })
+        events.onVerified = { late.value = $0 }
+        let engine = GenerationEngine(events: events, tools: [], initialMessages: [], prompt: "q", transport: transport)
+
+        let started = ContinuousClock.now
+        try await engine.run { _ in }
+        #expect(ContinuousClock.now - started < .milliseconds(500), "run waited for the signature check")
+        #expect(!inline.value)
+        await waitFor(timeout: .seconds(5), interval: .milliseconds(50)) { late.value != nil }
+        guard case .verified = late.value else { Issue.record("no late verdict"); return }
+    }
+
+    @Test func withoutAListenerTheVerdictStaysInline() async throws {
+        var report = TurnReport()
+        report.verify = { .verified(.init(signingAddress: "0xabc")) }
+        let transport = StubTransport(turns: [TurnOutput(content: "answer", report: report)])
+        let inline = LockedBox<Bool>(false)
+        let engine = makeEngine(transport: transport, onSuccess: { r in inline.value = r.teeVerification != nil })
+        try await engine.run { _ in }
+        #expect(inline.value)
+    }
+}

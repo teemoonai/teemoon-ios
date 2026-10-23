@@ -43,6 +43,8 @@ struct RequestDebugView: View {
         if let speed = info.speedLine { parts.append(speed) }
         if let timing = info.timingLine { parts.append(timing) }
         if let prefill = info.prefillSummary { parts.append(prefill) }
+        if let phases = info.phases?.line { parts.append(phases) }
+        if let effort = info.effortLine { parts.append(effort) }
         if let url = info.url {
             parts.append("\n--- URL ---\n\(DebugHeaderRedaction.copyURLString(url.absoluteString))")
         }
@@ -127,24 +129,16 @@ struct RequestDebugView: View {
             if let url = info.url {
                 InlineDebugRow(label: "url", value: url.absoluteString, scrollable: true)
             }
-            if let timing = info.timingLine {
+            if let timing = info.cardTimingLine {
                 Divider().padding(.leading, 12)
-                // ONE LINE, always. The chain is a shape as much as a set of numbers:
-                // six values in a row read as one measurement of one request, and the
-                // same six wrapped read as two of something. It fit at five and
-                // `think` was the sixth, so rather than drop a figure to keep the
-                // shape, the line scales itself down the few percent it needs.
-                //
-                // A floor, not free rein: 0.75 of caption2 is still legible, and if a
-                // future part cannot fit inside that, the truncation is the signal
-                // that the chain has outgrown the row.
-                // ON-DEVICE the speed row LEADS, and the two rows are ONE Text so
-                // they share one scale: the longer row sets the size for both, and
-                // nothing renders at two sizes. Cloud keeps its single chain.
+                // Timing chain, then effort and cache (the maintainer). It wraps to a second line
+                // rather than truncating. ON-DEVICE the speed row leads in the SAME Text,
+                // so both rows share one scale.
                 Text(info.speedLine.map { "\($0)\n\(timing)" } ?? timing)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(info.speedLine == nil ? 1 : 2)
+                    .lineLimit(info.speedLine == nil ? 2 : 3)
+                    .accessibilityIdentifier("chat.debugCard.timing")
                     .minimumScaleFactor(0.75)
                     // Without this the hosting cell proposes one line's height
                     // and the second row is swallowed into a "…" (seen in a render).

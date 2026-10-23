@@ -201,6 +201,50 @@ struct ConfidentialSessionTests {
                                                  verdictsPending: false) != nil)
     }
 
+    /// A hung attestation fetch used to hold the send past the 15 s wait:
+    /// the wait awaited the fetch task before its deadline loop.
+    @Test @MainActor func aHungAttestationFetchDoesNotOutlastTheKeyWait() async {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.clearDerivedState(resetCounts: true)
+        session.attestationTask = neverAnswers()
+        defer { session.attestationTask?.cancel() }
+        let started = ContinuousClock.now
+        let key = await session.e2eeKey(waitingUpTo: .milliseconds(300))
+        await session.attestationOutcome(waitingUpTo: .milliseconds(300))
+        #expect(key == nil)
+        #expect(ContinuousClock.now - started < .seconds(3), "the wait followed the hung fetch, not its deadline")
+    }
+
+    /// The model leg's 15 s cap raced the fetch in a task group, which waits
+    /// for every child, so the cap bounded nothing.
+    @Test func awaitValueGivesUpAtItsTimeout() async {
+        let hung = Task<Int?, Never> { try? await Task.sleep(for: .seconds(30)); return 1 }
+        defer { hung.cancel() }
+        let started = ContinuousClock.now
+        let value = await AttestationService.awaitValue(of: hung, timeout: 200_000_000)
+        #expect(value == nil)
+        #expect(ContinuousClock.now - started < .seconds(3))
+        let quick = Task<Int?, Never> { 7 }
+        #expect(await AttestationService.awaitValue(of: quick, timeout: 5_000_000_000) == 7)
+    }
+
+    /// Android found a window where a check not yet launched did not count as
+    /// pending. iOS adopts the record and launches its verifiers in one
+    /// main-actor step, so a send can never see a record without them.
+    @Test @MainActor func adoptingARecordLeavesNoUnlaunchedCheck() async {
+        let store = Self.storeMatchingPreviewRecord()
+        let session = ConfidentialSession(providers: store)
+        session.attestationTask?.cancel()
+        session.clearDerivedState(resetCounts: true)
+        #expect(!session.verdictsPending, "precondition: nothing launched, nothing adopted")
+        session.adopt(.preview, for: store.activeProvider!)
+        #expect(session.attestation != nil)
+        #expect(session.dcapTask != nil && session.tlsTask != nil, "a verifier was left unlaunched")
+        #expect(session.verdictsPending, "an adopted record must hold the send until its checks answer")
+        session.dcapTask?.cancel(); session.nrasTask?.cancel(); session.tlsTask?.cancel()
+    }
+
     /// A verdict that never lands is not a pass: the wait is bounded and the
     /// caller learns it is still pending.
     @Test @MainActor func prepareTurnReportsAVerdictStillPendingAtTheDeadline() async {
@@ -720,8 +764,8 @@ struct ConfidentialSessionTests {
 @Suite("AppSettings")
 struct AppSettingsTests {
 
-    @Test func defaultSystemPrompt_containsDatetimePlaceholder() {
-        #expect(AppSettings.defaultSystemPrompt.contains("{{datetime}}"))
+    @Test func defaultSystemPrompt_containsDatePlaceholder() {
+        #expect(AppSettings.defaultSystemPrompt.contains("{{date}}"))
     }
 
     @Test func defaultSystemPrompt_isNotEmpty() {

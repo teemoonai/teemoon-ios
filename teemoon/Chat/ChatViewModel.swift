@@ -156,6 +156,10 @@ final class ChatViewModel {
         }
         guard let thread = currentThread else { return }
         generatingThreadID = thread.id
+        // The card's phases count from the tap, on a plain send as on a retry.
+        llm.turnOrigin = Date()
+        llm.gateEndedAt = nil
+        llm.turnIsReask = false
         let message = prompt
         prompt = ""
         onPlayHaptic?()
@@ -199,7 +203,8 @@ final class ChatViewModel {
         providers: ProviderStore,
         session: ConfidentialSession,
         llm: ChatGeneration,
-        acceptedDegrade: Bool = false
+        acceptedDegrade: Bool = false,
+        effort: ReasoningEffort = .chatDefault
     ) {
         guard let thread = message.thread ?? currentThread else { return }
 
@@ -208,9 +213,12 @@ final class ChatViewModel {
             llm.stop()
         }
 
-        // Delete all messages after this one with an animated exit
         let sorted = thread.sortedMessages
-        if let idx = sorted.firstIndex(where: { $0.id == message.id }) {
+        if effort == .thinkHarder, let idx = sorted.firstIndex(where: { $0.id == message.id }) {
+            // The old reply stays until the new one lands (`ReplySupersession`).
+            llm.superseding = ReplySupersession(replyIDs: Set(sorted[(idx + 1)...].map(\.id)))
+        } else if let idx = sorted.firstIndex(where: { $0.id == message.id }) {
+            // Delete all messages after this one with an animated exit
             let toDelete = Array(sorted[(idx + 1)...])
             let apply = onBatchUpdate ?? { $0() }
             ChatSearchService.shared.didDelete(messageIDs: toDelete.map(\.id))
@@ -230,13 +238,30 @@ final class ChatViewModel {
 
         currentThread = thread
         generatingThreadID = thread.id
+        llm.turnOrigin = Date()
+        llm.gateEndedAt = nil
+        llm.turnIsReask = true
         Task {
             await llm.waitUntilStopped(timeout: .seconds(1))
             onPlayHaptic?()
             await generateResponse(in: thread, settings: settings, providers: providers, session: session,
-                                   llm: llm, modelContext: modelContext, acceptedDegrade: acceptedDegrade)
+                                   llm: llm, modelContext: modelContext, acceptedDegrade: acceptedDegrade,
+                                   effort: effort)
             generatingThreadID = nil
         }
+    }
+
+    /// Think Harder asks again NOW, so its time note says so; a plain retry keeps
+    /// the time the question was first sent.
+    static func restampIfReasked(_ question: Message, effort: ReasoningEffort, now: Date = Date()) {
+        if effort == .thinkHarder { question.timestamp = now }
+    }
+
+    /// The question a reply answered: the user message just before it.
+    static func question(answeredBy reply: Message, in thread: Thread) -> Message? {
+        let sorted = thread.sortedMessages
+        guard let idx = sorted.firstIndex(where: { $0.id == reply.id }) else { return nil }
+        return sorted[..<idx].last(where: { $0.role == .user })
     }
 
     private func generateResponse(
@@ -246,8 +271,12 @@ final class ChatViewModel {
         session: ConfidentialSession,
         llm: ChatGeneration,
         modelContext: ModelContext,
-        acceptedDegrade: Bool
+        acceptedDegrade: Bool,
+        effort: ReasoningEffort = .chatDefault
     ) async {
+        let supersession = llm.superseding
+        // Cleared on every exit, and only after the save below, or the old reply shows for a frame.
+        defer { if supersession.isActive { llm.superseding = ReplySupersession() } }
         guard let provider = providers.activeProvider else { return }
         let groundingKey = provider.capabilities.contains(.builtInGrounding)
             ? nil : settings.groundingAPIKey
@@ -267,6 +296,13 @@ final class ChatViewModel {
         }
 
         let teeContext = await session.prepareTurn()
+        llm.gateEndedAt = Date()
+        // A verdict that lands after a provider switch must not count for the new one.
+        let sentTo = provider.id
+        llm.onReplyVerified = { [weak session, weak providers] verification in
+            guard providers?.activeProvider?.id == sentTo else { return }
+            session?.recordVerification(verification)
+        }
         if let refusal = Self.postPrepareRefusal(policy: session.sendPolicy, acceptedDegrade: acceptedDegrade,
                                                  verdictsPending: session.verdictsPending) {
             logger.warning("[E2EE] gate refused after prepareTurn — \(refusal, privacy: .public)")
@@ -304,19 +340,40 @@ final class ChatViewModel {
             return
         }
 
+        await ReasoningControl.classifyIfNeeded(provider, store: providers)
+        ReasoningControl.note(ReasoningControl.resolve(provider: provider, store: providers), for: provider)
         let output = await llm.generate(
             provider: provider,
             thread: thread,
             systemPrompt: settings.systemPrompt,
             groundingAPIKey: groundingKey,
             apiKey: apiKey,
-            teeContext: teeContext
+            teeContext: teeContext,
+            effort: effort
         )
         // `generate` has already set `running = false`. Do not yield before
         // the assistant row is in SwiftData — a hop here lets SwiftUI paint
         // one frame with the streaming view gone and no persisted message,
         // which is the flash before the debug panel.
         session.finishTurn(debugInfo: llm.lastRequestDebugInfo, error: llm.lastError)
+
+        switch supersession.outcome(failed: llm.lastError != nil, cancelled: llm.cancelled, output: output) {
+        case .restore:
+            // The question keeps its old answer: nothing to resume, and no partial reply.
+            llm.interruptedThreadID = nil
+            llm.scrollToBottomToken += 1
+            return
+        case .replace(let oldIDs):
+            let old = thread.sortedMessages.filter { oldIDs.contains($0.id) }
+            ChatSearchService.shared.didDelete(messageIDs: old.map(\.id))
+            old.forEach { modelContext.delete($0) }
+            if let question = thread.sortedMessages.last(where: { $0.role == .user }) {
+                Self.restampIfReasked(question, effort: effort)
+            }
+            thread.invalidateSortedMessages()
+        case nil:
+            break
+        }
 
         // Save the assistant message immediately so it appears in the conversation
         // as soon as the StreamingMessageView disappears (llm.running became false).

@@ -36,9 +36,9 @@ enum OllamaAdapter {
 
     /// Cheap probe: is this endpoint an Ollama server? `GET {root}/api/version`
     /// returns `{"version":"…"}`. Swallows all errors → false.
-    static func isOllama(baseURL: URL, session: URLSession = .shared) async -> Bool {
+    static func isOllama(baseURL: URL, session: URLSession = .shared, timeout: TimeInterval = 5) async -> Bool {
         var req = URLRequest(url: rootURL(from: baseURL).appendingPathComponent("api/version"))
-        req.timeoutInterval = 5
+        req.timeoutInterval = timeout
         guard let (data, resp) = try? await session.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let v = try? JSONDecoder().decode(OllamaVersionResponse.self, from: data) else {

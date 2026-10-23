@@ -2,7 +2,7 @@
 //  AttestationService+GPU.swift
 //  teemoon
 //
-//  Direct GPU-node attestation: signing-address re-fetch and the
+//  Direct GPU-node attestation: the
 //  compose/artifact report. Kept off AttestationService.swift so the
 //  orchestrator is not also the node retry loop.
 //
@@ -14,37 +14,6 @@ import TDXQuoteVerifier
 private let logger = Logger(subsystem: "ai.teemoon", category: "attestation")
 
 extension AttestationService {
-
-    /// Used by TEESignatureVerifier to check for key rotation on mismatch.
-    static func fetchSigningAddress(
-        from nodeURL: URL, apiKey: String, http: any HTTPClient = URLSessionHTTP()
-    ) async -> String? {
-        guard let (request, _) = makeAttestationRequest(baseURL: nodeURL, apiKey: apiKey) else { return nil }
-        guard let data = try? await http.data(for: request).0
-        else {
-            logger.warning("GPU signing address fetch failed — no data from \(nodeURL.host ?? "", privacy: .public)")
-            return nil
-        }
-        if let report = try? JSONDecoder().decode(GPUNodeReport.self, from: data) {
-            if let addr = report.signingAddress {
-                logger.debug("GPU re-fetch got signing_address: \(addr, privacy: .public)")
-                return addr
-            }
-            logger.debug("GPU report has no signing_address field")
-            if let hex = report.intelQuote,
-               let quote = try? QuoteParser.parse(hex: hex) {
-                let reportData = quote.body.reportData
-                if reportData.count >= 20, reportData.prefix(20) != Data(count: 20) {
-                    let addr = "0x" + reportData.prefix(20).map { String(format: "%02x", $0) }.joined()
-                    logger.debug("GPU address extracted from TDX report_data: \(addr, privacy: .public)")
-                    return addr
-                }
-            }
-        } else {
-            logger.error("GPU report decode failed — body: \(data.previewForLog(), privacy: .private)")
-        }
-        return nil
-    }
 
     /// Fetches GPU attestation data from a direct model inference node.
     /// Retries up to 3 times with exponential backoff (1s, 2s, 4s) to handle

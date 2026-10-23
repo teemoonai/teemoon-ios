@@ -157,6 +157,9 @@ struct ConversationView: View {
     let threadID: UUID
     let generatingThreadID: UUID?
     var onRetry: ((Message) -> Void)? = nil
+    var onThinkHarder: ((Message) -> Void)? = nil
+    /// Whether the active provider has a higher level to ask for, asked when a menu opens.
+    var thinkHarderAvailable: () -> Bool = { true }
     /// Raised by the offer card. The host opens settings deep-linked to search.
     var onSetUpWebSearch: (() -> Void)? = nil
     /// Raised once a key is accepted IN THE CARD, with the question to re-ask.
@@ -224,6 +227,13 @@ struct ConversationView: View {
     #endif
 
     private var isGenerating: Bool { llm.running && threadID == generatingThreadID }
+
+    /// The newest finished reply only: on an earlier one it would delete every later turn.
+    private func thinkHarderAction(for message: Message) -> (() -> Void)? {
+        guard message.role == .assistant, message.id == messages.last?.id, !isGenerating,
+              let onThinkHarder else { return nil }
+        return { onThinkHarder(message) }
+    }
     /// Whether the transcript should be pinned to the newest text right now:
     /// a reply is arriving into THIS thread and the user has not scrolled away
     /// from it. Gates the explicit follow below — and nothing else; the
@@ -236,7 +246,8 @@ struct ConversationView: View {
     @ViewBuilder
     private var pendingChip: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            GenerationActivityChipView(state: .thinking, elapsedTime: llm.elapsedTime)
+            GenerationActivityChipView(state: llm.superseding.isActive ? .thinkingHarder : .thinking,
+                                       elapsedTime: llm.elapsedTime)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -409,9 +420,12 @@ struct ConversationView: View {
                             // every time an old row scrolled back into view.
                             let isLast = message.id == sortedMessages.last?.id
                             MessageView(message: message,
-                                        isLLMRunning: isGenerating && isLast,
-                                        onRetry: showRetry ? { onRetry?(message) } : nil)
+                                        isLLMRunning: isGenerating && isLast && !llm.superseding.replyIDs.contains(message.id),
+                                        onRetry: showRetry ? { onRetry?(message) } : nil,
+                                        onThinkHarder: thinkHarderAction(for: message),
+                        thinkHarderAvailable: thinkHarderAvailable)
                                 .padding()
+                                .modifier(SupersededReplyDimming(messageID: message.id))
                                 // A row-size cache lived here for one day
                                 // (2026-08-06/07) and is deliberately GONE —
                                 // resurrect it only after reading its commit
@@ -1053,9 +1067,13 @@ struct ConversationView: View {
             // every row it auto-expands every historic reasoning block the
             // moment a generation starts.
             MessageView(message: message,
-                        isLLMRunning: isGenerating && message.id == messages.last?.id,
-                        onRetry: showRetry ? { onRetry?(message) } : nil)
+                        isLLMRunning: isGenerating && message.id == messages.last?.id
+                            && !llm.superseding.replyIDs.contains(message.id),
+                        onRetry: showRetry ? { onRetry?(message) } : nil,
+                        onThinkHarder: thinkHarderAction(for: message),
+                        thinkHarderAvailable: thinkHarderAvailable)
                 .padding()
+                .modifier(SupersededReplyDimming(messageID: message.id))
         }
     }
 

@@ -63,6 +63,8 @@ struct AppearanceSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        // Menu pickers keep the tint they were drawn with; a new tint redraws them.
+        .id(settings.appTintColor)
         .navigationTitle("appearance")
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

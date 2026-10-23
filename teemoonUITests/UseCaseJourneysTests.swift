@@ -228,8 +228,10 @@ final class UseCaseJourneysTests: XCTestCase {
         ProductE2E.typeIntoComposer(app, "turn-me-around")
         ProductE2E.send(app)
         XCTAssertTrue(app.buttons["chat.stop"].waitForExistence(timeout: 10), "the turn never started")
+#if os(iOS)
         XCUIDevice.shared.orientation = .landscapeLeft; sleep(2)
         XCUIDevice.shared.orientation = .portrait
+#endif
         XCTAssertTrue(ProductE2E.waitUntilSettled(app, timeout: 60), "the turn did not finish after a rotation")
         XCTAssertFalse(app.descendants(matching: .any)["chat.error"].firstMatch.exists, "the rotation broke the turn")
         XCTAssertEqual(server.requestBodies.filter { $0.contains("turn-me-around") }.count, 1, "the rotation re-sent the turn")
@@ -242,7 +244,7 @@ final class UseCaseJourneysTests: XCTestCase {
         let bubble = app.staticTexts.matching(NSPredicate(format: "label == %@", "copy-exactly-this")).allElementsBoundByIndex.max { $0.frame.minY < $1.frame.minY }
         XCTAssertNotNil(bubble, "the question is not in the transcript")
         bubble?.press(forDuration: 1.0)
-        let copy = app.buttons.matching(NSPredicate(format: "label ==[c] %@", "copy")).firstMatch   // the menu says "Copy"
+        let copy = app.buttons.matching(NSPredicate(format: "label ==[c] %@", "copy")).firstMatch   // the menu says "copy"
         XCTAssertTrue(copy.waitForExistence(timeout: 5), "the long press offered no copy")
         copy.tap()
         // read it back INSIDE the app: the runner reading UIPasteboard raises the simulator's paste prompt and hangs
@@ -725,7 +727,9 @@ final class UseCaseJourneysTests: XCTestCase {
         // the card's own identifier is on every element inside it, so the button is found by its label
         let paste = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label ==[c] %@", "chat.webSearchOffer", "paste")).firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 30), "a keyless search call offered no key")
+#if os(iOS)
         UIPasteboard.general.string = "uitest-brave-key"
+#endif
         paste.tap()
         // the system's paste consent, when it asks
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")

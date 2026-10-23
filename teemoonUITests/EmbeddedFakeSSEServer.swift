@@ -71,6 +71,10 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
     /// thinking chip (it is only on screen until paced text arrives).
     var startDelay: TimeInterval = 0
 
+    /// Hold every chat completion's response HEADERS this long, the way a
+    /// provider that has not started the request does.
+    var headerDelay: TimeInterval = 0
+
     /// Go quiet mid-stream every `stallEvery` blocks, for `stallDuration`.
     ///
     /// The 2026-08-25 jitter cannot be reproduced by a continuous stream:
@@ -277,7 +281,13 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
         return replies[min(users - 1, replies.count - 1)]
     }
 
-    private func streamCompletion(_ conn: NWConnection, requestBody: String = "") {
+    private func streamCompletion(_ conn: NWConnection, requestBody: String = "", held: Bool = false) {
+        if headerDelay > 0, !held {
+            queue.asyncAfter(deadline: .now() + headerDelay) { [weak self] in
+                self?.streamCompletion(conn, requestBody: requestBody, held: true)
+            }
+            return
+        }
         let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
             + "Cache-Control: no-cache\r\nConnection: close\r\n\r\n"
         conn.send(content: Data(header.utf8), completion: .contentProcessed { _ in })

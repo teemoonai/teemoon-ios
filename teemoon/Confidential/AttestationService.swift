@@ -23,18 +23,23 @@ enum AttestationService {
     }
 
     /// Awaits `task`'s value, giving up after `timeout` nanoseconds and
-    /// returning nil. Does not itself cancel `task` — the caller decides
-    /// whether the in-flight work should keep running or be cancelled.
-    static func awaitValue<T>(of task: Task<T?, Never>, timeout: UInt64) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await task.value }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: timeout)
-                return nil
+    /// returning nil. Does not cancel `task`. Never race it in a task group:
+    /// the group waits for the child still awaiting `task.value`.
+    static func awaitValue<T: Sendable>(of task: Task<T?, Never>, timeout: UInt64) async -> T? {
+        let resumed = OSAllocatedUnfairLock(initialState: false)
+        return await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+            @Sendable func resume(_ value: T?) {
+                let first = resumed.withLock { done -> Bool in
+                    defer { done = true }
+                    return !done
+                }
+                if first { continuation.resume(returning: value) }
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+            Task { resume(await task.value) }
+            Task {
+                try? await Task.sleep(nanoseconds: timeout)
+                resume(nil)
+            }
         }
     }
 

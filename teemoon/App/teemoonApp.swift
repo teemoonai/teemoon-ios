@@ -202,6 +202,8 @@ struct TeemoonApp: App {
 
         // Keep the default store location so existing conversations aren't orphaned.
         let configuration = ModelConfiguration(schema: schema)
+        // Before the container: it must be the only connection to the file.
+        StoreCompaction.runIfPending(storeURL: configuration.url)
         let container: ModelContainer
         do {
             // Opened THROUGH the migration plan (SchemaVersioning.swift):

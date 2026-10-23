@@ -149,6 +149,12 @@ struct TurnReport: Sendable {
     /// The gap is thinking — see `SSEStreamParser.firstDeltaAt`.
     var firstTokenAt: Date?
     var firstVisibleTokenAt: Date?
+    /// When the request left and when the response headers came back.
+    var sentAt: Date?
+    var responseAt: Date?
+    /// usage.prompt_tokens and the share of them served from the provider's prompt cache.
+    var promptTokens: Int?
+    var cachedTokens: Int?
 
     /// Prefill/decode figures the runtime timed itself. Never estimate prefill
     /// from ttft: over HTTP that also holds the network and the server's queue.
@@ -204,4 +210,26 @@ protocol GenerationTransport: Sendable {
         includeTools: Bool,
         onPartialContent: @escaping @Sendable (String) -> Void
     ) async throws -> TurnOutput
+
+    /// The same turn, plus `onResponse` once the provider's response headers
+    /// arrive. A transport with no network wait must call it before any work.
+    func runTurn(
+        messages: [[String: Any]],
+        includeTools: Bool,
+        onResponse: @escaping @Sendable () -> Void,
+        onPartialContent: @escaping @Sendable (String) -> Void
+    ) async throws -> TurnOutput
+}
+
+extension GenerationTransport {
+    func runTurn(
+        messages: [[String: Any]],
+        includeTools: Bool,
+        onResponse: @escaping @Sendable () -> Void,
+        onPartialContent: @escaping @Sendable (String) -> Void
+    ) async throws -> TurnOutput {
+        onResponse()
+        return try await runTurn(messages: messages, includeTools: includeTools,
+                                 onPartialContent: onPartialContent)
+    }
 }

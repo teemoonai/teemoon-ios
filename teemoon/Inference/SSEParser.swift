@@ -120,6 +120,9 @@ final class SSEStreamParser {
     var completionTokens: Int? = nil
     /// `usage.prompt_tokens` — how many input tokens the server evaluated.
     var promptTokens: Int? = nil
+    /// Prompt tokens the provider served from its cache (OpenAI-style
+    /// `prompt_tokens_details.cached_tokens`, DeepSeek `prompt_cache_hit_tokens`).
+    var cachedTokens: Int? = nil
     /// llama.cpp's own `timings` object, on its last chunk. Other servers send none.
     var engineTimings: EngineTimings? = nil
 
@@ -244,6 +247,10 @@ final class SSEStreamParser {
                 // `PromptBudget`.
                 if let tokens = usage["prompt_tokens"] as? Int {
                     promptTokens = tokens
+                }
+                if let tokens = (usage["prompt_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int
+                    ?? usage["prompt_cache_hit_tokens"] as? Int {
+                    cachedTokens = tokens
                 }
             }
 

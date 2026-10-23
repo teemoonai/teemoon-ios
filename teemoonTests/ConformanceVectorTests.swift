@@ -157,9 +157,11 @@ struct ConformanceEmitTests {
         try write("sigstore", try ConformanceAttestationVectors.sigstore())
         try write("nras", try await ConformanceAttestationVectors.nras())
         try write("tls", try ConformanceAttestationVectors.tls())
+        try write("signatures", try ConformanceSignatureVectors.signatures())
         try write("streams", try ConformanceFixtureVectors.streams())
         try write("catalogs", try ConformanceFixtureVectors.catalogs())
         try write("brave", try ConformanceFixtureVectors.brave())
+        try write("requests", try await ConformanceRequestVectors.requests())
     }
 
     /// CONFORMANCE_OUT, else `<repo>/conformance` derived from this file.

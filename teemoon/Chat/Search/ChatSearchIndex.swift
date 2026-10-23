@@ -136,6 +136,8 @@ protocol ChatSearchIndexing: Sendable {
     func remove(messageIDs: [UUID]) async throws
     func remove(threadID: UUID) async throws
     func removeAll() async throws
+    /// After a chat delete: rewrites what FTS keeps of deleted rows and empties the WAL.
+    func purgeDeleted() async throws
     func indexedMessageIDs() async throws -> Set<UUID>
     /// `since` and `excludingThread` are applied IN SQL, before `limit`.
     /// Filtering rank-ordered rows after an over-fetch is not equivalent: a
@@ -276,7 +278,9 @@ actor ChatSearchIndex: ChatSearchIndexing {
         //
         // Regular FTS5, not contentless: contentless cannot do snippet(), and
         // the snippet IS the feature. The price is ~12 MB of duplicated text.
+        // secure_delete is per connection: freed pages are zeroed, not left readable.
         try exec(db, """
+            PRAGMA secure_delete = ON;
             PRAGMA journal_mode = WAL;
             CREATE VIRTUAL TABLE IF NOT EXISTS messages USING fts5(
                 content,
@@ -293,6 +297,9 @@ actor ChatSearchIndex: ChatSearchIndexing {
             );
             CREATE INDEX IF NOT EXISTS docs_thread ON docs(thread_id);
             """, operation: "create schema")
+        // FTS5 'secure-delete' (SQLite 3.42+) drops a deleted row's terms from
+        // the segments at delete time; older SQLite ignores it and 'optimize' covers.
+        sqlite3_exec(db, "INSERT INTO messages(messages, rank) VALUES('secure-delete', 1)", nil, nil, nil)
         sqlite3_exec(db, "PRAGMA user_version = \(Self.schemaVersion)", nil, nil, nil)
     }
 
@@ -389,7 +396,17 @@ actor ChatSearchIndex: ChatSearchIndexing {
     /// "delete all chats" leaves a searchable plaintext copy of every one.
     func removeAll() async throws {
         let db = try handle()
-        try exec(db, "DELETE FROM messages; DELETE FROM docs;", operation: "remove all")
+        // Dropped and rebuilt: under secure_delete, row-by-row deletes are slow.
+        try exec(db, "DROP TABLE IF EXISTS messages; DROP TABLE IF EXISTS docs;", operation: "remove all")
+        try createSchema(db)
+    }
+
+    /// FTS5 keeps a deleted row's terms in its segments until they merge;
+    /// 'optimize' merges them all now.
+    func purgeDeleted() async throws {
+        let db = try handle()
+        try exec(db, "INSERT INTO messages(messages) VALUES('optimize');", operation: "optimize")
+        try exec(db, "PRAGMA wal_checkpoint(TRUNCATE);", operation: "checkpoint")
     }
 
     // MARK: Reads

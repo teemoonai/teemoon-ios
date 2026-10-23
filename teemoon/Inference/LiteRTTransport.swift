@@ -84,6 +84,8 @@ struct LiteRTTransport: GenerationTransport {
     /// Ceiling on one answer. A decoder looping on a single token otherwise
     /// runs to the KV cache — minutes of GPU for a reply nobody can read.
     let maxAnswerTokens: Int
+    /// Think Harder: LiteRT's ThinkingConfig on, the thought streamed as the thinking block.
+    let thinking: Bool
 
     /// Test seam for the background-abandon path. Production is nil — the turn
     /// polls `UIApplication.applicationState`. A test can force the path (there
@@ -112,6 +114,7 @@ struct LiteRTTransport: GenerationTransport {
     init(modelPath: URL, estimatedSizeMB: Int, contextTokens: Int = 8192,
          tools: [any AnyLanguageModel.Tool] = [], events: StreamCallbacks? = nil,
          maxAnswerTokens: Int = LiteRTTransport.answerReserveTokens,
+         thinking: Bool = false,
          backgroundedForTest: (@Sendable () -> Bool)? = nil) {
         self.modelPath = modelPath
         self.estimatedSizeMB = estimatedSizeMB
@@ -119,8 +122,12 @@ struct LiteRTTransport: GenerationTransport {
         self.tools = tools
         self.events = events
         self.maxAnswerTokens = maxAnswerTokens
+        self.thinking = thinking
         self.backgroundedForTest = backgroundedForTest
     }
+
+    /// Off only to measure the difference (`LiteRTConversationReuse`).
+    nonisolated(unsafe) static var reuseConversations = true
 
     // MARK: - Engine cache
 
@@ -143,7 +150,31 @@ struct LiteRTTransport: GenerationTransport {
         /// this the second caller found no engine and built another.
         private var building: [Key: Task<Resident, Error>] = [:]
 
+        /// Last turn's conversation, when it already holds what the next turn
+        /// would seed (`LiteRTConversationReuse`). Belongs to one engine.
+        final class Kept: @unchecked Sendable {
+            let conversation: LiteRTLM.Conversation
+            let state: KeptConversationState
+            let engine: ObjectIdentifier
+            init(conversation: LiteRTLM.Conversation, state: KeptConversationState, engine: ObjectIdentifier) {
+                self.conversation = conversation; self.state = state; self.engine = engine
+            }
+        }
+        private var kept: [URL: Kept] = [:]
+
+        /// Takes (and forgets) the kept conversation, if it is this engine's.
+        func takeKept(_ path: URL, engine: LiteRTLM.Engine) -> Kept? {
+            defer { kept[path] = nil }
+            guard let k = kept[path], k.engine == ObjectIdentifier(engine) else { return nil }
+            return k
+        }
+
+        func keep(_ k: Kept, for path: URL) { kept[path] = k }
+
+        func dropKept() { kept.removeAll() }
+
         func evictAll() async {
+            kept.removeAll()
             guard !engines.isEmpty else { return }
             logger.info("[litert] releasing \(self.engines.count, privacy: .public) engine(s)")
             engines.removeAll()
@@ -157,6 +188,7 @@ struct LiteRTTransport: GenerationTransport {
         /// out). The next turn builds a fresh one; the caller releases the dead
         /// one off any thread a user is waiting on.
         func discard(_ path: URL, contextTokens: Int) async {
+            kept[path] = nil
             engines[Key(path: path, contextTokens: contextTokens)] = nil
             await publish()
         }
@@ -272,6 +304,13 @@ struct LiteRTTransport: GenerationTransport {
         await EngineCache.shared.evictAll()
     }
 
+    /// A deleted chat's text must not outlive it in a kept conversation. The
+    /// kept state is per model, not per thread, so all of it goes; the next
+    /// on-device turn seeds again.
+    static func forgetKeptConversations() async {
+        await EngineCache.shared.dropKept()
+    }
+
     /// Turns on the LiteRT behaviour teemoon depends on. Idempotent; every flag
     /// here is inert until `optIntoExperimentalAPIs()` has been called, and each
     /// is read only when a *new* `Conversation` is created.
@@ -330,6 +369,14 @@ struct LiteRTTransport: GenerationTransport {
     /// hard `INVALID_ARGUMENT` from the native layer, which the user sees as a
     /// one-token non-answer.
     static let answerReserveTokens = 4800
+    /// Room for a Think Harder thought on top of the answer cap.
+    static let thinkingReserveTokens = 2048
+
+    /// Some bundles put the thought inline as `<|channel>thought…<channel|>` (Android's NPU build).
+    /// Like the channel, it is discarded: never shown, never the saved reply. Cut off by the cap, all of it goes.
+    static func strippingInlineThought(_ raw: String) -> String {
+        raw.replacing(/<\|channel>thought(?s:.*?)(?:<channel\|>|$)/, with: "")
+    }
 
     /// Rough token count. Deliberately PESSIMISTIC: Gemma 4 averages ~6.3
     /// characters per token, so dividing by 4 over-estimates, and
@@ -365,6 +412,16 @@ struct LiteRTTransport: GenerationTransport {
     static func prettyMessages(_ messages: [[String: Any]]) -> String? {
         guard let data = try? JSONSerialization.data(
             withJSONObject: messages, options: [.prettyPrinted, .sortedKeys]) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// The card's request body: the messages, and the tools the model was given in the
+    /// cloud card's `tools` shape. No tools offered, no `tools` key.
+    static func prettyRequest(_ messages: [[String: Any]], tools: [any AnyLanguageModel.Tool]) -> String? {
+        guard !tools.isEmpty else { return prettyMessages(messages) }
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: ["messages": messages, "tools": HTTPTransport.wireTools(tools)] as [String: Any],
+            options: [.prettyPrinted, .sortedKeys]) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
@@ -478,7 +535,7 @@ struct LiteRTTransport: GenerationTransport {
         let priorMessages = messages
             .dropLast()                                   // the live turn is sent below
             .filter { ($0["role"] as? String) != "system" } // carried separately
-        let history: [LiteRTLM.Message] = Self.trimmedHistory(
+        let historyTurns: [KeptConversationState.Turn] = Self.trimmedHistory(
             priorMessages,
             budgetTokens: contextTokens
                 - Self.estimatedTokens(systemMessage?.toString ?? "")
@@ -486,8 +543,18 @@ struct LiteRTTransport: GenerationTransport {
                 - Self.answerReserveTokens
         ).compactMap { message in
             guard let text = message["content"] as? String, !text.isEmpty else { return nil }
-            return LiteRTLM.Message(text, role: Self.role(for: message["role"] as? String))
+            return .init(role: (message["role"] as? String) ?? "user", text: text)
         }
+        let history = historyTurns.map { LiteRTLM.Message($0.text, role: Self.role(for: $0.role)) }
+        let systemText = messages.first { ($0["role"] as? String) == "system" }
+            .flatMap { $0["content"] as? String }.flatMap { $0.isEmpty ? nil : $0 }
+        let toolNames = includeTools ? tools.map(\.name) : []
+        let kept = Self.reuseConversations ? await EngineCache.shared.takeKept(modelPath, engine: engine) : nil
+        let reusedConversation = LiteRTConversationReuse.canReuse(
+            kept?.state, systemMessage: systemText, toolNames: toolNames, history: historyTurns,
+            thinking: self.thinking) ? kept?.conversation : nil
+        let thinkingConfig = LiteRTLM.ThinkingConfig(enableThinking: thinking)
+        DiagLog.note("[litert] conversation: \(reusedConversation != nil ? "reused (\(historyTurns.count) turns cached)" : "seeded")")
 
         let executed = LockedBox<[ToolCallRecord]>([])
         let conversation: LiteRTLM.Conversation
@@ -518,19 +585,19 @@ struct LiteRTTransport: GenerationTransport {
                 }
             )
             Self.setConstrainedDecoding(toolsAttached: true)
-            conversation = try await engine.createConversation(
+            if let reusedConversation { conversation = reusedConversation } else { conversation = try await engine.createConversation(
                 with: LiteRTLM.ConversationConfig(
                     systemMessage: systemMessage, initialMessages: history,
                     tools: shims, samplerConfig: LiteRTSpeculativeDecoding.benchSampler,
-                    enableToolCallStreaming: true)
-            )
+                    enableToolCallStreaming: true, thinkingConfig: thinkingConfig)
+            ) }
         } else {
             Self.setConstrainedDecoding(toolsAttached: false)
-            conversation = try await engine.createConversation(
+            if let reusedConversation { conversation = reusedConversation } else { conversation = try await engine.createConversation(
                 with: LiteRTLM.ConversationConfig(
                     systemMessage: systemMessage, initialMessages: history,
-                    samplerConfig: LiteRTSpeculativeDecoding.benchSampler)
-            )
+                    samplerConfig: LiteRTSpeculativeDecoding.benchSampler, thinkingConfig: thinkingConfig)
+            ) }
         }
 
         let lastText = (messages.last?["content"] as? String) ?? ""
@@ -551,7 +618,8 @@ struct LiteRTTransport: GenerationTransport {
         // the gate — until that decode has stopped. Merely leaving the Swift loop
         // leaves LiteRT decoding on its one worker thread, and the next turn
         // queues behind it (LiteRTLiveTests.answersAfterATurnWasAbandonedMidDecode).
-        let cap = maxAnswerTokens
+        // A thought counts against the cap too; it took ~400 tokens a question measured.
+        let cap = thinking ? maxAnswerTokens + Self.thinkingReserveTokens : maxAnswerTokens
         // LiteRT ends a cancelled stream with an ERROR
         // (`invalidResponse("CANCELLED: Task cancelled")`). One we asked for is a
         // normal end of stream, and the partial answer is the turn's output.
@@ -562,6 +630,8 @@ struct LiteRTTransport: GenerationTransport {
         /// the engine it runs on.
         let dead = LockedBox<Bool>(false)
         let live = LockedBox<LiteRTLM.Conversation?>(conversation)
+        /// The cap ended the turn: no answer is then an error, never an empty reply.
+        let hitCap = LockedBox<Bool>(false)
         let watchdog = LockedBox<Task<Void, Never>?>(nil)
         let consumerBox = LockedBox<Task<String, any Error>?>(nil)
         // What the user has already been shown, so an ABANDONED turn (below) can
@@ -603,18 +673,24 @@ struct LiteRTTransport: GenerationTransport {
             defer { finished.value = true }
             var answer = ""
             var capped = false
+            var inlineThought = InlineThoughtFilter()
             do {
             for try await chunk in conversation.sendMessageStream(LiteRTLM.Message(lastText, role: .user)) {
-                let piece = chunk.contents.compactMap { content -> String? in
+                let text = chunk.contents.compactMap { content -> String? in
                     if case .text(let t) = content { return t }
                     return nil
                 }.joined()
-                guard !piece.isEmpty else { continue }
-                answer += piece
+                // Like cloud reasoning: the thought (its own channel) is never shown or kept;
+                // the UI's "thinking…" timer runs until the answer starts.
+                guard !text.isEmpty else { continue }
+                answer += text
+                // An inline thought is held back while it streams, so it never flashes on screen.
+                let piece = inlineThought.append(text)
                 // Cancelled natively and DRAINED like any other cancel — never
                 // `break`, which would orphan the decode this guard exists to end.
                 if !capped, Self.estimatedTokens(answer) > cap {
                     capped = true
+                    hitCap.value = true
                     requestStop("answer passed \(cap) tokens")
                 }
                 // Stream the ELIDED accumulation, not the raw one. This used to be
@@ -634,7 +710,7 @@ struct LiteRTTransport: GenerationTransport {
                 // elider touches only tool-call regions. `answer` stays RAW — the
                 // TurnOutput below parses thinking out of it, and the engine's
                 // sanitize pass owns the final text; elide only what is SHOWN.
-                if !elider.append(piece).isEmpty {
+                if !piece.isEmpty, !elider.append(piece).isEmpty {
                     // Drop writes from a decode that outlived its turn.
                     guard !abandoned.value else { continue }
                     onPartialContent(elider.visibleContent)
@@ -648,6 +724,8 @@ struct LiteRTTransport: GenerationTransport {
             } catch {
                 guard stoppedByUs.value else { throw error }
             }
+            let held = inlineThought.finish()
+            if !held.isEmpty { _ = elider.append(held) }
             if !elider.finish().isEmpty, !abandoned.value {
                 onPartialContent(elider.visibleContent)
             }
@@ -731,6 +809,14 @@ struct LiteRTTransport: GenerationTransport {
             DiagLog.note("[litert] backgrounded turn abandoned — handing back an interruption, not an answer")
             throw CancellationError()
         }
+        if Self.reuseConversations, !stoppedByUs.value, !abandoned.value, !dead.value,
+           let state = LiteRTConversationReuse.afterTurn(
+               systemMessage: systemText, toolNames: toolNames, history: historyTurns,
+               userText: lastText, rawAnswer: answer, toolsRan: executed.value.count, completed: true,
+               thinking: self.thinking) {
+            await EngineCache.shared.keep(.init(conversation: conversation, state: state, engine: ObjectIdentifier(engine)),
+                                          for: modelPath)
+        }
 
         // LiteRT reports the prefill/decode split directly.
         var decodeTokens: Int?
@@ -765,7 +851,7 @@ struct LiteRTTransport: GenerationTransport {
             logger.info("[litert] executed \(records.count, privacy: .public) tool call(s)")
         }
 
-        let (thinking, visible) = ThinkingContentParser.parse(answer)
+        let (thinking, visible) = ThinkingContentParser.parse(Self.strippingInlineThought(answer))
         return TurnOutput(
             content: visible ?? "",
             reasoning: thinking ?? "",
@@ -775,6 +861,7 @@ struct LiteRTTransport: GenerationTransport {
             toolCalls: [:],
             isTextBasedToolCall: false,
             completionTokens: decodeTokens,
+            wasTruncated: hitCap.value,
             // The developer panel's equivalent of a request, for a turn that
             // never made one. `url` stays nil — there is no endpoint — but the
             // messages actually sent and the runtime settings ARE the request
@@ -788,8 +875,10 @@ struct LiteRTTransport: GenerationTransport {
                     "backend": "gpu (Metal)",
                     "context-tokens": String(contextTokens),
                     "tools-offered": includeTools ? String(tools.count) : "0",
+                    "conversation": reusedConversation != nil ? "reused (\(historyTurns.count) turns)" : "rebuilt",
+                    "thinking": self.thinking ? "on" : "off",
                 ],
-                requestBodyJSON: Self.prettyMessages(messages),
+                requestBodyJSON: Self.prettyRequest(messages, tools: includeTools ? tools : []),
                 isE2EEActive: false,
                 engineTimings: timings,
                 onDeviceRun: run,
@@ -799,5 +888,51 @@ struct LiteRTTransport: GenerationTransport {
                 executedToolCalls: records,
                 verify: nil)
         )
+    }
+}
+
+/// Holds back an inline `<|channel>…<channel|>` thought as it streams, a marker split across
+/// chunks included, and releases only the text outside it.
+struct InlineThoughtFilter {
+    private static let open = "<|channel>", close = "<channel|>"
+    private var buffer = ""
+    private var inThought = false
+
+    mutating func append(_ text: String) -> String {
+        buffer += text
+        var out = ""
+        while true {
+            if inThought {
+                guard let end = buffer.range(of: Self.close) else {
+                    buffer = String(buffer.suffix(Self.close.count - 1))
+                    return out
+                }
+                buffer = String(buffer[end.upperBound...])
+                inThought = false
+            } else if let start = buffer.range(of: Self.open) {
+                out += buffer[..<start.lowerBound]
+                buffer = String(buffer[start.upperBound...])
+                inThought = true
+            } else {
+                let keep = Self.heldPrefix(of: buffer)
+                out += buffer.dropLast(keep)
+                buffer = String(buffer.suffix(keep))
+                return out
+            }
+        }
+    }
+
+    /// What was held back as a possible marker start; nothing if the stream ended inside a thought.
+    mutating func finish() -> String {
+        defer { buffer = "" }
+        return inThought ? "" : buffer
+    }
+
+    /// The longest tail of `text` that could still become the opening marker.
+    private static func heldPrefix(of text: String) -> Int {
+        for n in stride(from: min(open.count - 1, text.count), to: 0, by: -1) where open.hasPrefix(text.suffix(n)) {
+            return n
+        }
+        return 0
     }
 }

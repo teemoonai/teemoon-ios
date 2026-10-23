@@ -20,7 +20,7 @@ struct ChatsSettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section(header: Text("system prompt"), footer: Text("Use {{datetime}} to insert the current date and time.")) {
+            Section(header: Text("system prompt"), footer: Text("{{date}} is replaced with today's date. The current time is added to each message you send.")) {
                 TextEditor(text: $settings.systemPrompt)
                     .textEditorStyle(.plain)
             }
@@ -64,6 +64,8 @@ struct ChatsSettingsView: View {
             // The index sweep still matters: an index left behind would keep
             // a searchable plaintext copy of everything just deleted.
             ChatSearchService.shared.didDeleteAllChats()
+            Task { await LiteRTTransport.forgetKeptConversations() }
+            StoreCompaction.requestAfterDelete()
         } catch {
             logger.error("Failed to delete chats: \(error)")
         }

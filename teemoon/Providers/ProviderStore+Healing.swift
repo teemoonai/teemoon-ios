@@ -319,12 +319,17 @@ extension ProviderStore {
         let successor: String
         let retiredName: String
         let successorName: String
-        /// The retired id's last shipped price; the table no longer has it.
+        /// The retired id's last shipped price; the table no longer has it. Empty where no price is shown.
         let retiredPrice: String
+        var source: EndpointModelCatalog.Source = .fireworks
+        var place = "fireworks"
 
         var notice: String {
+            guard !retiredPrice.isEmpty else {
+                return "\(retiredName) is no longer on \(place), so your \(place) setup now uses \(successorName)."
+            }
             let price = KnownModel.fireworksPrices[successor] ?? ""
-            return "\(retiredName) is no longer on fireworks, so your fireworks setup now uses \(successorName) (\(price) per 1M tokens, was \(retiredPrice))."
+            return "\(retiredName) is no longer on \(place), so your \(place) setup now uses \(successorName) (\(price) per 1M tokens, was \(retiredPrice))."
         }
     }
 
@@ -333,9 +338,14 @@ extension ProviderStore {
                             successor: "accounts/fireworks/models/kimi-k3",
                             retiredName: "kimi k2.6", successorName: "kimi k3",
                             retiredPrice: "$0.95/$4.00"),
+        // 404 on NVIDIA since 2026-10 (the maintainer picked lightning, 2026-10-22).
+        FireworksRetirement(retired: "nvidia/nemotron-3-super-120b-a12b",
+                            successor: "nvidia/nemotron-3.5-lightning-30b-a3b",
+                            retiredName: "nemotron 3 super", successorName: "nemotron 3.5 lightning",
+                            retiredPrice: "", source: .nvidia, place: "nvidia"),
     ]
 
-    /// Moves Fireworks setups (and their equipped lists) off retired ids, and
+    /// Moves Fireworks and NVIDIA setups (and their equipped lists) off retired ids, and
     /// says so once per retirement through the "tidied up" notice. Returns the
     /// setups it moved.
     @discardableResult
@@ -344,7 +354,7 @@ extension ProviderStore {
         var notices: [String] = []
         for retirement in Self.fireworksRetirements {
             var touched = false
-            for p in providers where EndpointModelCatalog.Source.resolve(host: p.openAIBaseURL?.host) == .fireworks {
+            for p in providers where EndpointModelCatalog.Source.resolve(host: p.openAIBaseURL?.host) == retirement.source {
                 var healed = p
                 if p.model == retirement.retired { healed.model = retirement.successor }
                 healed.equippedModels = p.equippedModels.map { list in

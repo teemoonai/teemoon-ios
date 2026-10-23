@@ -9,8 +9,12 @@ import SwiftUI
 struct GenerationActivityChipView: View {
     enum ActivityState: Equatable {
         case thinking
+        /// Think Harder, while the old reply waits dimmed above.
+        case thinkingHarder
         case searching
         case sourcesFound(Int)
+        /// Shown once one request has had no response headers for `ProviderWait.threshold`.
+        case waitingForProvider(String)
     }
 
     let state: ActivityState
@@ -18,13 +22,18 @@ struct GenerationActivityChipView: View {
     @State private var chipOpacity: Double = 1.0
 
     private var isActive: Bool {
-        state == .thinking || state == .searching
+        switch state {
+        case .thinking, .thinkingHarder, .searching, .waitingForProvider: return true
+        case .sourcesFound: return false
+        }
     }
 
     private var iconName: String {
         switch state {
         case .thinking: return "sparkles"
+        case .thinkingHarder: return "brain"
         case .searching, .sourcesFound: return "globe"
+        case .waitingForProvider: return "hourglass"
         }
     }
 
@@ -35,8 +44,13 @@ struct GenerationActivityChipView: View {
                 return "thinking... \(Int(t))s"
             }
             return "thinking..."
+        case .thinkingHarder:
+            if let t = elapsedTime, t >= 1 { return "thinking harder... \(Int(t))s" }
+            return "thinking harder..."
         case .searching: return "searching..."
         case .sourcesFound(let n): return "\(n) source\(n == 1 ? "" : "s")"
+        case .waitingForProvider(let name):
+            return ProviderWait.label(providerName: name, seconds: Int(elapsedTime ?? 0))
         }
     }
 
@@ -102,6 +116,7 @@ struct GenerationActivityChipView: View {
         GenerationActivityChipView(state: .searching)
         GenerationActivityChipView(state: .sourcesFound(1))
         GenerationActivityChipView(state: .sourcesFound(5))
+        GenerationActivityChipView(state: .waitingForProvider("fireworks"), elapsedTime: 12)
     }
     .padding()
     .frame(maxWidth: .infinity, alignment: .leading)

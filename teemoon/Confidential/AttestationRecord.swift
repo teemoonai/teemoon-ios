@@ -123,6 +123,17 @@ struct AttestationRecord {
         return reportData.prefix(20) == addrBytes
     }
 
+    /// Same binding for the model node's ECDSA address against the GPU-leg quote.
+    /// The report's `signing_address` JSON field alone proves nothing.
+    var gpuSigningKeyBoundToHardware: Bool? {
+        guard let qv = gpuQuoteVerification,
+              let addr = gpuSigningAddress, !addr.isEmpty else { return nil }
+        let addrHex = addr.hasPrefix("0x") ? String(addr.dropFirst(2)) : addr
+        guard let addrBytes = try? Data(hexString: addrHex), addrBytes.count == 20,
+              qv.measurements.reportData.count >= 20 else { return false }
+        return qv.measurements.reportData.prefix(20) == addrBytes
+    }
+
     /// Whether the E2EE Ed25519 key is cryptographically bound to the model TEE's TDX quote.
     /// Checks that the key appears in the first 32 bytes of the model quote's report_data.
     var e2eeKeyBoundToModelTEE: Bool? {

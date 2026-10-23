@@ -28,6 +28,8 @@ enum ThreadDeletion {
             context.delete(message)
         }
         context.delete(thread)
+        // Save now, not at autosave: an app killed in between brings the chat back.
+        try? context.save()
     }
 
     /// The "delete all chats" cascade: every thread, every message — the
@@ -36,5 +38,6 @@ enum ThreadDeletion {
     static func deleteAll(in context: ModelContext) throws {
         try context.delete(model: Thread.self)
         try context.delete(model: Message.self)
+        try context.save()
     }
 }

@@ -135,6 +135,26 @@ struct ChatSearchReconcilerTests {
         #expect(try await index.indexedMessageIDs().isEmpty)
     }
 
+    /// Android, 2026-10-21: a kill between the store delete and the index hook
+    /// left the text readable in the index WAL after the launch reconcile.
+    @Test @MainActor func reconcile_leavesNoTextOfTheDroppedRowsOnDisk() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let (index, url) = makeIndex()
+        defer { cleanUp(url) }
+        let reconciler = ChatSearchReconciler(index: index)
+        let marker = "RECONCILEGONE-55120"
+        let filler = String(repeating: "lorem ipsum dolor sit amet ", count: 60)
+
+        let doomed = seedThread(context, messages: (0..<200).map { "\(marker) \($0) \(filler)" })
+        try await reconciler.reconcile(in: context)
+        #expect(StoreResidueTests.hits(marker, at: url) > 0)
+
+        ThreadDeletion.delete(doomed, in: context)
+        try await reconciler.reconcile(in: context)
+        #expect(StoreResidueTests.hits(marker, at: url) == 0)
+    }
+
     // MARK: - Content changes
 
     @Test @MainActor func reconcile_leavesEditedContentAloneByDesign() async throws {

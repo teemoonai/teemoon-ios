@@ -45,6 +45,13 @@ final class ChatGeneration {
     /// activity chip — see `StreamingMessageView.showTrailingChip`.
     var isAwaitingModel: Bool { awaitingTurn != nil }
 
+    /// The request in flight with no response headers yet, or nil.
+    var providerWait: ProviderWait?
+
+    /// Think Harder's old reply while the new one has no text. Set and cleared by
+    /// `ChatViewModel`; `generate` only leaves it out of the request and notes the swap.
+    var superseding = ReplySupersession()
+
     /// The query the model asked to search when no provider was configured, or
     /// nil. Set from the tool's own call, so it is evidence rather than a guess.
     ///
@@ -113,6 +120,15 @@ final class ChatGeneration {
     }
 
     var startTime: Date?
+    /// The tap, and the moment the attestation gate let the send through.
+    /// `startTime` is later: it opens when the request is built.
+    var turnOrigin: Date?
+    var turnIsFirstMessage = false
+    /// Set by a retry or Think Harder for its one turn: the prompt was just sent, so a 0% is a miss.
+    var turnIsReask = false
+    var gateEndedAt: Date?
+    /// Where a reply-signature verdict goes once it lands after the turn.
+    var onReplyVerified: ((ResponseVerification) -> Void)?
     var firstTokenTime: Date?
 
     /// Called once per generation, the first time the model produces output —
@@ -184,7 +200,8 @@ final class ChatGeneration {
         systemPrompt: String,
         groundingAPIKey: String?,
         apiKey: String,
-        teeContext: TEEContext? = nil
+        teeContext: TEEContext? = nil,
+        effort: ReasoningEffort? = ReasoningEffort.chatDefault
     ) async -> String {
         guard !running else { return "" }
 
@@ -195,6 +212,7 @@ final class ChatGeneration {
         searchQueries = []
         isExecutingTools = false
         awaitingTurn = nil
+        providerWait = nil
         // Only the PENDING capture resets. `offerByMessageID` deliberately
         // survives: those cards belong to turns that already happened.
         unconfiguredSearchQuery = nil
@@ -211,6 +229,7 @@ final class ChatGeneration {
         defer {
             running = false
             awaitingTurn = nil
+            providerWait = nil
             resumeStopped()
         }
 
@@ -219,7 +238,9 @@ final class ChatGeneration {
         }
         defer { BackgroundWork.end(bgTask) }
 
-        let allMessages = thread.sortedMessages
+        let allMessages = superseding.history(thread.sortedMessages)
+        turnIsFirstMessage = allMessages.filter { $0.role == .user }.count == 1 && !turnIsReask
+        turnIsReask = false
         guard let lastMessage = allMessages.last, lastMessage.role == .user else { return "" }
 
         guard let baseURL = provider.openAIBaseURL else {
@@ -257,10 +278,13 @@ final class ChatGeneration {
         // omitted system prompt are HARD constraints of the endpoint (Brave 422s
         // otherwise), so a provider whose stored config predates them — or was
         // edited — must not be able to send a shape the API will reject.
+        let timeNotes = Self.wantsTimeNotes(systemPrompt: systemPrompt,
+                                            omitSystemPrompt: provider.effectiveOmitSystemPrompt)
         let priorMessages = Self.buildWireMessages(
             from: allMessages, systemPrompt: resolvedPrompt,
             maxMessages: provider.effectiveMaxMessages,
-            omitSystemPrompt: provider.effectiveOmitSystemPrompt
+            omitSystemPrompt: provider.effectiveOmitSystemPrompt,
+            timeNotes: timeNotes
         )
         // The one place local and remote diverge. Both conform to
         // `LanguageModel`, both run the same `GenerationEngine` underneath, so
@@ -268,7 +292,7 @@ final class ChatGeneration {
         // the UI — is identical. Tests replace the whole construction.
         guard let model = resolveLanguageModel(
             provider: provider, apiKey: apiKey, priorMessages: priorMessages,
-            teeContext: teeContext, callbacks: callbacks, threadID: capturedThreadID
+            teeContext: teeContext, callbacks: callbacks, threadID: capturedThreadID, effort: effort
         ) else { return "" }
 
         seedDebugInfo(
@@ -280,7 +304,14 @@ final class ChatGeneration {
         )
 
         let session = LanguageModelSession(model: model, tools: tools)
-        let stream = session.streamResponse(to: lastMessage.content)
+        // Think Harder asks again now; its question is restamped only when the new reply lands.
+        let askedAt = superseding.isActive ? Date() : lastMessage.timestamp
+        let timeNote = timeNotes ? Self.timeNote(sentAt: askedAt) : ""
+        // The MODEL's stream, not `session.streamResponse`: AnyLanguageModel 0.8 relays that one
+        // through a Task it never cancels, so a stop left the request running (Android 3917.7).
+        let stream = model.streamResponse(within: session, to: Prompt(lastMessage.content + timeNote),
+                                          generating: String.self, includeSchemaInPrompt: false,
+                                          options: GenerationOptions())
         // Consumed on a task `stop()` can cancel — see `stop()`. Cancelling it
         // tears the stream down, which cancels the transport's turn.
         let consumer = Task { @MainActor [weak self] in
@@ -306,6 +337,9 @@ final class ChatGeneration {
                 // beginTransaction doing anchor/TextKit work with no visible
                 // text moving).
                 if self.output != snapshot.content { self.output = snapshot.content }
+                if self.superseding.isActive, !self.superseding.swapped, !snapshot.content.isEmpty {
+                    self.superseding.noteText(snapshot.content)
+                }
             }
             return snapshotCount
         }

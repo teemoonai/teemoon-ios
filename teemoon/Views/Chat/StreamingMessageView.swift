@@ -68,14 +68,22 @@ struct StreamingMessageView: View {
         }
     }
 
-    private var chipState: GenerationActivityChipView.ActivityState {
+    private func chipState(at now: Date) -> GenerationActivityChipView.ActivityState {
         if llm.isExecutingTools {
             if !llm.groundingSources.isEmpty {
                 return .sourcesFound(llm.groundingSources.count)
             }
             return .searching
         }
-        return .thinking
+        if let wait = llm.providerWait, wait.shownSeconds(at: now) != nil {
+            return .waitingForProvider(wait.providerName)
+        }
+        return llm.superseding.isActive ? .thinkingHarder : .thinking
+    }
+
+    /// The counter is the whole turn's (the maintainer), in every state.
+    private func chip(at now: Date) -> GenerationActivityChipView {
+        GenerationActivityChipView(state: chipState(at: now), elapsedTime: llm.elapsedTime)
     }
 
     /// Whether the chip in the trailing slot is VISIBLE. The slot itself is
@@ -124,8 +132,8 @@ struct StreamingMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if pacer.text.isEmpty {
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    GenerationActivityChipView(state: chipState, elapsedTime: llm.elapsedTime)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    chip(at: context.date)
                 }
                 .transition(.opacity.combined(with: .scale(0.95, anchor: .leading)))
             }
@@ -203,8 +211,8 @@ struct StreamingMessageView: View {
             // reserved slot, then a chip pinned above the composer — each
             // traded one of those away, and both were worse.
             if showTrailingChip {
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    GenerationActivityChipView(state: chipState, elapsedTime: llm.elapsedTime)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    chip(at: context.date)
                 }
                 .padding(.top, 4)
                 .transition(.opacity.combined(with: .scale(0.95, anchor: .leading)))

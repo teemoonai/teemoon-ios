@@ -75,6 +75,21 @@ struct TEEContext: Sendable {
     }
 }
 
+extension URLSession {
+    /// One session for chat and attestation, for the app's life. A session per
+    /// generation opened a new TCP + TLS connection every turn and was never
+    /// invalidated. The long idle limit is the wait for headers; the stream's
+    /// own idle limit is `StreamStallWatchdog`.
+    static let chat: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = StreamStallWatchdog.headerWait
+        // Authenticated traffic only: nothing is cached, not even in memory.
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+}
+
 // MARK: - ConfidentialLanguageModel
 
 /// An OpenAI-compatible chat-completions model with optional attested E2EE.
@@ -93,6 +108,8 @@ struct ConfidentialLanguageModel: LanguageModel {
     /// Injection point for tests (stub URLProtocol). Defaults to an ephemeral
     /// session with streaming-friendly timeouts.
     let urlSession: URLSession
+    let effort: ReasoningEffort?
+    let affinityID: String?
 
     init(
         provider: Provider,
@@ -100,18 +117,18 @@ struct ConfidentialLanguageModel: LanguageModel {
         priorMessages: [WireMessage],
         context: TEEContext? = nil,
         events: StreamCallbacks,
-        urlSession: URLSession? = nil
+        urlSession: URLSession? = nil,
+        effort: ReasoningEffort? = nil,
+        affinityID: String? = nil
     ) {
+        self.effort = effort
+        self.affinityID = affinityID
         self.provider = provider
         self.apiKey = apiKey
         self.priorMessages = priorMessages
         self.events = events
         self.teeContext = context
-        self.urlSession = urlSession ?? {
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 240
-            return URLSession(configuration: config)
-        }()
+        self.urlSession = urlSession ?? .chat
     }
 
     // MARK: LanguageModel
@@ -121,7 +138,7 @@ struct ConfidentialLanguageModel: LanguageModel {
             provider: provider, apiKey: apiKey, teeContext: teeContext,
             events: events, tools: session.tools,
             initialMessages: priorMessages, prompt: prompt.description,
-            urlSession: urlSession
+            urlSession: urlSession, effort: effort, affinityID: affinityID
         )
     }
 

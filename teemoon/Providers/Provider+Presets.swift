@@ -89,7 +89,7 @@ extension Provider {
         id:                   UUID(uuidString: "A0000000-0000-0000-0000-000000000006")!,
         name:                 "NVIDIA",
         endpoint:             "https://integrate.api.nvidia.com/v1/chat/completions",
-        model:                "nvidia/nemotron-3-super-120b-a12b",
+        model:                "nvidia/nemotron-3.5-lightning-30b-a3b",
         supportsModelBrowsing: true,
         // "free" is a fact about the tier, not a promise: the hosted catalogue
         // is free for development under the NVIDIA Developer Program and
@@ -346,6 +346,8 @@ extension KnownModel {
         // 975B MoE (41B active) from Thinking Machines Lab, multimodal.
         "accounts/fireworks/models/inkling":                       "$1.00/$4.05",
         "accounts/fireworks/models/deepseek-v4p1-flash":           "$0.30/$1.20",
+        "accounts/fireworks/models/deepseek-v4p1-flash-1017":      "$0.30/$1.20",
+        "accounts/fireworks/models/muse-spark-open":               "$1.25/$4.25",
         "accounts/fireworks/models/glm-5p3":                       "$1.40/$4.40",
         "accounts/fireworks/models/glm-5p3-flash":                 "$0.15/$0.50",
         "accounts/fireworks/models/qwen3p8-max":                   "$2.00/$6.00",

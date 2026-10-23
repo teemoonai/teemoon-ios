@@ -936,7 +936,22 @@ final class TranscriptViewController: UIViewController {
             snapshot.reconfigureItems([previous])
         }
 
-        dataSource.apply(snapshot, animatingDifferences: false)
+        // Think Harder's swap: the old reply left and the question moved INTO `.latest`.
+        // Same estimate trap as above, from the other side; crossfade it, unless Reduce Motion.
+        let replyReplaced = !threadChanged
+            && previousLatest.map { $0 != transcript.last && !transcript.contains($0) } == true
+        if replyReplaced, let last = transcript.last {
+            latestEstimate = TranscriptRowHeightCache.height(for: last) ?? 120
+            snapshot.reconfigureItems([last])
+        }
+
+        if replyReplaced, !UIAccessibility.isReduceMotionEnabled {
+            UIView.transition(with: collectionView, duration: 0.15, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                self.dataSource.apply(snapshot, animatingDifferences: false)
+            }
+        } else {
+            dataSource.apply(snapshot, animatingDifferences: false)
+        }
 
         if needsHandoffReconfigure {
             needsHandoffReconfigure = false

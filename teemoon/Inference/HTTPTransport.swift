@@ -34,19 +34,30 @@ struct HTTPTransport: GenerationTransport {
     let teeContext: TEEContext?
     let tools: [any Tool]
     let urlSession: URLSession
+    /// nil sends the provider's default. See `ReasoningEffort`.
+    let effort: ReasoningEffort?
+    /// Per-thread routing hint. See `SessionAffinity`.
+    let affinityID: String?
+    let streamIdle: TimeInterval
 
     init(
         provider: Provider,
         apiKey: String,
         teeContext: TEEContext?,
         tools: [any Tool],
-        urlSession: URLSession
+        urlSession: URLSession,
+        effort: ReasoningEffort? = nil,
+        affinityID: String? = nil,
+        streamIdle: TimeInterval = StreamStallWatchdog.streamIdle
     ) {
         self.provider = provider
         self.apiKey = apiKey
         self.teeContext = teeContext
         self.tools = tools
         self.urlSession = urlSession
+        self.effort = effort
+        self.affinityID = affinityID
+        self.streamIdle = streamIdle
     }
 
     // MARK: - GenerationTransport
@@ -54,6 +65,16 @@ struct HTTPTransport: GenerationTransport {
     func runTurn(
         messages: [[String: Any]],
         includeTools: Bool,
+        onPartialContent: @escaping @Sendable (String) -> Void
+    ) async throws -> TurnOutput {
+        try await runTurn(messages: messages, includeTools: includeTools,
+                          onResponse: {}, onPartialContent: onPartialContent)
+    }
+
+    func runTurn(
+        messages: [[String: Any]],
+        includeTools: Bool,
+        onResponse: @escaping @Sendable () -> Void,
         onPartialContent: @escaping @Sendable (String) -> Void
     ) async throws -> TurnOutput {
         guard let baseURL = provider.openAIBaseURL else {
@@ -69,15 +90,19 @@ struct HTTPTransport: GenerationTransport {
 
         // 1. Wire-format request body (plaintext).
         let plaintextBody = try makeBody(messages: messages, includeTools: includeTools)
+        let sentEffort = effortFields(for: messages) != nil
 
         // 2. Auth.
-        var request = URLRequest(url: endpoint, timeoutInterval: 240)
+        var request = URLRequest(url: endpoint, timeoutInterval: StreamStallWatchdog.headerWait)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let headerName = provider.authHeaderName {
             if !apiKey.isEmpty { request.setValue(apiKey, forHTTPHeaderField: headerName) }
         } else if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        if let affinityID, let header = SessionAffinity.header(for: provider) {
+            request.setValue(affinityID, forHTTPHeaderField: header)
         }
 
         // 3. E2EE sealing. `codec != nil` means THIS turn promised sealing
@@ -97,7 +122,10 @@ struct HTTPTransport: GenerationTransport {
         request.httpBody = bodyToSend
 
         // 4. One plain request.
+        let sentAt = Date()
         let (bytes, response) = try await urlSession.bytes(for: request)
+        let responseAt = Date()
+        onResponse()
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
@@ -118,6 +146,12 @@ struct HTTPTransport: GenerationTransport {
             )
             var errorBody = Data()
             for try await byte in bytes { errorBody.append(byte) }
+            if sentEffort, ReasoningEffort.isRefusal(status: http.statusCode, body: errorBody) {
+                // Sent again without it; `bodyFields` now returns nil for this model.
+                ReasoningEffort.noteRefused(by: provider)
+                return try await runTurn(messages: messages, includeTools: includeTools,
+                                         onResponse: onResponse, onPartialContent: onPartialContent)
+            }
             drainer.append(errorBody)
             throw drainer.makeLLMError(underlyingError: nil)
         }
@@ -134,6 +168,13 @@ struct HTTPTransport: GenerationTransport {
                 return plaintext
             }
         }
+
+        // The request timeout above covers the wait for headers; from here a
+        // stream that stops for `streamIdle` is dead.
+        let stall = StreamStallWatchdog(limit: streamIdle)
+        let dataTask = bytes.task
+        let stallWatch = stall.watch { dataTask.cancel() }
+        defer { stallWatch.cancel() }
 
         let isSSE = (http.value(forHTTPHeaderField: "Content-Type") ?? "").contains("text/event-stream")
         var toolCallRoundDetected = false
@@ -183,21 +224,27 @@ struct HTTPTransport: GenerationTransport {
                     onPartialContent(parser.visibleContent)
                 }
             }
-            for try await byte in bytes {
-                if byte == 0x0A {
-                    try processLine()
-                    // Stop after the [DONE] *event*, not the [DONE] line.
-                    // An SSE event is `data: [DONE]\n\n` — the trailing blank
-                    // line is in the signed payload (see
-                    // Fixtures/nearai_signed_response.json). Breaking on the
-                    // data line dropped that "\n" and failed content binding
-                    // on live streams (the "reply didn't check out" caption).
-                    // A keep-alive server never closes; once the terminator
-                    // is in `rawResponseText` we can leave.
-                    if parser.sawDone, rawResponseText.hasSuffix("\n\n") { break }
-                } else {
-                    lineBuffer.append(byte)
+            do {
+                for try await byte in bytes {
+                    if byte == 0x0A {
+                        stall.touch()
+                        try processLine()
+                        // Stop after the [DONE] *event*, not the [DONE] line.
+                        // An SSE event is `data: [DONE]\n\n` — the trailing blank
+                        // line is in the signed payload (see
+                        // Fixtures/nearai_signed_response.json). Breaking on the
+                        // data line dropped that "\n" and failed content binding
+                        // on live streams (the "reply didn't check out" caption).
+                        // A keep-alive server never closes; once the terminator
+                        // is in `rawResponseText` we can leave.
+                        if parser.sawDone, rawResponseText.hasSuffix("\n\n") { break }
+                    } else {
+                        lineBuffer.append(byte)
+                        if lineBuffer.count & 0x3FF == 0 { stall.touch() }
+                    }
                 }
+            } catch where stall.didFire {
+                throw URLError(.timedOut)
             }
             if !parser.sawDone, !lineBuffer.isEmpty { try processLine() }
             // Stream closed right after `data: [DONE]\n` with no terminator.
@@ -215,7 +262,14 @@ struct HTTPTransport: GenerationTransport {
             // Non-streaming JSON (E2EE servers force stream=false; also any
             // provider that ignores the stream flag).
             var data = Data()
-            for try await byte in bytes { data.append(byte) }
+            do {
+                for try await byte in bytes {
+                    data.append(byte)
+                    if data.count & 0x3FF == 0 { stall.touch() }
+                }
+            } catch where stall.didFire {
+                throw URLError(.timedOut)
+            }
             rawResponseText = String(decoding: data, as: UTF8.self)
             let detected = try consumeNonStreamingResponse(
                 data, into: parser, decrypt: decrypt, decryptFailure: decryptFailure,
@@ -299,6 +353,10 @@ struct HTTPTransport: GenerationTransport {
                 isE2EEActive: isE2EEActive,
                 firstTokenAt: parser.firstDeltaAt,
                 firstVisibleTokenAt: parser.firstVisibleAt,
+                sentAt: sentAt,
+                responseAt: responseAt,
+                promptTokens: parser.promptTokens,
+                cachedTokens: parser.cachedTokens,
                 engineTimings: parser.engineTimings,
                 promptBudget: promptBudget,
                 verify: verify
@@ -308,6 +366,16 @@ struct HTTPTransport: GenerationTransport {
 
     // MARK: - Request construction
 
+    /// The `tools` array as it goes on the wire. The on-device card shows the same JSON.
+    static func wireTools(_ tools: [any Tool]) -> [[String: Any]] {
+        tools.map { tool -> [String: Any] in
+            ["type": "function",
+             "function": ["name": tool.name,
+                          "description": tool.description,
+                          "parameters": GenerationEngine.flattenedToolSchema(tool)] as [String: Any]]
+        }
+    }
+
     private func makeBody(messages: [[String: Any]], includeTools: Bool) throws -> Data {
         var body: [String: Any] = [
             "model": provider.model,
@@ -316,12 +384,7 @@ struct HTTPTransport: GenerationTransport {
             "stream_options": ["include_usage": true],
         ]
         if includeTools {
-            body["tools"] = tools.map { tool -> [String: Any] in
-                return ["type": "function",
-                        "function": ["name": tool.name,
-                                     "description": tool.description,
-                                     "parameters": GenerationEngine.flattenedToolSchema(tool)] as [String: Any]]
-            }
+            body["tools"] = Self.wireTools(tools)
         }
         // Provider extras, auto-coerced: "true"/"false" → Bool, numbers → Double, else String.
         for (key, value) in provider.extraParams {
@@ -331,7 +394,16 @@ struct HTTPTransport: GenerationTransport {
             default:      body[key] = Double(value) ?? value
             }
         }
-        return try JSONSerialization.data(withJSONObject: body)
+        // A key the person set in the provider's extra parameters wins.
+        for (key, value) in effortFields(for: messages) ?? [:] where body[key] == nil {
+            body[key] = value
+        }
+        // Sorted: a dictionary's order changes the bytes per request, and every prompt cache misses.
+        return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+    }
+
+    private func effortFields(for messages: [[String: Any]]) -> [String: Any]? {
+        effort?.bodyFields(for: provider)
     }
 
     // MARK: - Non-streaming responses

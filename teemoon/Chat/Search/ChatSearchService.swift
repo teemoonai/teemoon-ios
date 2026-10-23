@@ -137,14 +137,20 @@ final class ChatSearchService {
     /// cascaded, so they become orphans; the index must drop them either way.
     func didDeleteThread(_ threadID: UUID) {
         guard let index else { return }
-        enqueue { try? await index.remove(threadID: threadID) }
+        enqueue {
+            try? await index.remove(threadID: threadID)
+            try? await index.purgeDeleted()
+        }
     }
 
     /// Site 6 — "delete all chats". Empties the index outright: leaving it would
     /// keep a searchable plaintext copy of everything the user just deleted.
     func didDeleteAllChats() {
         guard let index else { return }
-        enqueue { try? await index.removeAll() }
+        enqueue {
+            try? await index.removeAll()
+            try? await index.purgeDeleted()
+        }
     }
 
     // MARK: - Query

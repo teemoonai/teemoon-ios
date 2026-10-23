@@ -545,8 +545,27 @@ struct RetiredFireworksModelHealingTests {
         #expect(store.mergeNotice == nil)
     }
 
+    /// nemotron-3-super 404s on NVIDIA (2026-10-22); the maintainer picked lightning as the default.
+    @Test @MainActor func anNvidiaSetupOnSuperMovesToLightningAndSaysSo() {
+        let superID = "nvidia/nemotron-3-super-120b-a12b", lightning = "nvidia/nemotron-3.5-lightning-30b-a3b"
+        let (store, p) = store(.nvidia, model: superID, equipped: [superID, "nvidia/nemotron-3-ultra-550b-a55b"])
+        #expect(store.healRetiredFireworksModelsForTesting().map(\.id) == [p.id])
+        let healed = store.providers.first { $0.id == p.id }
+        #expect(healed?.model == lightning)
+        #expect(healed?.equippedModels == [lightning, "nvidia/nemotron-3-ultra-550b-a55b"])
+        #expect(store.mergeNotice == "nemotron 3 super is no longer on nvidia, so your nvidia setup now uses nemotron 3.5 lightning.")
+        #expect(Provider.nvidia.model == lightning, "the preset's default is the successor")
+    }
+
+    @Test @MainActor func theNvidiaIdOnAnotherProviderIsUntouched() {
+        let superID = "nvidia/nemotron-3-super-120b-a12b"
+        let (store, p) = store(.openRouter, model: superID, equipped: [superID])
+        #expect(store.healRetiredFireworksModelsForTesting().isEmpty)
+        #expect(store.providers.first { $0.id == p.id }?.model == superID)
+    }
+
     @Test func everySuccessorIsPricedAndServedTodayInTheTable() {
-        for r in ProviderStore.fireworksRetirements {
+        for r in ProviderStore.fireworksRetirements where r.source == .fireworks {
             #expect(KnownModel.fireworksPrices[r.successor] != nil, "\(r.successor) has no price")
             #expect(KnownModel.fireworksPrices[r.retired] == nil, "\(r.retired) is still in the table")
         }

@@ -40,6 +40,9 @@ struct MessageView: View {
     let message: Message
     let isLLMRunning: Bool
     var onRetry: (() -> Void)? = nil
+    /// Long-press "Think Harder" on a reply: the same question again at high effort.
+    var onThinkHarder: (() -> Void)? = nil
+    var thinkHarderAvailable: () -> Bool = { true }
 
     // MARK: - Cached thinking-content parse (persisted messages only)
     //
@@ -187,6 +190,15 @@ struct MessageView: View {
 
     @ViewBuilder
     func renderedAssistantText(_ markdown: String, cacheKeySuffix: String, structured: Bool) -> some View {
+        // On iOS a long-press is the reply's menu (`ReplyActionsMenu`); double-tap selects.
+        #if os(iOS)
+        if structured {
+            StructuredText.cached(markdown)
+                .textual.textSelection(.enabled)
+        } else {
+            Text(MessageView.cachedAttr(markdown, key: message.id.uuidString + cacheKeySuffix))
+        }
+        #else
         if structured {
             StructuredText.cached(markdown)
                 .textual.textSelection(.enabled)
@@ -194,6 +206,7 @@ struct MessageView: View {
             Text(MessageView.cachedAttr(markdown, key: message.id.uuidString + cacheKeySuffix))
                 .textSelection(.enabled)
         }
+        #endif
     }
 
     static func processThinkingContent(_ content: String) -> (String?, String?) {
@@ -228,6 +241,24 @@ struct MessageView: View {
     private func toggleCollapsed() {
         collapsed.toggle()
         DisclosureState.shared.setExpanded(message.id, !collapsed)
+    }
+
+    /// Think Harder (newest reply only), then copy, which copies the whole reply.
+    private func replyActions(copyText: String) -> [ReplyAction] {
+        var actions: [ReplyAction] = []
+        if let onThinkHarder {
+            actions.append(ReplyAction(id: "chat.thinkHarder", title: "think harder", systemImage: "brain",
+                                       isAvailable: thinkHarderAvailable, perform: onThinkHarder))
+        }
+        actions.append(ReplyAction(id: "chat.copyReply", title: "copy", systemImage: "square.on.square") {
+            #if os(iOS) || os(visionOS)
+            UIPasteboard.general.string = copyText
+            #elseif os(macOS)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(copyText, forType: .string)
+            #endif
+        })
+        return actions
     }
 
     var body: some View {
@@ -277,19 +308,16 @@ struct MessageView: View {
 
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                #if os(iOS)
+                .modifier(ReplyActionsMenu(actions: replyActions(copyText: afterThink ?? message.content)))
+                #else
                 .contextMenu {
-                    Button {
-                        let textToCopy = afterThink ?? message.content
-                        #if os(iOS) || os(visionOS)
-                        UIPasteboard.general.string = textToCopy
-                        #elseif os(macOS)
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(textToCopy, forType: .string)
-                        #endif
-                    } label: {
-                        Label("Copy", systemImage: "square.on.square")
+                    ForEach(replyActions(copyText: afterThink ?? message.content).filter { $0.isAvailable() }) { action in
+                        Button(action: action.perform) { Label(action.title, systemImage: action.systemImage) }
+                            .accessibilityIdentifier(action.id)
                     }
                 }
+                #endif
             } else {
                 Text(message.content)
                 #if os(iOS) || os(visionOS)
@@ -333,7 +361,7 @@ struct MessageView: View {
                             NSPasteboard.general.setString(message.content, forType: .string)
                             #endif
                         } label: {
-                            Label("Copy", systemImage: "square.on.square")
+                            Label("copy", systemImage: "square.on.square")
                         }
                     }
                     .padding(.leading, 48)
@@ -386,3 +414,4 @@ struct MessageView: View {
             .padding()
     }
 }
+

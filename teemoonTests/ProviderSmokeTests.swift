@@ -55,16 +55,10 @@ struct ProviderSmokeTests {
         try await smoke(p, apiKey: key)
     }
 
-    /// Nemotron REASONS before it answers and the budget covers both, so a
-    /// cheap limit buys thinking and no reply: at 32 tokens this smoke failed
-    /// about a third of the time, at 256 it still did, and at 512 it answered
-    /// "pong" four times out of four (measured live 2026-09-15). NVIDIA's
-    /// older instruct models are 404 for this account, so the budget is the
-    /// knob, not the model.
-    @Test @MainActor func nvidiaNemotronSuper() async throws {
+    /// nemotron-3-super 404s since 2026-10; lightning is the preset default now.
+    @Test @MainActor func nvidiaNemotronLightning() async throws {
         guard let key = hostHomeFile(".NVIDIA_API_KEY") else { return }
         var p = Provider.nvidia
-        p.model = "nvidia/nemotron-3-super-120b-a12b"
         p.extraParams = ["max_tokens": "512"]
         try await smoke(p, apiKey: key)
     }

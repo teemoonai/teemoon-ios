@@ -424,6 +424,8 @@ struct ChatsListView: View {
         // already known, and the search field must not offer a row that is on
         // its way out.
         ChatSearchService.shared.didDeleteThread(thread.id)
+        Task { await LiteRTTransport.forgetKeptConversations() }
+        StoreCompaction.requestAfterDelete()
         // Adding a delay fixes a crash on iOS following a deletion
         let delay = DeviceLayout.current == .phone ? 1.0 : 0.0
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {

@@ -75,7 +75,9 @@ final class OnDeviceUseCaseTests: XCTestCase {
         ProductE2E.typeIntoComposer(app, "Say hello in three words.")
         ProductE2E.send(app)
         XCTAssertTrue(ProductE2E.waitUntilSettled(app, timeout: 240), "gemma never answered")
+#if os(iOS)
         XCUIDevice.shared.press(.home)
+#endif
         sleep(5)
         app.activate()
         XCTAssertTrue(ProductE2E.composer(app).waitForExistence(timeout: 15), "the app did not come back")

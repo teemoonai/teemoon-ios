@@ -234,6 +234,10 @@ struct ContentView: View {
                 providerStore.providers.removeAll()
                 providerStore.addProvider(seeded)
                 providerStore.currentProviderID = seeded.id.uuidString
+                // What the Where probe would have recorded (an in-memory store records no probe).
+                if ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_KIND"] == "ollama" {
+                    ReasoningControl.seededKinds[seeded.endpoint] = .ollama
+                }
             }
             // And the same door for an ON-DEVICE provider (MLX), so a UI test can
             // drive real local inference — including the tool round — without
@@ -373,6 +377,9 @@ struct ContentView: View {
         }
         #if !os(visionOS)
         .tint(settings.appTintColor.getColor())
+        #endif
+        #if os(iOS)
+        .onChange(of: settings.appTintColor, initial: true) { _, tint in tint.applyToWindows() }
         #endif
         .fontDesign(settings.appFontDesign.getFontDesign())
         .environment(\.dynamicTypeSize, settings.appFontSize.getFontSize())

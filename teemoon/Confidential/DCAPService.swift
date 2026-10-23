@@ -9,11 +9,10 @@
 //  MRCONFIGID/report_data ever disagrees with dcap-qvl's, the quote is
 //  treated as failed and the disagreement logged loudly.
 //
-//  TCB policy: a quote that fails DCAP or
-//  has revoked TCB is a hard failure (degrades the session, fail-closed —
-//  including when collateral is unreachable). Out-of-date TCB means genuine
-//  hardware behind on Intel platform updates: near.ai's own verifier treats
-//  it as non-fatal but flagged, and the sheet surfaces it the same way.
+//  TCB policy (near.ai inference-sdk's default allow-list): UpToDate and
+//  OutOfDate pass; every other status, and a quote that fails DCAP or whose
+//  collateral is unreachable, is a hard failure. OutOfDate is genuine
+//  hardware behind on Intel updates and is flagged in the sheet.
 //
 
 import DcapQvl
@@ -31,7 +30,7 @@ struct RecordDCAPVerification: Equatable, Sendable {
     var gpu: DCAPVerification?
 
     /// True when any present quote hard-fails DCAP — verification failure
-    /// (incl. unavailable collateral) or revoked TCB. Out-of-date is not hard.
+    /// (incl. unavailable collateral) or a TCB status outside the allow-list.
     var hasHardFailure: Bool {
         [gateway, model, gpu].compactMap { $0 }.contains { $0.isHardFailure }
     }
@@ -62,6 +61,8 @@ struct RecordDCAPVerification: Equatable, Sendable {
             switch outcome {
             case .failed(let why):            return "\(label) quote — \(why)"
             case .verified(.revoked, _, _):   return "\(label) quote — TCB revoked by Intel"
+            case .verified(let tcb, _, _) where !tcb.isAccepted:
+                return "\(label) quote — TCB status \(tcb.rawValue) is not accepted (only up to date or out of date)"
             default:                          continue
             }
         }
@@ -70,10 +71,10 @@ struct RecordDCAPVerification: Equatable, Sendable {
 }
 
 extension DCAPVerification {
-    /// Hard failure = quote didn't verify (incl. no collateral) or TCB revoked.
+    /// Hard failure = quote didn't verify (incl. no collateral) or TCB outside the allow-list.
     var isHardFailure: Bool {
         switch self {
-        case .verified(let tcb, _, _): return tcb == .revoked
+        case .verified(let tcb, _, _): return !tcb.isAccepted
         case .failed: return true
         }
     }

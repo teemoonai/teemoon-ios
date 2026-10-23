@@ -177,6 +177,17 @@ enum AppTintColor: String, CaseIterable {
             .teal
         }
     }
+
+    #if os(iOS)
+    /// UIKit-drawn controls (menu pickers, edit menus, alerts) take the window's tint, not
+    /// SwiftUI's `.tint`; left alone that is the orange AccentColor asset whatever was picked.
+    @MainActor func applyToWindows() {
+        let color = self == .monochrome ? UIColor.label : UIColor(getColor())
+        for window in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
+            window.tintColor = color
+        }
+    }
+    #endif
 }
 
 enum AppFontDesign: String, CaseIterable {
