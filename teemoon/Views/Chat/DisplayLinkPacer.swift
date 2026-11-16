@@ -20,24 +20,28 @@ private final class DisplayLinkProxy: NSObject {
 @Observable
 @MainActor
 final class DisplayLinkPacer {
-    /// The paced text to render. Trails the source by at most one frame.
+    /// The text to render: the source through StreamRevealFeed ("whole if quick").
     private(set) var text = ""
+    /// Where in `text` a paragraph that appeared whole is fading in.
+    private(set) var fadeFrom: Int?
+    /// Bumps once per frame in which the source changed. The stall rule reads this, not `text`.
+    private(set) var arrivals = 0
+
+    private var feed = StreamRevealFeed()
 
     private var displayLink: CADisplayLink?
     private let proxy = DisplayLinkProxy()
     private var source: () -> String = { "" }
+    private var onDevice: () -> Bool = { false }
 
-    /// Starts sampling `source` on a display link.
-    func attach(to source: @escaping () -> String) {
+    /// Starts sampling `source` on a display link. `onDevice` is read when the answer's first character arrives.
+    func attach(onDevice: @escaping () -> Bool = { false }, to source: @escaping () -> String) {
         self.source = source
-        text = source()
+        self.onDevice = onDevice
+        step()
         guard displayLink == nil else { return }
         proxy.tick = { [weak self] in
-            MainActor.assumeIsolated { [weak self] in
-                guard let self else { return }
-                let latest = self.source()
-                if self.text != latest { self.text = latest }
-            }
+            MainActor.assumeIsolated { [weak self] in self?.step() }
         }
         #if os(macOS)
         let link = NSScreen.main!.displayLink(target: proxy,
@@ -68,9 +72,17 @@ final class DisplayLinkPacer {
         displayLink = link
     }
 
-    /// Stops the display link after a final sync with the source.
+    private func step() {
+        let shown = feed.frame(source: source(), origin: onDevice() ? .onDevice : .cloud, at: CACurrentMediaTime() * 1000)
+        if text != shown.text { text = shown.text }
+        if fadeFrom != shown.fadeFrom { fadeFrom = shown.fadeFrom }
+        if arrivals != feed.arrivals { arrivals = feed.arrivals }
+    }
+
+    /// Stops the display link after a final sync with the source: everything that arrived shows.
     func detach() {
         text = source()
+        fadeFrom = nil
         displayLink?.invalidate()
         displayLink = nil
     }

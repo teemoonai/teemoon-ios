@@ -30,7 +30,9 @@ import Testing
         let b = ChatGeneration.resolvePromptTemplates(AppSettings.defaultSystemPrompt, now: Self.laterThatDay)
         #expect(a == b)
         #expect(!a.contains("{{datetime}}"))
-        #expect(!a.contains(":"), "no clock time in the system prompt")
+        // The zone's offset (UTC−05:00) is the only "hh:mm" allowed: a fixed fact, not the time of day.
+        let withoutOffset = a.replacingOccurrences(of: #"UTC[+−]\d{2}:\d{2}"#, with: "", options: .regularExpression)
+        #expect(!withoutOffset.contains(":"), "no clock time in the system prompt")
     }
 
     @Test func dateAndTheOlderDatetimeMeanTheSameDay() {

@@ -14,6 +14,8 @@ import XCTest
 
 final class MarketingCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     private static let bundleID = "ai.teemoon.app"
 
     private var outputDir: URL {

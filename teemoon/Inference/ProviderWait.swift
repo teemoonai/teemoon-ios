@@ -24,6 +24,6 @@ struct ProviderWait: Equatable, Sendable {
     }
 
     static func label(providerName: String, seconds: Int) -> String {
-        "waiting for \(providerName)... \(seconds)s"
+        "waiting for \(providerName)… \(seconds)s"
     }
 }

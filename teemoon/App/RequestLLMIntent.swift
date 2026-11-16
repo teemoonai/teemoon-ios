@@ -67,7 +67,8 @@ struct RequestLLMIntent: AppIntent {
             return .result(value: error, dialog: "\(error)")
         }
 
-        let teeContext = await session.prepareTurn()
+        let place = ConfidentialSession.TurnPlace(provider)
+        let teeContext = await session.prepareTurn(for: place)
         // Fail-closed send gate: the chat UI consults
         // `session.sendPolicy` before generating; this headless entry point
         // must consult the SAME canonical gate. A record merely EXISTING is
@@ -84,7 +85,7 @@ struct RequestLLMIntent: AppIntent {
         }
         // Same hold as the composer: `prepareTurn` waited for the verdicts;
         // one still missing is not a pass.
-        if provider.capabilities.contains(.attestation), session.verdictsPending {
+        if provider.capabilities.contains(.attestation), session.sendPending {
             let refusal = "Verification is still running — try again in a moment."
             return .result(value: refusal, dialog: "\(refusal)")
         }
@@ -113,7 +114,7 @@ struct RequestLLMIntent: AppIntent {
             teeContext: teeContext
         )
         await Task.yield()
-        session.finishTurn(debugInfo: llm.lastRequestDebugInfo, error: llm.lastError)
+        session.finishTurn(for: place, debugInfo: llm.lastRequestDebugInfo, error: llm.lastError)
 
         // A failed request leaves `output` empty; without this Siri would speak
         // an empty string (silence), and continuous mode would ask a blank
@@ -125,7 +126,7 @@ struct RequestLLMIntent: AppIntent {
 
         let maxCharacters = maxCharacters ?? .max
         if output.count > maxCharacters {
-            output = String(output.prefix(maxCharacters)).trimmingCharacters(in: .whitespaces) + "..."
+            output = String(output.prefix(maxCharacters)).trimmingCharacters(in: .whitespaces) + "…"
         }
         
         let responseMessage = Message(role: .assistant, content: output, thread: thread)

@@ -72,7 +72,9 @@ final class DeveloperModeLocalUITests: XCTestCase {
         // non-hittable element is silently dropped — which reads as "the toggle
         // didn't work". Bring it into view first, then poll: the switch's value
         // lags the tap by an animation frame.
-        if !toggle.isHittable { app.swipeUp() }
+        // Hittable is not enough: at the system text size (1.1.0's default) the row's centre sat below the screen
+        // edge while isHittable was true, and the tap went nowhere.
+        if !toggle.isHittable || toggle.frame.maxY > app.windows.firstMatch.frame.maxY - 40 { app.swipeUp() }
         // Tap the TRAILING edge, not the centre. The accessibility element spans
         // the whole Form row (measured 355pt wide), so a centre tap lands on the
         // label and is swallowed — the switch itself sits at the far right. Three

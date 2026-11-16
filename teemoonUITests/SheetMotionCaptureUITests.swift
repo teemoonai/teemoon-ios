@@ -9,6 +9,8 @@
 import XCTest
 
 final class SheetMotionCaptureUITests: XCTestCase {
+
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
     private func openWhere() throws -> XCUIApplication {
         guard ProcessInfo.processInfo.environment["SHEET_MOTION"] == "1" else { throw XCTSkip("capture only (SHEET_MOTION=1)") }
         let server = try EmbeddedFakeSSEServer(lines: 2, delay: 0.005)

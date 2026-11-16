@@ -109,7 +109,7 @@ struct LocalToolSupportSweepTests {
             )],
             events: StreamCallbacks(onSourcesFound: { _ in }, onQueriesFound: { _ in },
                                     onToolExecutionEnded: {}, onSuccess: { _ in })
-            // Defaults everywhere else: overriding temperature or maxTokens here
+            // Defaults everywhere else: overriding maxTokens here
             // would measure a configuration the app never ships.
         )
         let session = LanguageModelSession(model: lm, tools: [SweepPlantedTool(ran: ran)])

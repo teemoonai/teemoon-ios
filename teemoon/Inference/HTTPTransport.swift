@@ -80,7 +80,7 @@ struct HTTPTransport: GenerationTransport {
         guard let baseURL = provider.openAIBaseURL else {
             throw LLMError(
                 source: .provider(name: provider.name),
-                userMessage: "Invalid endpoint URL: \(provider.endpoint)",
+                userMessage: "this server address isn't valid: \(provider.endpoint)",
                 httpStatus: nil, url: nil, requestHeaders: nil, requestBodyJSON: nil,
                 messageHistory: nil, responseBody: nil, underlyingError: nil
             )
@@ -192,6 +192,8 @@ struct HTTPTransport: GenerationTransport {
         // exactly as received — including blank SSE separator lines,
         // which `bytes.lines` would drop.
         var rawResponseText = ""
+        // Whether the WIRE said [DONE]; the synthetic one below exists only for tool-call recovery.
+        var sawDoneOnWire = false
 
         if isSSE {
             // Manual line assembly (split on \n, strip trailing \r):
@@ -252,6 +254,7 @@ struct HTTPTransport: GenerationTransport {
             if parser.sawDone, !rawResponseText.hasSuffix("\n\n") {
                 rawResponseText += "\n"
             }
+            sawDoneOnWire = parser.sawDone
             // Stream ended without [DONE]: give the parser a chance to
             // resolve buffered text-based tool calls.
             if !toolCallRoundDetected {
@@ -345,6 +348,7 @@ struct HTTPTransport: GenerationTransport {
             toolCalls: toolCallRoundDetected ? parser.toolCallStates : [:],
             isTextBasedToolCall: toolCallRoundDetected && isTextBased,
             completionTokens: parser.completionTokens,
+            finish: Self.turnEnd(finishReason: parser.lastFinishReason, streamed: isSSE, sawDone: sawDoneOnWire),
             report: TurnReport(
                 url: endpoint,
                 requestHeaders: requestHeaders,
@@ -421,7 +425,7 @@ struct HTTPTransport: GenerationTransport {
               let choice = choices.first else {
             throw LLMError(
                 source: .provider(name: provider.name),
-                userMessage: "\(provider.name) returned an unreadable response.",
+                userMessage: "\(provider.name) sent an answer teemoon couldn't read.",
                 httpStatus: nil, url: endpoint, requestHeaders: headers,
                 requestBodyJSON: body, messageHistory: nil,
                 responseBody: String(data: data, encoding: .utf8), underlyingError: nil
@@ -438,7 +442,10 @@ struct HTTPTransport: GenerationTransport {
         // reasoning-only fallback has to work when the server ignores `stream`.
         if let (_, reasoning) = SSEStreamParser.reasoningChunk(in: message) {
             parser.accumulatedReasoning = decrypt.flatMap { $0(reasoning) } ?? reasoning
+            // Never hand ciphertext on as reasoning: the engine shows reasoning when content is empty.
+            if decryptFailure.value { throw decryptionFailedError(endpoint: endpoint, headers: headers, body: body) }
         }
+        if let reason = choice["finish_reason"] as? String, reason != "tool_calls" { parser.lastFinishReason = reason }
         if let content = message["content"] as? String, !content.isEmpty {
             if let decrypt {
                 if let plaintext = decrypt(content) {
@@ -487,8 +494,30 @@ struct HTTPTransport: GenerationTransport {
     /// thrown `LLMError`, so a caller can never fall back to sending the
     /// plaintext body under an E2EE promise. Internal (not private) so the
     /// regression tests can drive each mode directly.
+    /// Request fields under which near.ai's proxy returns parts of the reply in plaintext (audit, proxy
+    /// 0be4ee8f). conformance/e2ee-request-keys.json holds the same list; keep them equal.
+    static let plaintextReplyKeys: Set<String> = [
+        "prompt_logprobs", "return_token_ids", "return_prompt_text", "return_hidden_states", "logprobs", "top_logprobs",
+        "return_prompt_token_ids", "return_meta_info",
+    ]
+
+    static func asksForPlaintext(_ value: Any) -> Bool {
+        switch value {
+        case let d as [String: Any]: d.keys.contains(where: plaintextReplyKeys.contains) || d.values.contains(where: asksForPlaintext)
+        case let a as [Any]: a.contains(where: asksForPlaintext)
+        default: false
+        }
+    }
+
     func e2eeSealedBody(_ plaintextBody: Data, codec: E2EEStreamCodec,
                         endpoint: URL, request: inout URLRequest) throws -> Data {
+        // Sealed only to chat/completions, and never asking for a reply field the proxy returns in the clear.
+        let body = try? JSONSerialization.jsonObject(with: plaintextBody)
+        guard endpoint.path.hasSuffix("/chat/completions"), !(body.map(Self.asksForPlaintext) ?? false) else {
+            logger.error("[E2EE] the sealed request would ask for a plaintext reply field — NOT sent")
+            throw encryptionFailedError(endpoint: endpoint, headers: request.allHTTPHeaderFields ?? [:],
+                                        plaintextBody: plaintextBody)
+        }
         let sealed: Data?
         do {
             sealed = try codec.encryptedBodyIfChanged(plaintextBody)
@@ -515,7 +544,7 @@ struct HTTPTransport: GenerationTransport {
     private func encryptionFailedError(endpoint: URL, headers: [String: String], plaintextBody: Data) -> LLMError {
         LLMError(
             source: .provider(name: provider.name),
-            userMessage: "The request could not be encrypted, so it was not sent. Try again — if this keeps happening, re-verify the connection from the lock icon.",
+            userMessage: "the request couldn't be encrypted, so it wasn't sent. try again. if it keeps happening, re-verify from the lock icon.",
             httpStatus: nil, url: endpoint, requestHeaders: headers,
             requestBodyJSON: String(data: plaintextBody, encoding: .utf8).map { prettyPrintedJSON($0) },
             messageHistory: nil, responseBody: nil,
@@ -523,10 +552,20 @@ struct HTTPTransport: GenerationTransport {
         )
     }
 
+    /// reply-machine.json G4: a stream that closed with neither [DONE] nor a finish_reason was cut short.
+    static func turnEnd(finishReason: String?, streamed: Bool, sawDone: Bool) -> TurnEnd {
+        switch finishReason {
+        case "length": .length
+        case "content_filter": .contentFilter
+        case nil: streamed && !sawDone ? .endedWithoutDone : TurnEnd.none
+        default: .stop
+        }
+    }
+
     private func decryptionFailedError(endpoint: URL, headers: [String: String], body: String?) -> LLMError {
         LLMError(
             source: .provider(name: provider.name),
-            userMessage: "The encrypted response could not be decrypted, so it was not displayed. Try again — if this keeps happening, re-verify the connection from the lock icon.",
+            userMessage: "the encrypted answer couldn't be decrypted, so it isn't shown. try again. if it keeps happening, re-verify from the lock icon.",
             httpStatus: nil, url: endpoint, requestHeaders: headers,
             requestBodyJSON: body, messageHistory: nil, responseBody: nil,
             underlyingError: E2EEError.decryptionFailed

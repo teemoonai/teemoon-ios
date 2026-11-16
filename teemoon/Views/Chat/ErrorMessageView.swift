@@ -22,7 +22,7 @@ struct ErrorMessageView: View {
     var sourceLabel: String {
         switch error.source {
         case .provider(let name): return name
-        case .braveGrounding: return "Brave Search"
+        case .braveGrounding: return "brave search"
         }
     }
 
@@ -65,7 +65,7 @@ struct ErrorMessageView: View {
         if let history = error.messageHistory { parts.append("\n--- Message History ---\n\(history)") }
         if let response = error.responseBody, !response.isEmpty { parts.append("\n--- Response ---\n\(response)") }
         if let underlying = error.underlyingError { parts.append("\n--- Underlying Error ---\n\(underlying)") }
-        return parts.joined(separator: "\n")
+        return DebugHeaderRedaction.scrubStoredSecrets(parts.joined(separator: "\n"))
     }
 
     var body: some View {
@@ -80,7 +80,7 @@ struct ErrorMessageView: View {
                     .fontWeight(.medium)
                     .foregroundStyle(.secondary)
                 if let status = error.httpStatus {
-                    Text("HTTP \(status)")
+                    Text("http \(status)")
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -190,7 +190,7 @@ struct ErrorMessageView: View {
                 NSPasteboard.general.setString(debugText, forType: .string)
                 #endif
             } label: {
-                Label("Copy Debug Info", systemImage: "square.on.square")
+                Label("copy debug info", systemImage: "square.on.square")
             }
         }
     }
@@ -279,7 +279,7 @@ struct ErrorMessageView: View {
         // guard in ChatViewModel.generateResponse / HTTPTransport.e2eeSealedBody).
         let err = LLMError(
             source: .provider(name: "near.ai glm 5.2"),
-            userMessage: "End-to-end encryption could not be established, so nothing was sent. Try again — if this keeps happening, re-verify the connection from the lock icon.",
+            userMessage: "end-to-end encryption couldn't be set up, so nothing was sent. try again. if it keeps happening, re-verify from the lock icon.",
             httpStatus: nil,
             url: URL(string: "https://cloud-api.near.ai/v1/chat/completions"),
             requestHeaders: nil,

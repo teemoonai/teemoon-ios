@@ -127,10 +127,14 @@ final class ChatSearchService {
         enqueue { try? await index.index([record]) }
     }
 
-    /// Site 3 — retry truncation deletes the messages after a given turn.
+    /// Site 3 — retry truncation and Think Harder delete replies. Deleted text:
+    /// scrub as a thread delete does, or the words wait in the -wal.
     func didDelete(messageIDs: [UUID]) {
         guard let index, !messageIDs.isEmpty else { return }
-        enqueue { try? await index.remove(messageIDs: messageIDs) }
+        enqueue {
+            try? await index.remove(messageIDs: messageIDs)
+            try? await index.purgeDeleted()
+        }
     }
 
     /// Site 4 — a thread was deleted. Its messages are nullified rather than

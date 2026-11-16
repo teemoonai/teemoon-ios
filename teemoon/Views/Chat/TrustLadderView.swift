@@ -29,6 +29,7 @@ struct TrustLadderView: View {
     @Environment(ConfidentialSession.self) var session
     @Environment(ProviderStore.self) var providerStore
     @Environment(\.dismiss) var dismiss
+    @Environment(\.dynamicTypeSize) var typeSize
 
     /// Phones open on `everyday` (the plain-language front door); the reader can
     /// flip up to `expert`. The verdict is identical at every rung — only the
@@ -81,7 +82,8 @@ struct TrustLadderView: View {
             tlsAttestation: session.tlsAttestation,
             modelLayerVerification: session.modelLayerVerification,
             degradeIsHardFailure: session.degradeIsHardFailure,
-            e2eeIntact: session.e2eeBindingIntact)
+            e2eeIntact: session.e2eeBindingIntact,
+            provenanceInconclusive: session.provenanceInconclusive)
     }
 
     /// Everyday claims live on `TrustVerdict`. This view renders them.
@@ -97,16 +99,19 @@ struct TrustLadderView: View {
             isLocal: isOnDevice,
             isSelfHosted: isSelfHosted,
             e2eeKeyBound: summary.e2eeKeyBound,
+            hardwareChecksPending: summary.hardwareChecksPending,
             provenanceState: summary.provenanceState,
             provenanceDetail: summary.provenanceDetail,
             responseSigState: summary.responseSigState,
             hasSigningAddress: session.attestation?.signingAddress != nil,
             quantDrift: session.modelArtifact?.quantDrift == true,
-            auditState: modelNodeAuditState,
+            auditState: modelNodeAudit.state,
             deviceBoundary: DeviceNoun.boundary,
             deviceSubject: DeviceNoun.subject,
             e2eeDegradedReason: session.e2eeDegradedReason,
-            unpublishedButSealed: session.unpublishedOnlyButE2EEIntact
+            unpublishedButSealed: session.unpublishedOnlyButE2EEIntact,
+            leaksExposure: modelNodeAudit.leaksExposure,
+            recordStale: session.attestation.map(session.recordIsStaleAndUnrefreshable) ?? false
         ))
     }
 
@@ -216,7 +221,7 @@ struct TrustLadderView: View {
             }
             #endif
             .task { refreshNearAIKey() }
-            .task(id: session.attestationState) {
+            .task(id: session.firstRecordWaitID) {
                 timedOut = false
                 guard session.awaitsFirstRecord else { return }
                 try? await Task.sleep(nanoseconds: 8_000_000_000)

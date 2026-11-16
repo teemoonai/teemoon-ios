@@ -27,6 +27,11 @@ import Foundation
 /// This is deliberately *post-parse*: the transport has already turned bytes
 /// (or tokens) into text and tool calls. What it must NOT do is execute those
 /// tool calls or decide whether to loop — that belongs to the engine.
+/// The last finish_reason a turn saw, or that its stream closed with neither [DONE] nor one.
+enum TurnEnd: String, Sendable {
+    case stop, length, contentFilter, none, endedWithoutDone
+}
+
 struct TurnOutput: Sendable {
     /// Visible answer text for this turn, with any tool-call markup already
     /// removed by the transport's parser.
@@ -62,6 +67,9 @@ struct TurnOutput: Sendable {
     /// injects, burns all 1024 tokens, and produced 3,616 characters ending
     /// mid-word — which teemoon then displayed as the assistant's reply.
     var wasTruncated: Bool = false
+
+    /// How the stream ended (reply-machine.json G4); nil when the transport can't tell.
+    var finish: TurnEnd? = nil
 
     /// Transport-specific reporting and verification for this turn.
     var report: TurnReport = .init()
@@ -114,6 +122,9 @@ struct PromptBudget: Sendable, Equatable {
         var characters = 0
         for message in messages {
             characters += (message["content"] as? String)?.count ?? 0
+            for part in message["content"] as? [[String: Any]] ?? [] {
+                characters += (part["text"] as? String)?.count ?? 0
+            }
             for call in message["tool_calls"] as? [[String: Any]] ?? [] {
                 let function = call["function"] as? [String: Any]
                 characters += (function?["name"] as? String)?.count ?? 0

@@ -8,6 +8,9 @@
 
 import Foundation
 
+/// A where row's second line. `.attention` only for a row the user must act on; trust facts stay `.muted`.
+enum WhereCaptionTone: Equatable { case muted, attention }
+
 struct WhereGetPolicy {
     struct HomeInfo: Equatable {
         var kind: LocalServerKind
@@ -25,6 +28,12 @@ struct WhereGetPolicy {
     /// stays testable and there is one number: the saved live list's length.
     var catalogCount: (Provider) -> Int? = { _ in nil }
     var catalog: [LocalModel] = LocalModelCatalog.all
+    /// The "show only" row's filters (§4e): they narrow `get` too.
+    var show = WhereFilterPolicy()
+    /// The server's saved list, so a filtered row can say "k of n". nil when none is saved.
+    var catalogModels: (Provider) -> [KnownModel]? = { _ in nil }
+    /// Whether a phone model's image turn fits this phone (PhoneImageMemory).
+    var phoneReadsImages: (String) -> Bool = { PhoneImageMemory.reads(modelID: $0) }
 
     var filteredProviders: [Provider] {
         providers.filter { p in
@@ -35,24 +44,30 @@ struct WhereGetPolicy {
     }
 
     var downloadableModels: [LocalModel] {
+        guard show.showsDownload else { return [] }
         let owned = Set(providers.compactMap(\.localModelID))
-        return catalog.filter { !owned.contains($0.id) }
+        return catalog.filter {
+            !owned.contains($0.id) && show.showsDownload(readsImages: show.imagesOnDevice && phoneReadsImages($0.id))
+        }
     }
 
     /// In `all`, only the catalog leader (E2B). E4B is not a fallback.
     var recommendedDownload: LocalModel? {
-        guard let recommended = catalog.first,
+        guard show.showsDownload, let recommended = catalog.first,
+              show.showsDownload(readsImages: show.imagesOnDevice && phoneReadsImages(recommended.id)),
               !providers.contains(where: { $0.localModelID == recommended.id })
         else { return nil }
         return recommended
     }
 
     var getSectionIsEmpty: Bool {
-        filter == .phone && downloadableModels.isEmpty && browseableProviders.isEmpty
+        (filter == .phone && downloadableModels.isEmpty && browseableProviders.isEmpty)
+            || (filter == .home && !show.showsHomeGetRows)
     }
 
     var pullableProviders: [Provider] {
-        filteredProviders.filter { home[$0.id]?.kind == .ollama }
+        guard show.showsHomeGetRows else { return [] }
+        return filteredProviders.filter { home[$0.id]?.kind == .ollama }
     }
 
     var browseableProviders: [Provider] {
@@ -65,6 +80,34 @@ struct WhereGetPolicy {
     func presetTrailingText(for provider: Provider, keyed: Bool) -> String? {
         guard keyed else { return "add key" }
         return catalogCount(provider).map(String.init)
+    }
+
+    /// A preset or browse row under the "show only" filters: hidden, or its trailing text.
+    func serverRow(for provider: Provider, keyed: Bool) -> WhereFilterPolicy.ServerRow {
+        let models = keyed ? catalogModels(provider).flatMap { $0.isEmpty ? nil : $0 } : nil
+        return show.serverRow(keyed: keyed, claimsEndToEnd: provider.claimsEndToEndEncryption,
+                              total: models?.count,
+                              matching: models.map { WhereFilterPolicy.matching($0, filters: show.filters,
+                                                                                 tiered: provider.isNearAI) })
+    }
+
+    /// Whether `get` offers a model under the "show only" filters: a download or a server row. Not the
+    /// add / connect / pull rows, which are always there. Decides the filter's empty line.
+    func getOffers(hasKey: (Provider) -> Bool) -> Bool {
+        guard networkSatisfied else { return false }
+        func serverOffers() -> Bool {
+            let custom = filter == .cloud ? browseableProviders.filter(isCustom) : []
+            let presets = Provider.presets.filter { !$0.isFixedAnswerService }
+                .map { preset in providers.first { $0.sameEndpoint(as: preset) } ?? preset }
+            return custom.contains { serverRow(for: $0, keyed: true) != .hidden }
+                || presets.contains { serverRow(for: $0, keyed: hasKey($0)) != .hidden }
+        }
+        switch filter {
+        case .none:  return recommendedDownload != nil || serverOffers()
+        case .phone: return !downloadableModels.isEmpty
+        case .home:  return false
+        case .cloud: return serverOffers()
+        }
     }
 
     func canDeleteFromServer(_ provider: Provider) -> Bool {
@@ -121,6 +164,9 @@ struct WhereGetPolicy {
     }
 
     func browseCaption(for provider: Provider) -> String {
+        if show.isFiltering, case .shown(let count?) = serverRow(for: provider, keyed: true) {
+            return "\(count) models on this setup"
+        }
         if let count = home[provider.id]?.modelCount {
             return count == 1 ? "1 model on this server" : "\(count) models on this server"
         }
@@ -164,15 +210,14 @@ struct WhereGetPolicy {
         return .unequipCloud
     }
 
-    /// Catalog leader if it fits; nil means do not hero a download that would fail.
-    /// `availableMB == 0` is "API silent" — do not block (previews, simulator).
+    /// Catalog leader unless the phone is below its RAM floor; nil means do not hero a download that would fail.
+    /// The same rule as the "may not fit" label, never free memory at the moment the sheet draws.
     static func recommendedPhoneModel(
         catalog: [LocalModel] = LocalModelCatalog.all,
-        availableMB: Int
+        physicalBytes: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) -> LocalModel? {
         guard let model = catalog.first else { return nil }
-        guard availableMB > 0 else { return model }
-        return availableMB >= model.sizeMB + LocalMemory.headroomMB ? model : nil
+        return LocalMemory.belowFloor(model, physicalBytes: physicalBytes) ? nil : model
     }
 
     func showsFirstRun(loadFailed: Bool, recommended: LocalModel?) -> Bool {
@@ -228,7 +273,7 @@ struct WhereGetPolicy {
             return (filter == .home && machines.count < 2) ? nil : name
         }
         let caption = WhereProviderPresentation.placeCaption(for: provider)
-        if !provider.capabilities.contains(.endToEndEncryption),
+        if !provider.claimsEndToEndEncryption,
            !provider.isFixedAnswerService,
            caption == WhereProviderPresentation.canonicalName(for: provider) {
             return "\(caption) · not end-to-end encrypted"
@@ -243,9 +288,8 @@ struct WhereGetPolicy {
         return info.warm.contains(modelID)
     }
 
-    /// Orange caption: a near.ai model that is proxied, not enclave.
-    func warnsUnencryptedNear(_ provider: Provider) -> Bool {
-        provider.isNearAI
-            && !provider.capabilities.contains(.endToEndEncryption)
+    /// Never `.attention` for a trust fact: "not end-to-end encrypted" is information, not a fault.
+    func captionTone(for provider: Provider, missingWeights: Bool, pullFailed: Bool) -> WhereCaptionTone {
+        missingWeights || pullFailed ? .attention : .muted
     }
 }

@@ -35,9 +35,9 @@ enum TrustRung: String, CaseIterable, Identifiable {
 
 /// One node in the plaintext→model chain.
 struct ChainNode: Identifiable {
-    enum Status { case origin, ok, alert, info, fail, pending }
+    typealias Status = TrustClaim.Status
     let id: String
-    let status: Status
+    var status: Status
     let title: String
     /// Plain sentence; backtick-marked spans are literal attested tokens and
     /// render monospaced (see `proofText`).
@@ -58,6 +58,8 @@ struct ChainNode: Identifiable {
     /// the ladder (the handler flips the rung to expert, then scrolls): that's
     /// proof-one-tap-away, not an external link. Only the audit node opts in.
     var jumpAtEveryday: Bool = false
+    /// The rail below this node, into the next one, is grey (`TrustVerdict.greyRails`).
+    var railGrey = false
     /// True for nodes downstream of a broken link — rendered dimmed.
     var dimmed: Bool = false
     /// Plain-language rewrites for the `everyday` rung — no jargon, no acronyms.
@@ -135,7 +137,7 @@ private struct ChainRow: View {
     private var spine: some View {
         VStack(spacing: 0) {
             statusIcon
-                .frame(width: 26, height: 26)
+                .glyphColumn(26, relativeTo: .title3, square: true)
             if !isLast {
                 Group {
                     if node.status == .fail {
@@ -181,7 +183,8 @@ private struct ChainRow: View {
     }
 
     private var linksRow: some View {
-        HStack(spacing: 14) {
+        // Wraps whole links: an HStack gave the last one a column a letter wide.
+        FlowLayout(spacing: 14) {
             if let jump = node.jumpTitle, rung.showsLinks || node.jumpAtEveryday {
                 Button { onJump?(node) } label: {
                     HStack(spacing: 3) {
@@ -238,6 +241,8 @@ private struct ChainRow: View {
                 .font(.title3).foregroundStyle(.red)
         case .pending:
             ProgressView().controlSize(.small)
+        case .notChecked:
+            Image(systemName: "circle").font(.title3).foregroundStyle(.secondary)
         }
     }
 
@@ -253,12 +258,12 @@ private struct ChainRow: View {
     }
 
     private var segmentColor: Color {
-        if node.dimmed { return Self.separator }
+        if node.dimmed || node.railGrey { return Self.separator }
         switch node.status {
         case .ok, .origin, .info: return teeVerified.opacity(0.55)
         case .alert:              return .orange.opacity(0.55)
         case .fail:               return .red
-        case .pending:            return Self.separator
+        case .pending, .notChecked: return Self.separator
         }
     }
 
@@ -290,10 +295,10 @@ struct ValuePill: View {
                 .textSelection(.enabled)
             Button {
                 Clipboard.copy(fullValue ?? value)
-                withAnimation(.spring(duration: 0.3, bounce: 0.1)) { copied = true }
+                withAnimation(Motion.swap) { copied = true }
                 Task {
                     try? await Task.sleep(nanoseconds: 1_400_000_000)
-                    await MainActor.run { withAnimation { copied = false } }
+                    await MainActor.run { withAnimation(Motion.swap) { copied = false } }
                 }
             } label: {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")

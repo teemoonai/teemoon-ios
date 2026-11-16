@@ -15,6 +15,8 @@ struct RecipeCardView: View {
     let recipe: EnclaveGroup.RecipeCard
     let images: [ImageEntry]
     let rung: TrustRung
+    /// Trust scope for this record: (a) on top of the card, (c) below its rows.
+    var scope: TrustScope? = nil
 
     /// A recipe-hash mismatch is an adversarial integrity break — the whole card
     /// turns red, never a quiet dropped row (silence reads as safe).
@@ -69,7 +71,7 @@ struct RecipeCardView: View {
         let pinned = images.count - tagged.count
         let pronoun = tagged.count == 1 ? "its" : "their"
         let rows = tagged.count == 1 ? "its row" : "their rows"
-        return "pins \(pinned) of \(images.count) images by content digest \u{2014} \(tagged.count) (\(names)) by tag only: \(pronoun) running bytes can change without changing the hash verified above. see \(rows)."
+        return "\(TrustScopeText.namesImages(pinned, of: images.count)) \u{2014} \(tagged.count) (\(names)) by tag only: \(pronoun) running bytes can change without changing the hash verified above. see \(rows)."
     }
 
     /// On the message's DATA PATH: a plaintext role, or the in-enclave engine
@@ -130,6 +132,10 @@ struct RecipeCardView: View {
                     ImageRowView(image: image, rung: rung)
                 }
             }
+            if let running = scope?.activeRunning, !running.isEmpty {
+                RunningNowSection(rows: running)
+                    .padding(.top, 4)
+            }
             // A mismatch drops the inner compose, so the card can be image-less.
             // Say so — an empty red card must not read as "nothing to see."
             if images.isEmpty && isFailure {
@@ -170,9 +176,12 @@ struct RecipeCardView: View {
             // member exists (a tag names, it doesn't pin) — narrow to
             // "declares" only then; the unqualified copy stays for the
             // all-digest case.
+            if let line = TrustScopeText.actionLogLine(scope?.binding) {
+                TrustScopeLineView(line: line)
+            }
             Text(.init(tagPinnedImages.isEmpty
-                ? "the exact images the signed action log pinned \u{2014} the engine + proxy that handle your message, plus their telemetry sidecars \u{2014} checked on this device against its `file_sha256`."
-                : "the images the signed action log\u{2019}s recipe declares \u{2014} checked on this device against its `file_sha256`."))
+                ? "\(TrustScopeText.imagesTheActionLogNames) \u{2014} the engine + proxy that handle your message, plus their telemetry sidecars \u{2014} checked on this device against its `file_sha256`."
+                : TrustScopeText.recipeDeclaresCaption(scope?.binding)))
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // The verdict — full width so the mismatch sentence wraps rather
@@ -215,7 +224,6 @@ struct RecipeCardView: View {
             if rung.showsLinks, let url = recipe.auditURL {
                 FableAuditBlock(url: url,
                                 title: "fable miniaudit · recipe",
-                                subtitle: "launch flags, logging & egress reviewed · this exact file",
                                 verdict: AuditIndex.shared.verdict(for: url),
                                 verdictClass: AuditIndex.shared.verdictClass(for: url))
             }

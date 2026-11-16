@@ -30,17 +30,19 @@ private let logger = Logger(subsystem: "ai.teemoon", category: "nras")
 enum NRASVerification: Equatable, Sendable {
     /// NRAS verdict is PASS and the evidence nonce matches our request nonce.
     case verified
-    /// A genuine NEGATIVE verdict — NVIDIA rejected the evidence, or the nonce
-    /// didn't echo (possible replay). Adversarial: this is a HARD failure.
+    /// NVIDIA rejected the evidence, the nonce didn't echo, or the evidence or NVIDIA's answer is malformed
+    /// (near-gate-nvidia-tls-split). HARD: blocks.
     case failed(String)
-    /// The check couldn't be completed — NRAS unreachable, an unparseable/
-    /// unrecognized response, no recorded nonce. Fail-closed (still degrades),
-    /// but NOT adversarial: a network blip must never be branded tamper.
+    /// An outage, or teemoon's own fault (`teemoonFault`). Soft: asks, never blocks.
     case inconclusive(String)
 
+    /// trust-verifier-error's approved line, for a check that failed inside teemoon.
+    static let teemoonFault = "this check failed inside teemoon, so it proves nothing."
+    /// A near.ai model node that answered without GPU evidence (gpu_evidence_required): couldn't check, never verified.
+    static let evidenceAbsent = "the model's hardware attestation is unavailable."
+
     var isVerified: Bool { self == .verified }
-    /// True only for a genuine negative verdict — drives the RED hard-failure
-    /// tier. `.inconclusive` is soft (confirm-to-proceed), never hard.
+    /// Drives the red, blocking tier. `.inconclusive` is soft (confirm-to-proceed), never hard.
     var isHardFailure: Bool { if case .failed = self { return true }; return false }
     /// Any non-verified, non-pending outcome — both degrade the session.
     var isUnverified: Bool { self != .verified }
@@ -60,10 +62,13 @@ protocol NRASHTTPClient: Sendable {
 struct URLSessionNRASHTTP: NRASHTTPClient {
     let session: URLSession
 
+    /// NVIDIA's own bound; the verdict deadline does not cut it short (the maintainer 2026-11-14).
+    static let requestTimeout: TimeInterval = 60
+
     init(session: URLSession = .shared) { self.session = session }
 
     func post(_ url: URL, body: Data) async throws -> Data {
-        var request = URLRequest(url: url, timeoutInterval: 60)
+        var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
@@ -118,10 +123,10 @@ struct NRASService {
     func verify(payloadJSON: String, expectedNonceHex: String?) async -> NRASVerification {
         guard let payload = try? JSONSerialization.jsonObject(with: Data(payloadJSON.utf8)) as? [String: Any],
               let payloadNonce = payload["nonce"] as? String else {
-            return .inconclusive("GPU evidence payload unparseable")
+            return .failed("GPU evidence payload unparseable")
         }
         guard let expectedNonceHex else {
-            return .inconclusive("no request nonce recorded for GPU evidence")
+            return .inconclusive(NRASVerification.teemoonFault)
         }
         guard payloadNonce.lowercased() == expectedNonceHex.lowercased() else {
             logger.warning("[nras] evidence nonce mismatch — possible replay")
@@ -137,11 +142,11 @@ struct NRASService {
         }
 
         guard let jwt = Self.overallJWT(responseData) else {
-            return .inconclusive("unrecognized NRAS response")
+            return .failed("unrecognized NRAS response")
         }
         if let problem = await checkToken(jwt, nonceHex: payloadNonce) { return problem }
         guard let verdict = Self.overallVerdict(responseData) else {
-            return .inconclusive("unrecognized NRAS response")
+            return .failed("unrecognized NRAS response")
         }
         guard verdict else {
             logger.warning("[nras] NVIDIA verdict: FAIL")
@@ -159,7 +164,7 @@ struct NRASService {
               let header = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
               let claims = Self.decodeJWTClaims(jwt),
               let signature = Self.base64URLDecode(segments[2]) else {
-            return .inconclusive("unrecognized NRAS token")
+            return .failed("unrecognized NRAS token")
         }
         guard header["alg"] as? String == "ES384" else { return .failed("NRAS token is not ES384-signed") }
         guard let kid = header["kid"] as? String else { return .failed("NRAS token names no signing key") }

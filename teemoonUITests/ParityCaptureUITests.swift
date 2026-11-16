@@ -16,6 +16,7 @@ final class ParityCaptureUITests: XCTestCase {
     private let outputDir = URL(fileURLWithPath: "/tmp/teemoon-parity/ios")
 
     override func setUpWithError() throws {
+        try CaptureRig.skipUnlessAsked()
         continueAfterFailure = true
         try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
     }
@@ -252,7 +253,7 @@ final class ParityCaptureUITests: XCTestCase {
         let composer = app.descendants(matching: .any)["chat.composer"].firstMatch
         composer.tap(); composer.typeText("hello")
         tapFirst(app, ["chat.send"])
-        if app.alerts.firstMatch.waitForExistence(timeout: 5) { save("send_gate", app); tapFirst(app, ["cancel", "Cancel"]) }
+        if ProductE2E.sendGateDialog(app).waitForExistence(timeout: 5) { save("send_gate", app); tapFirst(app, ["don't send"]) }
     }
 
     func test3_firstRun() throws {

@@ -2,7 +2,7 @@
 //  ConformanceVectorTests.swift
 //  teemoonTests
 //
-//  The Android port's Phase 0 gate: every vector the kit ships is
+//  The Phase 0 gate (docs/ANDROID_PORT.md §8): every vector the kit ships is
 //  asserted against the production code path HERE, on every CI run, whether or
 //  not anyone regenerates. A vector that stops describing the app fails in this
 //  repo — long before teemoon-android inherits it as the definition of correct.
@@ -145,7 +145,7 @@ struct ConformanceEmitTests {
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         func write<T: Encodable>(_ fixtureClass: String, _ vectors: T) throws {
             let document = ConformanceDocument(
-                kitVersion: ConformanceVectors.kitVersion, fixtureClass: fixtureClass,
+                kitVersion: ConformanceVectors.kitVersion(for: fixtureClass), fixtureClass: fixtureClass,
                 sourceOfTruth: "teemoon-ios", vectors: vectors)
             let url = out.appendingPathComponent("\(fixtureClass).json")
             try ConformanceEncoder.encode(document).write(to: url)
@@ -162,6 +162,11 @@ struct ConformanceEmitTests {
         try write("catalogs", try ConformanceFixtureVectors.catalogs())
         try write("brave", try ConformanceFixtureVectors.brave())
         try write("requests", try await ConformanceRequestVectors.requests())
+        try write("refusals", ConformanceRefusalVectors.refusals())
+        try write("errorcopy", ConformanceErrorCopyVectors.errorCopy())
+        try write("redaction", ConformanceRedactionVectors.redaction())
+        try write("reveal", ConformanceRevealVectors.reveal())
+        try write("loading", ConformanceLoadingVectors.loading())
     }
 
     /// CONFORMANCE_OUT, else `<repo>/conformance` derived from this file.

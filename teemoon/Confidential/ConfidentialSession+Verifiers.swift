@@ -7,6 +7,7 @@
 //  the verifier fan-out.
 //
 
+import CryptoKit
 import Foundation
 import os
 
@@ -14,20 +15,39 @@ private let logger = Logger(subsystem: "ai.teemoon", category: "confidential")
 
 extension ConfidentialSession {
 
+    /// The manifests and the model layer a provenance verdict is about. Another node gives another key.
+    nonisolated static func provenanceKey(for record: AttestationRecord) -> String {
+        let parts = [record.composeManifest ?? "", record.gpuNodeComposeManifest ?? "", record.modelComposePath ?? "",
+                     record.modelComposeCommit ?? "", record.modelFileHash ?? ""]
+        return Data(SHA256.hash(data: Data(parts.joined(separator: "\u{1F}").utf8))).hexString
+    }
+
     /// Verifies image provenance for the record's manifest (async, off the
     /// attestation fetch). Fail-closed: any fetch/verify failure yields an
     /// `.incomplete` result, which degrades the security state. Skipped when
     /// there is no manifest to check.
+    /// Scopes the verified model-layer YAML to the requested model and reads its artifact. Keep it nonisolated
+    /// async: the YAML work must not run on the main actor (docs/ATTESTATION_FLOW.md, "Where the work runs").
+    nonisolated static func scopeModelLayer(_ inner: String, model: String?,
+                                            parse: @Sendable (String, String?) -> ModelArtifact?) async
+        -> (scoped: String, artifact: ModelArtifact?) {
+        let scoped = PlaintextExposure.scoped(inner, toModel: model)
+        return (scoped, parse(scoped, model))
+    }
+
     func verifyImageProvenance(for record: AttestationRecord) {
         if freezeAttestationFixtures { return }
         provenanceTask?.cancel()
-        // A transient pass keeps this; only evidence replaces it.
-        let previous = imageProvenance
+        // A transient pass keeps this, for the same record only; only evidence replaces it.
+        let key = Self.provenanceKey(for: record)
+        let previous = provenanceKey == key ? imageProvenance : nil
         imageProvenance = nil
+        provenanceKey = key
         modelLayerVerification = nil
         modelLayerManifest = nil
         modelArtifact = nil
         provenanceSettled = true
+        provenanceInconclusive = false
         // Both attested container sets: the gateway CVM's manifest and the
         // model node's own manifest (the enclave that reads plaintext).
         let manifests: [(host: String, manifest: String)] = [
@@ -36,6 +56,7 @@ extension ConfidentialSession {
         ].filter { !$0.manifest.isEmpty }
         guard !manifests.isEmpty || record.modelComposeCommit != nil else { return }
         let service = provenanceService
+        let parse = modelLayerParse
         provenanceSettled = false
         let run = UUID()
         provenanceRun = run
@@ -63,8 +84,7 @@ extension ConfidentialSession {
                     // list reflect only the model you're talking to. Hash
                     // verification already passed on the FULL attested inner; the
                     // scoped view is a subset of that same document.
-                    let scopedInner = PlaintextExposure.scoped(inner, toModel: record.model)
-                    let artifact = ModelArtifact.parse(fromComposeYAML: scopedInner, servingModel: record.model)
+                    let (scopedInner, artifact) = await Self.scopeModelLayer(inner, model: record.model, parse: parse)
                     // The manifest is ALWAYS kept: identity was already established
                     // by the verified served `model_name` (gpuReportServesExpectedModel),
                     // so the compose is only DISPLAY enrichment. On reused/combined
@@ -76,7 +96,7 @@ extension ConfidentialSession {
                     // panel stays complete instead of collapsing to "couldn't
                     // determine".
                     all.append((host: "model", manifest: scopedInner))
-                    if !Task.isCancelled {
+                    if !Task.isCancelled, self?.provenanceKey == key {
                         // Keep the verified (scoped) text: PlaintextExposure + the
                         // measured-config panel read this same document.
                         self?.modelLayerManifest = scopedInner
@@ -116,10 +136,12 @@ extension ConfidentialSession {
                 // Rate limit / network trouble only — no negative evidence.
                 // Leave provenance pending instead of degrading the session;
                 // the next attestation refresh retries.
-                logger.warning("[provenance] inconclusive (transient fetch errors only) — keeping the last verdict")
+                logger.warning("[provenance] inconclusive (transient fetch errors only) — keeping this record's last verdict")
                 self?.imageProvenance = previous
+                self?.provenanceInconclusive = previous == nil
                 return
             }
+            self?.provenanceInconclusive = false
             self?.imageProvenance = result
             switch result {
             case .allVerified(let refs, let thirdParty):
@@ -151,13 +173,41 @@ extension ConfidentialSession {
         }
     }
 
-    /// Verifies the record's GPU evidence against NVIDIA NRAS (async, off the
-    /// attestation fetch). Skipped when there is no `nvidia_payload`;
-    /// fail-closed once evidence exists.
+    /// Trust scope for the GPU node's report. Always answers once started (an unreadable report reads as not
+    /// bound and no boot log), or `verdictsPending` would wait on it forever.
+    func verifyTrustScope(for record: AttestationRecord) {
+        trustScopeTask?.cancel()
+        trustScope = nil
+        trustScopeTask = nil
+        guard let json = record.gpuNodeReportJSON, let quote = record.gpuIntelQuote, !quote.isEmpty else { return }
+        let service = dcapService
+        let pairs = runningPairCheck
+        let nonce = record.gpuNonce
+        let host = record.gpuNodeHost
+        let now = UInt64(record.fetchedAt.timeIntervalSince1970)
+        trustScopeTask = Task { [weak self] in
+            let node = await service.verify(quoteHex: quote, label: "gpu", nowSecs: now)
+            let scope = await TrustScope.run(reportJSON: json, nodeQuoteHex: quote, nonceHex: nonce,
+                                             dcap: { await service.verify(quoteHex: $0, label: "compose-manager", nowSecs: now) },
+                                             nodeDCAP: node, pairs: pairs, host: host)
+                ?? TrustScope(binding: .notBound, boot: .absent)
+            guard !Task.isCancelled else { return }
+            self?.trustScope = scope
+            if scope.hardBreak { logger.warning("[trust-scope] hard break — degrading session") }
+        }
+    }
+
+    /// Verifies the record's GPU evidence against NVIDIA NRAS (async, off the attestation fetch); fail-closed once
+    /// evidence exists. A model node that answered with no `nvidia_payload` couldn't be checked: soft, never verified.
     func verifyGPU(for record: AttestationRecord) {
         nrasTask?.cancel()
         gpuAttestation = nil
-        guard let payload = record.nvidiaPayload, !payload.isEmpty else { return }
+        // A cancelled handle left here reads as pending in `verdictsPending` for the new record's whole life.
+        nrasTask = nil
+        guard let payload = record.nvidiaPayload, !payload.isEmpty else {
+            if record.modelIntelQuote?.isEmpty == false { gpuAttestation = .inconclusive(NRASVerification.evidenceAbsent) }
+            return
+        }
         let service = nrasService
         let nonce = record.modelNonce
         nrasTask = Task { [weak self] in
@@ -167,8 +217,8 @@ extension ConfidentialSession {
         }
     }
 
-    /// Verifies that HTTPS terminates inside the model TEE (async, off the
-    /// fetch). Runs against the model's authoritative direct host; when the
+    /// Probes the model node's TLS key against its attestation (async, off the
+    /// fetch); not the chat's gateway connection. Runs against the model's authoritative direct host; when the
     /// model has no direct host, TLS attestation isn't applicable
     /// (`.notPerformed`). Fail-closed: a `.failed` verdict degrades the state.
     func verifyTLS(for provider: Provider) {
@@ -176,8 +226,11 @@ extension ConfidentialSession {
         tlsAttestation = nil
         let service = tlsService
         let model = provider.model
+        let lookup = directBase
         tlsTask = Task { [weak self] in
-            guard let directBase = await EndpointDirectory.shared.directBase(forModel: model) else {
+            guard let directBase = await lookup(model) else {
+                // A cancelled lookup writes nothing: a newer check may be pending on this session.
+                guard !Task.isCancelled else { return }
                 self?.tlsAttestation = .notPerformed
                 return
             }

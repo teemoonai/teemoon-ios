@@ -25,6 +25,8 @@ import XCTest
 /// (then reboot the simulator; `-bool true` puts it back).
 final class ChatBottomEdgeCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     func testCaptureBottomEdgeWithKeyboardUp() throws {
         let env = ProcessInfo.processInfo.environment
         guard let endpoint = env["TEEMOON_EDGE_CAPTURE_ENDPOINT"] else {
@@ -38,7 +40,7 @@ final class ChatBottomEdgeCaptureUITests: XCTestCase {
         app.launchEnvironment["UITEST_SEED_LOCAL_MODEL"] = model
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20), "composer never appeared")
 
         // The fade lives on ConversationView, which an empty thread never mounts.

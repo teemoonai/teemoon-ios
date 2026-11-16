@@ -202,7 +202,7 @@ struct VerificationRunTests {
         dcap.gateway = .verified(tcbStatus: .outOfDate, mrConfigIdHex: "01", reportDataHex: "")
         // TLS + provenance resolved so no pending section keeps the run "running".
         let s = summary(imageProvenance: .allVerified(verified: [], thirdParty: []),
-                        dcap: dcap, tls: .notPerformed)
+                        dcap: dcap, tls: .notPerformed, modelLayerVerification: .verified)
         // Genuine hardware behind on Intel platform updates is a note, not a
         // warning — the quote still proves real sealed silicon and the E2EE
         // binding holds. Matches the green expert "genuine hardware" row; only

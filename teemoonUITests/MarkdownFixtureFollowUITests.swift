@@ -65,7 +65,7 @@ final class MarkdownFixtureFollowUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.transcript.waitForExistence(timeout: 20))
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20), "composer never appeared")
         composer.tap()
         composer.typeText("go")
@@ -115,7 +115,7 @@ final class MarkdownFixtureFollowUITests: XCTestCase {
         // area, so something scrolled entirely past the fold comes back as an
         // empty rect rather than as an off-screen one — which would otherwise
         // satisfy a naive bounds check.
-        let composerTop = app.textFields["chat.composer"].frame.minY
+        let composerTop = app.textViews["chat.composer"].frame.minY
         let transcriptTop = app.transcript.frame.minY
         let frame = sentinel.frame
         XCTAssertFalse(frame.isEmpty,

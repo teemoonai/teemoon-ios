@@ -31,25 +31,27 @@ extension AttestationState {
 
 // MARK: - VerifyingLock
 
-/// Pulsing lock icon — fades in/out while verifying, solid otherwise.
+/// The lock: pulses while verifying and stops when the verdict lands, then swaps glyph in place (motion audit #4).
+/// The system symbol effects own both, so the pulse cannot outlive the state (a `repeatForever` keyed to a value that
+/// never changed again could). Reduce Motion: a still, secondary lock while verifying.
 struct VerifyingLock: View {
     let state: AttestationState
     var size: CGFloat = 12
     var sealedDespiteDegrade: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var pulse = false
+    // degraded shows an OPEN lock — never a closed lock next to
+    // "E2EE unavailable" (design review: glyph must match the words)
+    private var glyph: String { (state == .degraded && !sealedDespiteDegrade) ? "lock.open.fill" : "lock.fill" }
 
     var body: some View {
-        // degraded shows an OPEN lock — never a closed lock next to
-        // "E2EE unavailable" (design review: glyph must match the words)
-        Image(systemName: (state == .degraded && !sealedDespiteDegrade) ? "lock.open.fill" : "lock.fill")
-            .font(.system(size: size, weight: .semibold))
+        Image(systemName: glyph)
+            .scaledFont(size: size, weight: .semibold)
             .foregroundStyle(state == .verifying ? .secondary : .primary)
-            .opacity(state == .verifying && pulse ? 0.45 : 1.0)
-            .animation(state == .verifying
-                ? .easeInOut(duration: 0.85).repeatForever()
-                : .default, value: pulse)
-            .onAppear { pulse = true }
+            .symbolEffect(.pulse, options: .repeating, isActive: state == .verifying && !reduceMotion)
+            .contentTransition(.symbolEffect(.replace))
+            .animation(Motion.swap, value: glyph)
+            .animation(Motion.swap, value: state == .verifying)
     }
 }
 
@@ -67,6 +69,8 @@ struct E2EETitleBlock: View {
     var isHardFailure: Bool = false
     /// GitHub 404s only, send still sealed. Caption must not say unencrypted.
     var unpublishedButSealed: Bool = false
+    /// A hardware check couldn't run, the send is still sealed: "encrypted · hardware not confirmed".
+    var hardwareUnconfirmedButSealed: Bool = false
     /// Replies whose signature failed to verify this session. A red header cue:
     /// the session is still sealed, but a delivered reply couldn't be authenticated.
     var mismatchCount: Int = 0
@@ -97,13 +101,15 @@ struct E2EETitleBlock: View {
             quantDrift: false,
             deviceBoundary: "",
             deviceSubject: "",
-            unpublishedButSealed: unpublishedButSealed
+            unpublishedButSealed: unpublishedButSealed,
+            hardwareUnconfirmedButSealed: hardwareUnconfirmedButSealed
         ))
     }
 
     private var displayCaption: String {
         TrustVerdict.chipCaption(mode: chipMode, state: state,
-                                 unpublishedButSealed: unpublishedButSealed)
+                                 unpublishedButSealed: unpublishedButSealed,
+                                 hardwareUnconfirmedButSealed: hardwareUnconfirmedButSealed)
     }
 
     private var displayColor: Color {
@@ -188,12 +194,12 @@ struct E2EETitleBlock: View {
             if showModel, let modelLabel {
                 // the middot belongs to the model, and leaves with it
                 Text(chipMode == .none ? modelLabel : modelLabel + " \u{00B7} ")
-                    .font(.system(size: 11, weight: .medium))
+                    .scaledFont(size: 11, weight: .medium)
                     .foregroundStyle(modelStyle)
             }
             if chipMode != .none {
                 Text(displayCaption)
-                    .font(.system(size: 11, weight: isAlert ? .semibold : .regular))
+                    .scaledFont(size: 11, weight: isAlert ? .semibold : .regular)
                     .foregroundStyle(statusStyle)
             }
         }
@@ -218,16 +224,16 @@ struct E2EETitleBlock: View {
         switch chipMode {
         case .hardBlock:
             Image(systemName: "lock.open.fill")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.red)
+                .scaledFont(size: 12, weight: .semibold).foregroundStyle(.red)
         case .mismatch:
             Image(systemName: "lock.fill")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.red)
+                .scaledFont(size: 12, weight: .semibold).foregroundStyle(.red)
         case .onDevice:
             // A phone, not a laptop and not a padlock. The distinction is the
             // whole point: "on your own machine" is a machine glyph because the
             // data travels to a machine; this one never travels at all.
             Image(systemName: "iphone")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary)
+                .scaledFont(size: 12, weight: .semibold).foregroundStyle(.primary)
         case .selfHosted:
             // A machine, not a padlock — the same glyph the sheet leads with, so
             // both surfaces make the same claim. A padlock would say "sealed",
@@ -235,9 +241,10 @@ struct E2EETitleBlock: View {
             // which is a different reason to be private and reads as its own
             // thing rather than a weaker version of e2ee.
             Image(systemName: "lock.laptopcomputer")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary)
+                .scaledFont(size: 12, weight: .semibold).foregroundStyle(.primary)
         default:
-            VerifyingLock(state: state, size: 12, sealedDespiteDegrade: unpublishedButSealed)
+            VerifyingLock(state: state, size: 12,
+                          sealedDespiteDegrade: unpublishedButSealed || hardwareUnconfirmedButSealed)
         }
     }
 
@@ -261,17 +268,22 @@ struct E2EETitleBlock: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
+                            .scaledFont(size: 10, weight: .semibold)
                             .foregroundStyle(.secondary)
                             .layoutPriority(1)
                     }
                 }
                 if chipMode != .none || modelLabel != nil {
                     secondaryLine
+                        // Checking → verified: the caption fades from one verdict to the next (motion audit #4).
+                        .contentTransition(.opacity)
+                        .animation(Motion.fade, value: state)
                 }
             }
             .frame(minHeight: 44)
             .contentShape(Rectangle())
+            // A new title cuts in place: the first send's motion carries the title change and slid the block.
+            .transaction(value: title) { $0.animation = nil }
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)

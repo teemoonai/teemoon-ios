@@ -309,6 +309,45 @@ struct RequestBodyEncryptionTests {
         #expect(String(data: userPlain, encoding: .utf8) == "What is 2+2?")
     }
 
+    /// An image turn's content is an array of parts. It is sealed whole, as near's SDK seals it
+    /// (inference-sdk 4bb1de0, e2ee-chat.ts:271-273); before this only a string was sealed, so the
+    /// array, image bytes included, would have gone out in the clear.
+    @Test func encryptRequestBody_sealsAnArrayContentWhole() throws {
+        let modelEdKey = Curve25519.Signing.PrivateKey()
+        let modelXPrivate = try Ed25519ToX25519.privateKey(seed: modelEdKey.rawRepresentation)
+        let session = try E2EEPeer(modelEd25519PubKey: modelEdKey.publicKey.rawRepresentation)
+        let parts: [[String: Any]] = [
+            ["type": "text", "text": "What is in this picture?"],
+            ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="]],
+        ]
+        let body: [String: Any] = ["model": "m", "messages": [["role": "user", "content": parts]]]
+        let sealed = try session.encryptRequestBody(try JSONSerialization.data(withJSONObject: body))
+
+        let raw = try #require(String(data: sealed, encoding: .utf8))
+        #expect(!raw.contains("data:image"), "the image went out in the clear")
+        #expect(!raw.contains("What is in this picture"), "the text part went out in the clear")
+        let msgs = try #require((try JSONSerialization.jsonObject(with: sealed) as? [String: Any])?["messages"] as? [[String: Any]])
+        let hex = try #require(msgs[0]["content"] as? String, "an array content must become one sealed string")
+        let opened = try E2EEEnvelope.open(wireFormat: try Data(hexString: hex), privateKey: modelXPrivate)
+        let back = try #require(try JSONSerialization.jsonObject(with: opened) as? [[String: Any]])
+        #expect(back.count == 2)
+        #expect(back[0]["text"] as? String == "What is in this picture?")
+        #expect((back[1]["image_url"] as? [String: Any])?["url"] as? String == "data:image/jpeg;base64,/9j/4AAQSkZJRg==")
+    }
+
+    /// A content that is neither a string, parts nor null has no sealed form: refused, never sent.
+    @Test func encryptRequestBody_refusesContentItCannotSeal() throws {
+        let modelEdKey = Curve25519.Signing.PrivateKey()
+        let session = try E2EEPeer(modelEd25519PubKey: modelEdKey.publicKey.rawRepresentation)
+        for content: Any in [42, ["url": "x"], true] {
+            let body: [String: Any] = ["messages": [["role": "user", "content": content]]]
+            #expect(throws: E2EEError.self) { try session.encryptRequestBody(try JSONSerialization.data(withJSONObject: body)) }
+        }
+        // A tool-calling assistant turn's null content still passes.
+        let nullBody: [String: Any] = ["messages": [["role": "assistant", "content": NSNull()]]]
+        _ = try session.encryptRequestBody(try JSONSerialization.data(withJSONObject: nullBody))
+    }
+
     @Test func encryptRequestBody_emptyContent_unchanged() throws {
         let modelEdKey = Curve25519.Signing.PrivateKey()
         let session = try E2EEPeer(modelEd25519PubKey: modelEdKey.publicKey.rawRepresentation)

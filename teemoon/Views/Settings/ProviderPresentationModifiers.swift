@@ -16,6 +16,8 @@ struct ProviderSheets: ViewModifier {
     let models: [KnownModel]
     let showsConfidentialityTags: Bool
     let downloadBaseURL: URL?
+    /// The where sheet's filters (§4e), carried into the browser and the Ollama links.
+    var browseFilters: ModelBrowserQuery.Filter = []
     let onSelectModel: (KnownModel) -> Void
     let onDownloadCompleted: (String) -> Void
     /// Fired the moment a pull STARTS, so the arriving model becomes this screen's
@@ -28,7 +30,8 @@ struct ProviderSheets: ViewModifier {
                 ModelBrowserView(selectedModel: $selectedModel,
                                  door: ModelBrowserDoor(models: models,
                                                         showsConfidentialityTags: showsConfidentialityTags),
-                                 onSelect: onSelectModel)
+                                 onSelect: onSelectModel,
+                                 initialFilters: browseFilters)
                 #if os(macOS)
                 .frame(minWidth: 400, minHeight: 450)
                 #endif
@@ -41,7 +44,8 @@ struct ProviderSheets: ViewModifier {
                     OllamaModelDownloadView(baseURL: base,
                                             onCompleted: onDownloadCompleted,
                                             onStarted: onDownloadStarted,
-                                            installed: models.map(\.id))
+                                            installed: models.map(\.id),
+                                            browseFilters: browseFilters)
                     #if os(macOS)
                     .frame(minWidth: 400, minHeight: 450)
                     #endif

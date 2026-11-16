@@ -21,7 +21,14 @@ extension WhereSheetView {
     /// exactly this one: what have I been running lately, wherever it ran.
     var visibleRecents: [WhereRecentEntry] {
         guard pathObserver.isSatisfied, filter == nil else { return [] }
-        return providerStore.recentlyUsed()
+        let show = getPolicy.show
+        guard show.isFiltering else { return providerStore.recentlyUsed() }
+        // A recent whose server is gone has no abilities to show.
+        return providerStore.recentlyUsed().filter { entry in
+            recentEquipped(entry).map {
+                show.passes(readsImages: readsImages($0), endToEnd: $0.asActive.claimsEndToEndEncryption)
+            } ?? false
+        }
     }
 
     @ViewBuilder
@@ -86,7 +93,8 @@ extension WhereSheetView {
                 // which doesn't stop mattering because the row moved down a section.
                 caption: recentEquipped(entry).map { readyCaption(for: $0.asActive) }
                     ?? WhereProviderPresentation.placeCaption(for: entry.provider),
-                warmth: recentEquipped(entry).flatMap(warmthLabel)
+                warmth: recentEquipped(entry).flatMap(warmthLabel),
+                readsImages: recentEquipped(entry).map(readsImages) ?? false
             )
         }
         .buttonStyle(.plain)

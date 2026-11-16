@@ -10,6 +10,7 @@
 
 import CryptoKit
 import Foundation
+import os
 import Testing
 @testable import teemoon
 
@@ -563,11 +564,12 @@ struct Provenance404ClassificationTests {
         ScriptedGitHub.requestCount = 0
         let outcome = await makeService().verify(.init(image: "nearaidev/compose-manager-launcher",
                                                        digest: String(repeating: "1", count: 64)))
-        guard case .unverified(.fetchTransient(let why)) = outcome else {
+        guard case .unverified(.fetchTransient(let why, _)) = outcome else {
             Issue.record("expected transient, got \(outcome)"); return
         }
         #expect(why.contains("rate limit"))
         #expect(ScriptedGitHub.requestCount == 1)   // no pointless retry against a dry quota
+        #expect(outcome.failureReason == "couldn\u{2019}t reach GitHub (rate-limited or offline)")
     }
 
     /// Two candidates (the guessed repo, then the compose repo), one retry
@@ -575,7 +577,7 @@ struct Provenance404ClassificationTests {
     @Test func clean404RetriesOnceThenFailsClosed() async {
         ScriptedGitHub.script = ScriptedGitHub.fourClean404s
         ScriptedGitHub.requestCount = 0
-        let outcome = await makeService().verify(.init(image: "nearaidev/compose-manager-launcher",
+        let outcome = await makeService().verify(.init(image: "nearaidev/vllm-proxy-rs",
                                                        digest: String(repeating: "2", count: 64)))
         guard case .unverified(.fetchFailed(let why)) = outcome else {
             Issue.record("expected definitive fetchFailed, got \(outcome)"); return
@@ -593,11 +595,11 @@ struct Provenance404ClassificationTests {
         ScriptedGitHub.requestCount = 0
         let digest = String(repeating: "9", count: 64)
         let service = makeService()
-        let first = await service.verify(.init(image: "nearaidev/compose-manager-launcher", digest: digest))
+        let first = await service.verify(.init(image: "nearaidev/vllm-proxy-rs", digest: digest))
         guard case .unverified(.fetchFailed) = first else { Issue.record("expected a definitive miss, got \(first)"); return }
         #expect(ScriptedGitHub.requestCount == 4)
 
-        let second = await service.verify(.init(image: "nearaidev/compose-manager-launcher", digest: digest))
+        let second = await service.verify(.init(image: "nearaidev/vllm-proxy-rs", digest: digest))
         guard case .unverified(.fetchFailed) = second else { Issue.record("expected the remembered miss, got \(second)"); return }
         #expect(ScriptedGitHub.requestCount == 4, "no request for a digest missed within the hour")
         ProvenanceService.forgetMisses()
@@ -691,5 +693,173 @@ struct ProvenanceServiceFetchTests {
             "/repos/nearai/sglang/attestations/sha256:\(ImageProvenanceTests.fixtureDigest)",
             "/repos/nearai/cvm-compose-files/attestations/sha256:\(ImageProvenanceTests.fixtureDigest)",
         ], "the guess retried once, then the compose repo answered: \(AttestationHostStub.asked)")
+    }
+}
+
+
+/// T2 (pm's state-machine sweep, 2026-11-06; also in 1.0.6, audit: LOW, display only): a re-verify that
+/// landed on another node and then hit a GitHub rate limit restored the OLD node's provenance — green, with
+/// the old node's digests. A transient pass now keeps the last verdict only for the same record.
+@Suite("Provenance carry-over is per record", .serialized)
+@MainActor
+struct ProvenanceCarryOverTests {
+    private func session() -> ConfidentialSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RateLimitedGitHub.self]
+        let defaults = UserDefaults(suiteName: "carry-over-\(UUID().uuidString)")!
+        let s = ConfidentialSession(providers: ProviderStore(inMemory: true),
+                                    provenanceService: ProvenanceService(session: URLSession(configuration: config), defaults: defaults))
+        s.attestationTask?.cancel()
+        return s
+    }
+
+    private func settle(_ s: ConfidentialSession) async {
+        for _ in 0..<200 where !s.provenanceSettled { try? await Task.sleep(for: .milliseconds(25)) }
+    }
+
+    @Test func anInconclusiveRecheckOfAnotherNodeLeavesProvenancePending() async {
+        let s = session()
+        let old = AttestationRecord.preview
+        s.provenanceKey = ConfidentialSession.provenanceKey(for: old)
+        s.imageProvenance = .allVerified(verified: [], thirdParty: [])
+        var other = AttestationRecord.preview
+        other.gpuNodeComposeManifest = "services:\n  vllm:\n    image: nearaidev/other@sha256:" + String(repeating: "c", count: 64) + "\n"
+        s.verifyImageProvenance(for: other)
+        await settle(s)
+        #expect(RateLimitedGitHub.requests > 0, "precondition: the re-check reached the (rate-limited) source")
+        #expect(s.imageProvenance == nil, "another node's verdict must not stand in for this one")
+    }
+
+    @Test func anInconclusiveRecheckOfTheSameNodeKeepsItsVerdict() async {
+        let s = session()
+        let record = AttestationRecord.preview
+        s.provenanceKey = ConfidentialSession.provenanceKey(for: record)
+        s.imageProvenance = .allVerified(verified: [], thirdParty: [])
+        s.verifyImageProvenance(for: record)
+        await settle(s)
+        #expect(s.imageProvenance == .allVerified(verified: [], thirdParty: []))
+    }
+
+    /// T2b, trust-provenance-unchecked (the maintainer 2026-11-06): a rate-limited first pass settles with nothing to
+    /// keep. It must not read as checked: the trust screen says GitHub didn't answer. The chip stays "end-to-end
+    /// encrypted" (the seal holds) and sending is untouched.
+    @MainActor
+    @Test func aRateLimitedFirstPassDoesNotReadVerified() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RateLimitedGitHub.self]
+        let defaults = UserDefaults(suiteName: "t2b-\(UUID().uuidString)")!
+        let s = ConfidentialSession(providers: ConfidentialSessionTests.storeMatchingPreviewRecord(),
+                                    provenanceService: ProvenanceService(session: URLSession(configuration: config),
+                                                                         defaults: defaults))
+        s.attestationTask?.cancel()
+        s.attestation = .preview
+        s.lastRequestUsedE2EE = true
+        s.imageProvenance = .allVerified(verified: [], thirdParty: [])
+        #expect(s.attestationState == .ok, "precondition: the baseline record reads verified")
+
+        s.verifyImageProvenance(for: .preview)
+        #expect(s.attestationState == .verifying, "in flight: checking, not verified")
+        await settle(s)
+        #expect(RateLimitedGitHub.requests > 0, "precondition: the pass reached the (rate-limited) source")
+        #expect(s.imageProvenance == nil && s.provenanceSettled, "settled inconclusive, nothing to keep")
+        #expect(s.provenanceInconclusive, "the code wasn't checked, and the session knows it")
+        #expect(s.attestationState == .ok, "the chip keeps its words")
+        s.verifyImageProvenance(for: .preview)
+        #expect(!s.provenanceInconclusive, "a new pass starts unanswered, not inconclusive")
+    }
+}
+
+private final class RateLimitedGitHub: URLProtocol {
+    nonisolated(unsafe) static var requests = 0
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        Self.requests += 1
+        let response = HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil,
+                                       headerFields: ["Retry-After": "60"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+
+/// The model layer's YAML (scope + artifact parse) runs off the main actor, and a result for a record that is
+/// no longer current is still dropped.
+@Suite("Model-layer parse is off the main actor", .serialized)
+@MainActor
+struct ModelLayerParseOffMainTests {
+    static let yaml = "services:\n  sglang:\n    image: lmsysorg/sglang@sha256:" + String(repeating: "d", count: 64) + "\n"
+
+    private func record(commit: String, hash: String?, path: String?) -> AttestationRecord {
+        var r = AttestationRecord(
+            composeHash: "", mrtd: "", osImageHash: "", intelQuote: "",
+            composeManifest: nil, gpuArch: nil, gpuNodeComposeHash: nil, modelFileHash: hash,
+            signingAddress: nil, gpuSigningAddress: nil, modelEd25519PubKey: nil,
+            quoteVerification: nil, gpuQuoteVerification: nil, modelQuoteVerification: nil,
+            fetchedAt: Date(), providerID: UUID())
+        r.modelComposePath = path
+        r.modelComposeCommit = commit
+        r.model = "zai-org/GLM-5.1-FP8"
+        return r
+    }
+
+    @Test func theHelperParsesOffTheMainThread() async {
+        let onMain = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let out = await ConfidentialSession.scopeModelLayer(Self.yaml, model: "zai-org/GLM-5.1-FP8", parse: { yaml, model in
+            onMain.withLock { $0 = Thread.isMainThread }
+            return ModelArtifact.parse(fromComposeYAML: yaml, servingModel: model)
+        })
+        #expect(onMain.withLock { $0 } == false, "the parse ran on the main thread")
+        #expect(out.scoped == PlaintextExposure.scoped(Self.yaml, toModel: "zai-org/GLM-5.1-FP8"))
+        #expect(out.artifact == ModelArtifact.parse(fromComposeYAML: out.scoped, servingModel: "zai-org/GLM-5.1-FP8"))
+    }
+
+    @Test func aParseForARecordNoLongerCurrentIsDropped() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ModelLayerStub.self]
+        let defaults = UserDefaults(suiteName: "layer-off-main-\(UUID().uuidString)")!
+        let s = ConfidentialSession(providers: ProviderStore(inMemory: true),
+                                    provenanceService: ProvenanceService(session: URLSession(configuration: config), defaults: defaults))
+        s.attestationTask?.cancel()
+        let entered = OSAllocatedUnfairLock(initialState: false)
+        let onMain = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let gate = DispatchSemaphore(value: 0)
+        s.modelLayerParse = { yaml, model in
+            onMain.withLock { $0 = Thread.isMainThread }
+            entered.withLock { $0 = true }
+            gate.wait()
+            return ModelArtifact.parse(fromComposeYAML: yaml, servingModel: model)
+        }
+        let a = record(commit: String(repeating: "a", count: 40), hash: ComposeDigest.sha256Hex(Self.yaml),
+                       path: "prod/a.yaml")
+        s.verifyImageProvenance(for: a)
+        for _ in 0..<200 where !entered.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(25)) }
+        #expect(entered.withLock { $0 }, "precondition: record A's layer reached the parse")
+        #expect(onMain.withLock { $0 } == false, "the parse ran on the main thread")
+
+        let b = record(commit: String(repeating: "b", count: 40), hash: nil, path: nil)
+        s.verifyImageProvenance(for: b)
+        gate.signal()
+        for _ in 0..<200 where !s.provenanceSettled { try? await Task.sleep(for: .milliseconds(25)) }
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(s.provenanceKey == ConfidentialSession.provenanceKey(for: b))
+        #expect(s.modelLayerManifest == nil, "record A's layer was written over record B")
+        #expect(s.modelArtifact == nil)
+    }
+}
+
+/// raw.githubusercontent.com answers the model-layer YAML; everything else is rate-limited.
+private final class ModelLayerStub: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        let raw = request.url?.host == "raw.githubusercontent.com"
+        let response = HTTPURLResponse(url: request.url!, statusCode: raw ? 200 : 429, httpVersion: nil,
+                                       headerFields: raw ? [:] : ["Retry-After": "60"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if raw { client?.urlProtocol(self, didLoad: Data(ModelLayerParseOffMainTests.yaml.utf8)) }
+        client?.urlProtocolDidFinishLoading(self)
     }
 }

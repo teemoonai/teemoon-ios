@@ -23,6 +23,8 @@ import Textual
 
 struct StreamingMarkdownView: View {
     let content: String
+    /// The paragraph that appeared whole and is fading in ("whole if quick"); its block fades on appear.
+    var fadingText: String? = nil
 
     /// Textual's block spacing is a multiple of the font size, so the gaps have
     /// to scale with Dynamic Type the same way.
@@ -45,13 +47,35 @@ struct StreamingMarkdownView: View {
                     ? MarkdownStreamSplitter.displayTail(block)
                     : block
                 StructuredText.cached(rendered)
+                    .modifier(FadeInOnAppear(active: fadingText.map { fades(block, in: $0) } ?? false))
                     .padding(.top, index == 0 ? 0 : gap(blocks[index - 1], block))
             }
         }
     }
 
+    private func fades(_ block: String, in fading: String) -> Bool {
+        let trimmed = block.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && fading.contains(trimmed)
+    }
+
     private func gap(_ previous: String, _ next: String) -> CGFloat {
         MarkdownStreamSplitter.collapsedSpacingEm(after: previous, before: next) * fontSize
+    }
+}
+
+/// Opacity only: a layout animation here would move the transcript under a reader (see StreamingMessageView).
+private struct FadeInOnAppear: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var visible = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active && !visible && !reduceMotion ? 0 : 1)
+            .onAppear {
+                guard active, !reduceMotion else { return }
+                withAnimation(.easeOut(duration: StreamReveal.fadeMs / 1000)) { visible = true }
+            }
     }
 }
 

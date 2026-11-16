@@ -254,11 +254,17 @@ enum GroundingBudget {
 struct BraveWebSearchTool: Tool {
     static let keychainKey = "brave-grounding"
 
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d, yyyy"
-        return f
-    }()
+    /// What a keyless call returns. Wording rationale is at the `guard !apiKey.isEmpty` in `call`.
+    static let keylessPolicy = """
+        SEARCH POLICY: live web search is turned off for this \
+        conversation, so this query was not sent anywhere. This is a \
+        setting, not a failure.
+        Answer the question now from your own knowledge, and say \
+        roughly when that knowledge is from. Do not recommend other \
+        websites, apps, or services, and do not suggest that the user \
+        run a search themselves.
+        """
+
 
     let apiKey: String
     /// Injection point for tests. Production is URLSession.
@@ -276,10 +282,10 @@ struct BraveWebSearchTool: Tool {
     /// `GroundingBudget.onDeviceURLCap`.
     let onDevice: Bool
 
-    init(apiKey: String, onDevice: Bool = false) {
+    /// `today` is the request's `DisclosurePolicy.toolDay`: a minimised destination gets the UTC day, in English.
+    init(apiKey: String, onDevice: Bool = false, today: String = DisclosurePolicy(tier: .private).toolDay(Date())) {
         self.onDevice = onDevice
         self.apiKey = apiKey
-        let today = Self.dateFormatter.string(from: Date())
         self.description = """
             Search the web for current, real-time information. Use this when the user asks about \
             recent events, current news, live prices, or anything that may have changed since your \
@@ -406,15 +412,7 @@ struct BraveWebSearchTool: Tool {
             // own search. A model that follows one instruction will follow the
             // one beside it. Evidence from a model that ignores everything
             // cannot be used to strip instructions aimed at models that do not.
-            return """
-                SEARCH POLICY: live web search is turned off for this \
-                conversation, so this query was not sent anywhere. This is a \
-                setting, not a failure.
-                Answer the question now from your own knowledge, and say \
-                roughly when that knowledge is from. Do not recommend other \
-                websites, apps, or services, and do not suggest that the user \
-                run a search themselves.
-                """
+            return Self.keylessPolicy
         }
         return try await fetchContext(for: q, freshness: arguments.freshness,
                                       contextThresholdMode: arguments.contextThresholdMode,
@@ -541,7 +539,7 @@ struct BraveWebSearchTool: Tool {
     private func fetchContext(for query: String, freshness: String? = nil, contextThresholdMode: String? = nil, count: Int? = nil) async throws -> String {
         guard var components = URLComponents(string: Self.endpoint) else {
             throw LLMError(source: .braveGrounding,
-                           userMessage: "Brave web search failed — invalid endpoint URL.",
+                           userMessage: "brave web search failed: the search address isn't valid.",
                            httpStatus: nil, url: nil,
                            requestHeaders: nil, requestBodyJSON: nil,
                            messageHistory: nil, responseBody: nil, underlyingError: nil)
@@ -565,7 +563,7 @@ struct BraveWebSearchTool: Tool {
 
         guard let url = components.url else {
             throw LLMError(source: .braveGrounding,
-                           userMessage: "Brave web search failed — invalid URL.",
+                           userMessage: "brave web search failed: the search address isn't valid.",
                            httpStatus: nil, url: nil,
                            requestHeaders: nil, requestBodyJSON: nil,
                            messageHistory: nil, responseBody: nil, underlyingError: nil)
@@ -595,7 +593,7 @@ struct BraveWebSearchTool: Tool {
             (data, response) = try await http.data(for: request)
         } catch {
             throw LLMError(source: .braveGrounding,
-                           userMessage: "Brave web search failed — check your network connection.",
+                           userMessage: "brave web search failed: check your connection.",
                            httpStatus: nil, url: url,
                            requestHeaders: ["X-Subscription-Token": apiKey],
                            requestBodyJSON: nil, messageHistory: nil,
@@ -616,7 +614,7 @@ struct BraveWebSearchTool: Tool {
 
         guard let decoded = try? JSONDecoder().decode(BraveGroundingResponse.self, from: data) else {
             throw LLMError(source: .braveGrounding,
-                           userMessage: "Brave web search returned an unexpected response format.",
+                           userMessage: "brave web search sent an answer teemoon couldn't read.",
                            httpStatus: nil, url: url,
                            requestHeaders: ["X-Subscription-Token": apiKey],
                            requestBodyJSON: nil, messageHistory: nil,
@@ -627,7 +625,7 @@ struct BraveWebSearchTool: Tool {
         let context = Self.contextXML(from: decoded)
         guard !context.isEmpty else {
             throw LLMError(source: .braveGrounding,
-                           userMessage: "Brave web search returned no results for this query.",
+                           userMessage: "brave web search found nothing for this query.",
                            httpStatus: nil, url: url,
                            requestHeaders: ["X-Subscription-Token": apiKey],
                            requestBodyJSON: nil, messageHistory: nil,
@@ -715,5 +713,26 @@ extension GroundingSource {
         guard !sources.isEmpty,
               let data = try? JSONEncoder().encode(sources) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+}
+
+/// The keyless `web_search` for an on-device model: the offer trigger only, so only `query`.
+/// The full `BraveWebSearchTool` schema is ~400 prefill tokens (1.3 s on a new chat, iPhone 16 Pro).
+struct WebSearchOfferTool: Tool {
+    let name = "web_search"
+    let description = "Search the web for current information."
+    var onUnconfiguredSearch: ((String) -> Void)?
+
+    @Generable
+    struct Arguments: Sendable {
+        @Guide(description: "The search query.")
+        var query: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        let q = String(arguments.query.prefix(400))
+        guard !q.isEmpty else { return "[BraveWebSearchTool] Empty query — skipping search." }
+        onUnconfiguredSearch?(q)
+        return BraveWebSearchTool.keylessPolicy
     }
 }

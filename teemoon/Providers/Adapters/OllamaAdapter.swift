@@ -135,6 +135,12 @@ enum OllamaAdapter {
         return .connected(models)
     }
 
+    /// One model's capabilities, nil when the machine didn't answer in time (HomeCapabilityRefresh's recheck).
+    static func capabilities(of model: String, baseURL: URL, timeout: TimeInterval = 4,
+                             session: URLSession = .shared) async -> ModelCapabilities? {
+        await showMeta(model: model, root: rootURL(from: baseURL), session: session, timeout: timeout).caps
+    }
+
     /// Per-model metadata from `/api/show`: capabilities + a display string
     /// ("256k · Q4_K_M") built from the real context length (`model_info`'s
     /// `*.context_length`) and quantization. nil caps = the call failed (unknown).
@@ -149,11 +155,11 @@ enum OllamaAdapter {
     /// `POST {root}/api/show {model}`. Uses JSONSerialization because `model_info`
     /// has dynamic, family-prefixed keys (`qwen35.context_length`, …).
     private static func showMeta(
-        model: String, root: URL, session: URLSession
+        model: String, root: URL, session: URLSession, timeout: TimeInterval = 10
     ) async -> OllamaModelMeta {
         var req = URLRequest(url: root.appendingPathComponent("api/show"))
         req.httpMethod = "POST"
-        req.timeoutInterval = 10
+        req.timeoutInterval = timeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONEncoder().encode(OllamaShowRequest(model: model))
         guard let (data, resp) = try? await session.data(for: req),

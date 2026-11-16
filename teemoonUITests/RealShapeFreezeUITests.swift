@@ -78,7 +78,7 @@ final class RealShapeFreezeUITests: XCTestCase {
         XCTAssertTrue(chatsButton.waitForExistence(timeout: 30))
         chatsButton.tap()
         try openShapedThread(0, in: app)
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -114,7 +114,7 @@ final class RealShapeFreezeUITests: XCTestCase {
         let transcript = app.transcript
         XCTAssertTrue(transcript.waitForExistence(timeout: 20))
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")

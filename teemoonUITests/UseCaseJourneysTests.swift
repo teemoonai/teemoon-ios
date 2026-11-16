@@ -2,7 +2,7 @@
 //  UseCaseJourneysTests.swift
 //  teemoonUITests
 //
-//  Use cases from the Android port's use-case list that iOS had no end-to-end
+//  Use cases from teemoon-android's docs/USE_CASES.md that iOS had no end-to-end
 //  test for, ported from the Android journeys that walk them. Offline: the
 //  embedded fake SSE server, seeded attestation, no keys.
 //
@@ -51,11 +51,126 @@ final class UseCaseJourneysTests: XCTestCase {
         stop.tap()
     }
 
+    /// T5: at the largest text size the trust sheet stays inside the screen (2026-11-01: from 1.0.6 on, the whole
+    /// expert ladder was laid out wider than the phone and clipped on the left). Every text, scrolled through.
+    func testTheTrustSheetFitsTheScreenAtTheLargestTextSize() {
+        let app = ProductE2E.launch(
+            arguments: ["--uitesting", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"],
+            environment: ["UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.3-flash", "UITEST_SEED_ATTESTATION": "ok"])
+        let title = ProductE2E.titleBlock(app)
+        XCTAssertTrue(title.waitForExistence(timeout: 15), "title block missing")
+        title.tap()
+        let expert = app.buttons.matching(NSPredicate(format: "label ==[c] %@", "expert")).firstMatch
+        XCTAssertTrue(expert.waitForExistence(timeout: 8), "no expert switch")
+        expert.tap()
+        let screen = app.windows.firstMatch.frame
+        var outside = Set<String>()
+        // One snapshot per scroll: querying each text on its own takes over an hour at this size.
+        func walk(_ node: XCUIElementSnapshot) {
+            let f = node.frame
+            if node.elementType == .staticText, f.height > 0, f.maxY > screen.minY, f.minY < screen.maxY,
+               f.minX < screen.minX - 1 || f.maxX > screen.maxX + 1 {
+                outside.insert("\(node.label.prefix(40)) [\(Int(f.minX))…\(Int(f.maxX))]")
+            }
+            node.children.forEach(walk)
+        }
+        for _ in 0..<14 {
+            if let tree = try? app.snapshot() { walk(tree) }
+            app.swipeUp(velocity: .fast)
+        }
+        XCTAssertTrue(outside.isEmpty, "laid out past the screen (\(Int(screen.width)) pt): \(outside.sorted().prefix(12))")
+    }
+
+    /// I9: the import sheet shows the export path and opens the picker over Settings; after a cancel and a swipe the
+    /// app still opens other sheets (8fed7ae1 once left Settings half-dismissed here until a relaunch).
+    func testTheImportPageOpensThePickerAndLeavesTheAppWorking() {
+        let app = ProductE2E.launchLocal(server: server)
+        ProductE2E.openSettings(app)
+        app.buttons["chats"].firstMatch.tap()
+        let row = app.descendants(matching: .any)["chats.import"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "no import row in chats settings")
+        row.tap()
+        XCTAssertTrue(element(app, "export chats").waitForExistence(timeout: 5), "the page shows no steps")
+        app.buttons["import.chooseFile"].firstMatch.tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 8), "the picker did not open")
+        cancel.tap()
+        XCTAssertTrue(app.buttons["import.chooseFile"].firstMatch.waitForExistence(timeout: 5), "cancel left the page")
+        app.buttons["import.cancel"].firstMatch.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the import sheet did not close back to Settings")
+        let top = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
+        top.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        let list = app.buttons["list.bullet"].firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5) && list.isHittable, "Settings did not go away")
+        list.tap()
+        XCTAssertTrue(app.buttons["plus"].firstMatch.waitForExistence(timeout: 5), "the chats list no longer opens")
+    }
+
+    /// I10: "done" on the nothing-new step and on the skipped-only step closes the import sheet to the chat screen.
+    func testDoneOnTheNothingNewAndSkippedOnlyStepsClosesTheSheet() throws {
+        func export(_ id: String, text: String) -> Data {
+            let item: [String: Any] = [
+                "type": "message", "id": "msg_\(id)", "response_id": "resp_\(id)", "next_response_ids": [],
+                "created_at": 1_760_500_000, "status": "completed", "model": "test-model",
+                "previous_response_id": "resp_outside_\(id)", "role": "user",
+                "content": [["type": "input_text", "text": text]]]
+            return try! JSONSerialization.data(withJSONObject: [item])
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("import-done-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fresh = dir.appendingPathComponent("fresh.json"), skipped = dir.appendingPathComponent("skipped.json")
+        try export("a", text: "synthetic import line").write(to: fresh)
+        try export("b", text: "").write(to: skipped)
+
+        let app = ProductE2E.launchLocal(server: server)
+        let done = app.buttons["import.done"].firstMatch
+        func open(_ url: URL) { XCUIDevice.shared.system.open(url) }
+
+        // A first import, so that the same file again has nothing new.
+        open(fresh)
+        let confirm = app.buttons["import.confirm"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 15), "the opened file did not reach the confirm step")
+        ProductE2E.tapUntilGone(confirm)
+        XCTAssertTrue(done.waitForExistence(timeout: 15), "the import did not finish")
+        XCTAssertEqual(app.buttons.matching(identifier: "import.done").count, 1, "the finished step must have exactly one done")
+        XCTAssertFalse(app.navigationBars.buttons["import.done"].exists, "the finished step's done is the bottom button, not the bar's")
+        XCTAssertFalse(app.buttons["import.showChats"].exists, "the finished step has no show chats")
+        let attach = XCTAttachment(screenshot: app.screenshot())
+        attach.name = "finished"; attach.lifetime = .keepAlways; add(attach)
+        done.tap()
+        XCTAssertTrue(waitGone(done), "done on the finished step left the sheet up")
+        // A file opened through the system is an app-owned copy, which never gets the offer (ImportPreviewTests pins it
+        // for the user's own file); if one appears it is answered with the harmless button.
+        let offer = app.alerts["delete the export file?"]
+        if offer.waitForExistence(timeout: 3) { offer.buttons["not now"].tap() }
+
+        open(fresh)
+        XCTAssertTrue(done.waitForExistence(timeout: 15), "re-opening the same file did not reach the nothing-new step")
+        XCTAssertFalse(confirm.exists, "the nothing-new step offered an import")
+        done.tap()
+        XCTAssertTrue(waitGone(done), "done on the nothing-new step left the sheet up")
+
+        open(skipped)
+        XCTAssertTrue(done.waitForExistence(timeout: 15), "a file with only skipped items did not reach its done step")
+        XCTAssertFalse(confirm.exists, "the skipped-only step offered an import")
+        done.tap()
+        XCTAssertTrue(waitGone(done), "done on the skipped-only step left the sheet up")
+    }
+
+    private func waitGone(_ element: XCUIElement, timeout: TimeInterval = 8) -> Bool {
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
+        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
+    }
+
     /// B8: the system prompt set in settings → chats is what the next turn sends, `{{datetime}}` filled in.
     func testTheSystemPromptFromSettingsReachesTheWire() {
         let app = ProductE2E.launchLocal(server: server)
         ProductE2E.openSettings(app)
         app.buttons["chats"].firstMatch.tap()
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "system prompt")).firstMatch   // its own screen since a5bda2c8
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "no system prompt row in chats settings")
+        row.tap()
         let editor = app.textViews.firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 5), "the system prompt editor is missing")
         editor.tap()
@@ -76,11 +191,7 @@ final class UseCaseJourneysTests: XCTestCase {
         ProductE2E.sendAndWait(app, "remember-this-one")
         XCTAssertTrue(element(app, "use-case-reply-alpha").waitForExistence(timeout: 10), "no reply")
         ProductE2E.openChats(app)
-        // "+" also asks for an App Store review once enough visits have accrued (requestReviewIfAppropriate) — late in
-        // a long run the system's prompt rises over the app; it is not this journey's subject, so it is dismissed
-        app.buttons["plus"].firstMatch.tap()   // new chat (testNewChatClearsTheComposer's way in)
-        let notNow = app.buttons["Not Now"].firstMatch   // StoreKit's sheet, in its own process but in the app's tree
-        if notNow.waitForExistence(timeout: 3) { notNow.tap() }
+        app.buttons["plus"].firstMatch.tap()   // new chat (testNewChatClearsTheComposer's way in); no review ask: launch pins it off
         XCTAssertTrue(ProductE2E.composer(app).waitForExistence(timeout: 8), "composer missing after new chat")
         XCTAssertFalse(element(app, "use-case-reply-alpha").waitForExistence(timeout: 2), "the new chat is not empty")
         // the list animates away after "+": wait for it to be gone before asking for it again
@@ -126,24 +237,34 @@ final class UseCaseJourneysTests: XCTestCase {
         XCTAssertTrue(element(app, "no chats yet").waitForExistence(timeout: 5), "the chats list is not empty after delete all")
     }
 
-    /// E1: degraded — the first send asks; cancel keeps the draft; the bypass sends.
-    func testTheDegradedGateCancelKeepsTheDraftAndTheBypassSends() {
+    /// E1: degraded — the first send asks; "don't send" keeps the draft; the bypass sends.
+    /// The way out is a visible plain button: iOS 26 hid the sheet's role-.cancel button in the popover (2026-10-30).
+    /// glm-5.2, not 5.3-flash: under this seed 5.3-flash reads "sealed, image unpublished", which sends without asking.
+    func testTheDegradedGateDontSendKeepsTheDraftAndTheBypassSends() {
         let app = ProductE2E.launch(environment: [
-            "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.3-flash",
+            "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.2",
             "UITEST_SEED_ATTESTATION": "degraded",
+            "UITEST_RESET_LOCAL_MODELS": "1",
         ])
         XCTAssertTrue(ProductE2E.titleBlock(app).waitForExistence(timeout: 15), "title block missing")
         ProductE2E.typeIntoComposer(app, "hello-anyway")
         app.buttons["chat.send"].tap()
-        let alert = app.alerts.firstMatch
-        XCTAssertTrue(alert.waitForExistence(timeout: 10), "a degraded send did not ask")
-        alert.buttons["cancel"].tap()
-        XCTAssertTrue((ProductE2E.composer(app).value as? String ?? "").contains("hello-anyway"), "cancel lost the draft")
+        let dialog = ProductE2E.sendGateDialog(app)
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "a degraded send did not ask")
+        XCTAssertTrue(element(app, "nothing has been sent").waitForExistence(timeout: 5), "the question does not say nothing was sent")
+        let dontSend = app.buttons["don't send"].firstMatch
+        XCTAssertTrue(dontSend.waitForExistence(timeout: 5) && dontSend.isHittable,
+                      "no visible way out: \(dialog.buttons.allElementsBoundByIndex.map(\.label))")
+        dontSend.tap()
+        XCTAssertTrue(dialog.waitForNonExistence(timeout: 5), "don't send left the question up")
+        XCTAssertFalse(app.buttons["chat.stop"].exists, "don't send sent")
+        XCTAssertTrue((ProductE2E.composer(app).value as? String ?? "").contains("hello-anyway"), "don't send lost the draft")
         app.buttons["chat.send"].tap()
-        XCTAssertTrue(alert.waitForExistence(timeout: 10), "the second send did not ask")
-        let bypass = alert.buttons.allElementsBoundByIndex.first { $0.label.contains("send") }
-        XCTAssertNotNil(bypass, "a soft degrade offered no way to send: \(alert.buttons.allElementsBoundByIndex.map(\.label))")
-        bypass?.tap()
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "the second send did not ask")
+        let bypass = app.buttons["send unencrypted"].firstMatch
+        XCTAssertTrue(bypass.waitForExistence(timeout: 5),
+                      "a soft degrade offered no way to send: \(dialog.buttons.allElementsBoundByIndex.map(\.label))")
+        bypass.tap()
         XCTAssertTrue(app.buttons["chat.stop"].waitForExistence(timeout: 15)
                       || app.descendants(matching: .any)["chat.error"].firstMatch.waitForExistence(timeout: 15),
                       "the bypass did not send")
@@ -181,6 +302,15 @@ final class UseCaseJourneysTests: XCTestCase {
         XCTAssertTrue(element(app, "fake-model").waitForExistence(timeout: 10), "the chip does not name the new place's model")
         ProductE2E.sendAndWait(app, "hello box")
         XCTAssertTrue(element(app, "use-case-reply-alpha").waitForExistence(timeout: 10), "the message did not go to the new place")
+    }
+
+    /// First run: no welcome text above the composer (the maintainer, 2026-11-08: "remove it"); the chip still says where.
+    func testAFirstRunShowsNoWelcomeLine() {
+        let app = ProductE2E.launch(environment: [:])
+        XCTAssertTrue(ProductE2E.composer(app).waitForExistence(timeout: 10), "no composer on a first run")
+        XCTAssertFalse(app.descendants(matching: .any)["chat.welcome"].firstMatch.waitForExistence(timeout: 3),
+                       "a welcome line on a first run")
+        XCTAssertTrue(element(app, "choose where").waitForExistence(timeout: 5), "the choose where chip is gone")
     }
 
     /// A3: connect a computer, failure paths — nothing listening, and http to a public host refused.
@@ -389,7 +519,7 @@ final class UseCaseJourneysTests: XCTestCase {
         openAppearance()
         // design and size, not colour: the launch helper passes -appTintColor, which overlays UserDefaults for the
         // whole process and drops writes (testAppearanceChangeSticksInSession's note)
-        pick("design", "serif"); pick("size", "large")
+        pick("design", "serif"); pick("size", "xlarge")
         app.terminate()
         app = ProductE2E.launchLocal(server: server)
         openAppearance()
@@ -397,8 +527,8 @@ final class UseCaseJourneysTests: XCTestCase {
         // the size row carries its choice as the row's VALUE, not as a label
         let size = app.descendants(matching: .any)["appearance.size"].firstMatch
         XCTAssertTrue(size.waitForExistence(timeout: 5), "the size row is missing")
-        XCTAssertEqual(size.value as? String, "large", "the size did not survive a relaunch")
-        pick("design", "standard"); pick("size", "medium")
+        XCTAssertEqual(size.value as? String, "xlarge", "the size did not survive a relaunch")
+        pick("design", "standard"); pick("size", "system")
     }
 
     /// H4 (part): a credit opens Safari at the host it names.
@@ -677,7 +807,7 @@ final class UseCaseJourneysTests: XCTestCase {
         let app = ProductE2E.launchLocal(server: server)
         ProductE2E.typeIntoComposer(app, "think first")
         ProductE2E.send(app)
-        XCTAssertTrue(element(app, "thinking...").waitForExistence(timeout: 15), "no \"thinking...\" while it reasoned")
+        XCTAssertTrue(element(app, "thinking…").waitForExistence(timeout: 15), "no \"thinking…\" while it reasoned")
         XCTAssertTrue(ProductE2E.waitUntilSettled(app, timeout: 40), "the turn never ended")
         let thought = element(app, "thought for")
         // the label heads the reply, and the transcript ends pinned to its tail: scroll up to it
@@ -857,50 +987,67 @@ final class UseCaseJourneysTests: XCTestCase {
         }
     }
 
-    /// E5: in every trust state the title opens the sheet; where it has rungs, everyday and expert each scroll to their
-    /// last line — nothing stranded under the home indicator.
-    func testTheTitleOpensTheLadderInEveryStateAndEachRungScrollsToItsEnd() {
-        for state in (ProcessInfo.processInfo.environment["E5_STATES"]?.split(separator: ",").map(String.init) ?? ["ok", "verifying", "hardFailure", "mismatch", "none", "e2eeUnavailable"]) {
-            let app = ProductE2E.launch(environment: ["UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.3-flash", "UITEST_SEED_ATTESTATION": state])
-            let title = ProductE2E.titleBlock(app)
-            XCTAssertTrue(title.waitForExistence(timeout: 15), "\(state): title block missing")
-            title.tap()
-            let opened = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "who can read this", "end-to-end")).firstMatch
-            XCTAssertTrue(opened.waitForExistence(timeout: 8), "\(state): the title opened no sheet")
-            let bottomLimit = app.frame.maxY - 30
-            // the scroll-to-end check on "ok" only: it carries both rungs and by far the longest content (the live audit
-            // findings), and a swipe over that tree costs XCUITest a snapshot each — six states of it ran past 45 minutes
-            guard state == "ok" else { app.terminate(); continue }
-            let rungs: [String?] = app.buttons["expert"].exists ? ["everyday", "expert"] : [nil]
-            for rung in rungs {
-                if let rung { app.buttons[rung].firstMatch.tap(); sleep(1) }
-                // one snapshot of the tree, not an element walk (21 minutes the slow way): every on-screen StaticText's frame
-                let pattern = try! NSRegularExpression(pattern: #"StaticText, 0x[0-9a-f]+, \{\{(-?[\d.]+), (-?[\d.]+)\}, \{([\d.]+), ([\d.]+)\}\}[^\n]*?label: '([^']*)'"#)
-                func visibleTexts() -> [(CGFloat, String)] {
-                    let tree = app.debugDescription
-                    return pattern.matches(in: tree, range: NSRange(tree.startIndex..., in: tree)).compactMap { m -> (CGFloat, String)? in
-                        func g(_ i: Int) -> String { String(tree[Range(m.range(at: i), in: tree)!]) }
-                        let y = CGFloat(Double(g(2))!), h = CGFloat(Double(g(4))!)
-                        return (h > 0 && y < app.frame.maxY) ? (y + h, g(5)) : nil
-                    }
-                }
-                // to the END: the expert rung carries the live audit findings and runs to many screens. Swipes are cheap and a
-                // tree snapshot is not (one per swipe took 40 minutes): swipe far, then confirm a few more swipes move nothing.
-                func bottom() -> String { visibleTexts().max { $0.0 < $1.0 }.map { "\($0.1)@\($0.0)" } ?? "" }
-                for _ in 0..<25 { app.swipeUp(velocity: .fast) }
-                var settled = bottom()
-                for _ in 0..<3 {
-                    for _ in 0..<3 { app.swipeUp(velocity: .fast) }
-                    let now = bottom(); if now == settled { break }; settled = now
-                }
-                sleep(1)
-                let frames = visibleTexts()
-                let last = frames.max { $0.0 < $1.0 }
-                XCTAssertLessThanOrEqual(last?.0 ?? 0, bottomLimit, "\(state)/\(rung ?? "sheet"): \"\(last?.1.prefix(80) ?? "")\" ends at \(last?.0 ?? 0), under the home indicator")
-            }
-            app.terminate()
-        }
+    /// E5: in every trust state the title opens the sheet. One test per state, so each stays a few minutes.
+    func testTheTitleOpensTheSheetWhenVerified() { openLadder("ok").terminate() }
+    func testTheTitleOpensTheSheetWhileVerifying() { openLadder("verifying").terminate() }
+    func testTheTitleOpensTheSheetOnAHardFailure() { openLadder("hardFailure").terminate() }
+    func testTheTitleOpensTheSheetOnAMismatch() { openLadder("mismatch").terminate() }
+    func testTheTitleOpensTheSheetWithNothingToAttest() { openLadder("none").terminate() }
+    func testTheTitleOpensTheSheetWhenE2EEIsUnavailable() { openLadder("e2eeUnavailable").terminate() }
+
+    /// E5: on the verified sheet (both rungs, and by far the longest content) each rung scrolls to its last line —
+    /// nothing stranded under the home indicator.
+    func testTheEverydayRungScrollsToItsEnd() { rungScrollsToItsEnd("everyday") }
+    func testTheExpertRungScrollsToItsEnd() { rungScrollsToItsEnd("expert") }
+
+    @discardableResult
+    private func openLadder(_ state: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIApplication {
+        let app = ProductE2E.launch(environment: ["UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.3-flash", "UITEST_SEED_ATTESTATION": state])
+        let title = ProductE2E.titleBlock(app)
+        XCTAssertTrue(title.waitForExistence(timeout: 15), "\(state): title block missing", file: file, line: line)
+        title.tap()
+        let opened = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "who can read this", "end-to-end")).firstMatch
+        XCTAssertTrue(opened.waitForExistence(timeout: 8), "\(state): the title opened no sheet", file: file, line: line)
+        return app
     }
+
+    private func rungScrollsToItsEnd(_ rung: String) {
+        let app = openLadder("ok")
+        let button = app.buttons[rung].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "the verified sheet has no \(rung) rung")
+        button.tap(); sleep(1)
+        let bottomLimit = app.frame.maxY - 30
+        // The lowest text a person can see: a text is cut to every scroll area it sits in, so a line inside the
+        // script card's own scroll area (its line numbers run on below the card) counts only where it shows.
+        func lastVisible() -> (bottom: CGFloat, label: String)? {
+            guard let tree = try? app.snapshot() else { return nil }
+            var best: (bottom: CGFloat, label: String)?
+            func walk(_ node: XCUIElementSnapshot, clip: CGRect) {
+                let clip = node.elementType == .scrollView ? clip.intersection(node.frame) : clip
+                if node.elementType == .staticText {
+                    let seen = node.frame.intersection(clip)
+                    if !seen.isNull, seen.height > 0, seen.maxY > (best?.bottom ?? -1) { best = (seen.maxY, node.label) }
+                }
+                node.children.forEach { walk($0, clip: clip) }
+            }
+            walk(tree, clip: app.frame)
+            return best
+        }
+        // Swipes are cheap and a tree snapshot is not: swipe far, then confirm a few more swipes move nothing.
+        func bottom() -> String { lastVisible().map { "\($0.label)@\($0.bottom)" } ?? "" }
+        for _ in 0..<25 { app.swipeUp(velocity: .fast) }
+        var settled = bottom()
+        for _ in 0..<3 {
+            for _ in 0..<3 { app.swipeUp(velocity: .fast) }
+            let now = bottom(); if now == settled { break }; settled = now
+        }
+        sleep(1)
+        let last = lastVisible()
+        XCTAssertLessThanOrEqual(last?.bottom ?? 0, bottomLimit,
+                                 "ok/\(rung): \"\(last?.label.prefix(80) ?? "")\" ends at \(last?.bottom ?? 0), under the home indicator")
+        app.terminate()
+    }
+
     /// C8: a pull shows its progress on its where row while it runs, and the row's cancel ends it — the model never
     /// lands on the machine, and the next reading of the machine drops the row.
     func testAPullShowsProgressAndCancelEndsIt() {

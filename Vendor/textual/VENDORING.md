@@ -24,10 +24,11 @@ further reasons of its own, recorded in
 
 ## patch register
 
-**Six deltas from upstream 0.3.1, plus one added file.** One delta is a build
+**Seven deltas from upstream 0.3.1, plus two added files.** One delta is a build
 flag; four are the same fix applied at the places upstream defers work past
-the first layout pass; one is list-item spacing on that first pass; and the
-added file is the small memo they share.
+the first layout pass; one is list-item spacing on that first pass; one keeps
+code colours while a block changes (7). The added files are the small memo
+2–6 share and the token cache 7 uses.
 
 **1. `.unsafeFlags(["-O"], .when(configuration: .debug))`** — `Package.swift:42`,
 with the rationale in the comment directly above it. Without it, Markdown
@@ -78,6 +79,18 @@ List spacing is already in the environment, so the patch uses it on the
 first pass. Paragraph/heading spacing still rides the preference (points,
 not pages).
 
+### 7. code colours do not flicker
+
+Upstream's `HighlightedTextFragment` reset a code block to one plain token on
+every content change and recoloured it when the async tokenizer answered, and
+a new view started plain. While a reply streams, that blanked the colours on
+every new line, and once more when the reply handed over to its saved row
+(filmed 2026-10-25, `pm/evidence/1.1-ui/ios/stream/3-code-block-20tps.mp4`).
+Now a changed block keeps its last colours with the new text plain until
+retokenized, and a new view draws its first frame from
+`Internal/Highlighter/HighlightTokenCache.swift` (recent results by
+language, exact or longest prefix). Pinned by `HighlightTokenCacheTests`.
+
 **Still deferred, deliberately**: table column widths resolve a pass late
 when Overflow's container width is still nil (points, not pages —
 `StructuredTextMeasurementTests` tolerates them explicitly). Chat tables
@@ -91,8 +104,9 @@ delimiter row), which the app holds in `MarkdownStreamSplitter.displayTail`.
 2. Replace this directory's contents with the fresh copy, minus its `.git`.
 3. Re-apply the patches above. Each site carries a comment naming itself, so a
    lost patch is findable — `grep -rn "TEEMOON PATCH" Vendor/textual` should
-   return six source hits (RenderMemo, parse, inline style, Text build,
-   Overflow, list spacing), plus the flag in `Package.swift` — but this
+   return nine source hits (RenderMemo, parse, inline style, Text build,
+   Overflow, list spacing, and three for patch 7: the cache file, the fragment's
+   first frame and its tokenize), plus the flag in `Package.swift` — but this
    register is the checklist.
 4. Verify: build the app, run `teemoonTests`, and scroll a long transcript on a
    Debug **device** build. A build that succeeds proves nothing here; the

@@ -107,14 +107,24 @@ enum ChatSearchHighlight {
         return nil
     }
 
-    /// Matched runs in semibold, everything else inherited.
+    /// The one search-highlight style, for titles and snippets alike: matched runs bold in the primary label colour
+    /// (the maintainer 2026-11-12: no tint), everything else inherited (a snippet's secondary).
     static func attributed(_ snippet: String) -> AttributedString {
         var result = AttributedString()
         for segment in segments(snippet) {
             var run = AttributedString(segment.text)
-            if segment.isMatch { run.inlinePresentationIntent = .stronglyEmphasized }
+            if segment.isMatch {
+                run.inlinePresentationIntent = .stronglyEmphasized
+                run.foregroundColor = .primary
+            }
             result.append(run)
         }
         return result
     }
+}
+
+extension ChatSearchHighlight {
+    /// A chat title's weight in the list: semibold as always, regular in a search result so its bold matches show
+    /// (the maintainer 2026-11-12, "Regular titles in search").
+    static func titleWeight(isSearchResult: Bool) -> Font.Weight { isSearchResult ? .regular : .semibold }
 }

@@ -8,7 +8,7 @@
 //  Why this exists when `LocalInferenceLiveTests` already calls the transport
 //  directly: those tests kept passing (3/3 tool calls) while the app kept
 //  failing (0 for 4), because they never exercised the app's own path — the
-//  resolved system prompt, the thread history, the real temperature. Every
+//  resolved system prompt, the thread history, the real sampler. Every
 //  earlier wrong hypothesis came from testing a layer
 //  below the one that was broken. This closes that gap.
 //
@@ -61,7 +61,7 @@ final class OnDeviceInferenceUITests: XCTestCase {
         // By IDENTIFIER, not by placeholder: the placeholder is content, and it
         // is absent the moment the field has text — which is why the first turn
         // worked and the follow-up reported "composer never appeared".
-        let composer = app.textFields["chat.composer"].firstMatch
+        let composer = app.textViews["chat.composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         // A long answer can leave it off-screen; tapping an unhittable element
         // silently does nothing and the test then times out on the send.
@@ -131,7 +131,7 @@ final class OnDeviceInferenceUITests: XCTestCase {
     /// the offer card — and must not emit one for a plain prompt.
     func testKeylessTimeSensitiveQuestionRaisesTheOffer() throws {
         let app = launchSeeded()
-        let composer = app.textFields["chat.composer"].firstMatch
+        let composer = app.textViews["chat.composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         composer.tap()
         composer.typeText("what's the weather in tokyo right now?")
@@ -165,7 +165,7 @@ final class OnDeviceInferenceUITests: XCTestCase {
     /// the test host keeps GPU access in the background and proves nothing.
     func testBackgroundingMidAnswerAbandonsAndResumes() throws {
         let app = launchSeeded()
-        let composer = app.textFields["chat.composer"].firstMatch
+        let composer = app.textViews["chat.composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         composer.tap()
         composer.typeText("Write a detailed 500 word essay about the history of the potato.")

@@ -25,7 +25,7 @@ final class ScrollStepTraceUITests: XCTestCase {
         app.launchEnvironment["UITEST_SEED_LOCAL_MODEL"] = "fake-model"
         app.launch()
 
-        let composer = app.textFields["chat.composer"].firstMatch
+        let composer = app.textViews["chat.composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -68,7 +68,7 @@ final class ScrollStepTraceUITests: XCTestCase {
         app.launchEnvironment["UITEST_SEED_LOCAL_MODEL"] = model
         app.launch()
 
-        let composer = app.textFields["chat.composer"].firstMatch
+        let composer = app.textViews["chat.composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("Name twelve common herbs. One short sentence each, numbered.")

@@ -15,7 +15,15 @@
 import Foundation
 
 /// Manages the discovery, schema generation, and execution of tools.
+/// teemoon patch: the ToolManager running a tool, so a host can drop calls from a conversation it abandoned.
+public enum ToolInvocation {
+  @TaskLocal public static var managerID: UUID?
+}
+
 public final class ToolManager: Sendable {
+
+  /// teemoon patch: identifies this conversation's tool calls (see `ToolInvocation`).
+  public let id = UUID()
 
   /// A map of tool names to their corresponding Swift Types.
   /// We store the `Type` so we can instantiate new copies via Codable.
@@ -111,7 +119,7 @@ public final class ToolManager: Sendable {
     let toolInstance = try decoder.decode(ToolType, from: argsData)
 
     // Run the tool
-    let result = try await toolInstance.run()
+    let result = try await ToolInvocation.$managerID.withValue(id) { try await toolInstance.run() }
 
     // Normalize the result to ensure it is strictly JSON-compatible (mimicking Android logic)
     return normalizeResult(result)

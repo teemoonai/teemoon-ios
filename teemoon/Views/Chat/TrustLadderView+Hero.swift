@@ -11,7 +11,7 @@ extension TrustLadderView {
     var hero: some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: summary.headerIcon)
-                .font(.system(size: 40, weight: .semibold))
+                .scaledFont(size: 40, weight: .semibold, relativeTo: .title)
                 .foregroundStyle(heroColor)
             Text(heroTitle)
                 .font(.title.weight(.bold))
@@ -19,12 +19,14 @@ extension TrustLadderView {
             Text(heroSubtitle)
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            // Flows, so "re-verify" moves under the meta line rather than breaking at its hyphen.
+            FlowLayout(spacing: 8) {
                 if !metaLine.isEmpty {
                     Text(metaLine).font(.caption).foregroundStyle(.secondary)
                 }
                 Button(action: rerun) {
                     Label("re-verify", systemImage: "arrow.clockwise").font(.caption.weight(.medium))
+                        .fixedSize()
                 }
                 .buttonStyle(.plain).foregroundStyle(Color.accentColor)
             }
@@ -42,6 +44,7 @@ extension TrustLadderView {
         // absence of review is not evidence against the seal, and the gray
         // chain node already carries it.
         if summary.headerSeverity == .ok, modelNodeAuditState == .leaks { return .orange }
+        if summary.headerSeverity == .ok, summary.provenanceState == .unchecked { return .orange }
         switch summary.headerSeverity {
         case .ok:       return teeVerified
         case .advisory: return .orange
@@ -66,7 +69,7 @@ extension TrustLadderView {
 
     func rerun() {
         timedOut = false
-        session.refreshAttestation(keepExisting: true)
+        session.refreshAttestation()
     }
 
 
@@ -105,7 +108,7 @@ extension TrustLadderView {
         var nodes = verdict.everydayClaims.map { claim -> ChainNode in
             ChainNode(
                 id: claim.id,
-                status: chainStatus(claim.status),
+                status: claim.status,
                 title: claim.title,
                 detail: claim.detail,
                 jumpTitle: claim.jumpTitle,
@@ -117,16 +120,6 @@ extension TrustLadderView {
         return nodes
     }
 
-    func chainStatus(_ status: TrustClaim.Status) -> ChainNode.Status {
-        switch status {
-        case .origin:  return .origin
-        case .ok:      return .ok
-        case .alert:   return .alert
-        case .info:    return .info
-        case .fail:    return .fail
-        case .pending: return .pending
-        }
-    }
 
     /// The everyday audit node — one plain-language claim about what the
     /// reviewed code does with the UNLOCKED message, closing the gap the chain
@@ -141,22 +134,13 @@ extension TrustLadderView {
     /// node and the hero (a LEAKS review demotes a green hero to advisory).
     /// nil = no basis to speak: no attestation, no primary group, or no rows
     /// whose code reads the unlocked message.
-    var modelNodeAuditState: EverydayAuditState? {
-        guard session.attestation != nil,
-              let group = enclaveGroups.first(where: { $0.primary }) else { return nil }
-        // The rows whose code can read the unlocked message: the plaintext
-        // touchers, the in-enclave engine, and the guest OS beneath them all.
-        let relevant = group.images.filter {
-            $0.plaintextRole != nil || $0.kind == .local || $0.kind == .guestOS
-        }
-        guard !relevant.isEmpty else { return nil }
-        var urls = relevant.compactMap(\.auditURL)
-        if let u = group.configAuditURL { urls.append(u) }
-        if let u = group.recipe?.auditURL { urls.append(u) }
-        let classes = urls.compactMap { AuditIndex.shared.verdictClass(for: $0) }
-        let covered = relevant.allSatisfy { $0.auditURL != nil }
-        return everydayAuditState(classes: classes, allTouchersCovered: covered)
+    var modelNodeAudit: (state: EverydayAuditState?, leaksExposure: String?) {
+        ModelNodeAudit.state(groups: enclaveGroups, hasAttestation: session.attestation != nil,
+                             chatPath: session.trustScope?.chatPath,
+                             runningSources: session.trustScope?.running.map(\.service.source) ?? [],
+                             composeManager: session.trustScope?.composeManager)
     }
+    var modelNodeAuditState: EverydayAuditState? { modelNodeAudit.state }
 
     /// Expert: the full technical spine, built from live session data. Only
     /// nodes that bind to a real check are included; once a node fails,
@@ -173,7 +157,7 @@ extension TrustLadderView {
 
         // Encryption target — the model's Ed25519 public key.
         if let key = att?.modelEd25519PubKey {
-            nodes.append(ChainNode(id: "target", status: .ok,
+            nodes.append(ChainNode(id: "target", status: summary.hardwareChecksPending ? .pending : .ok,
                 title: "encryption target · Ed25519 public key",
                 detail: "your device seals this chat to \(modelName)'s public key before it ever leaves \(DeviceNoun.boundary).",
                 value: "ed25519:\(key.hexString.prefix(12))…",
@@ -194,11 +178,17 @@ extension TrustLadderView {
         // quote's report_data.
         switch summary.e2eeKeyBound {
         case .some(true):
-            nodes.append(ChainNode(id: "bound", status: .ok,
+            nodes.append(ChainNode(id: "bound", status: summary.hardwareChecksPending ? .pending : .ok,
                 title: "key bound in the model's TDX quote",
                 detail: "that public key sits in `report_data` of \(modelName)'s hardware quote — the private half never leaves the enclave. no one else (gateway, operator, near.ai) can decrypt.",
                 everydayTitle: "only \(modelName) holds the key",
                 everydayDetail: "the key to open your chat lives inside \(modelName)'s sealed chip and never leaves it — not near.ai, not the network, nobody else can read your message."))
+        case .some(false) where summary.keyInUnverifiedQuote:
+            nodes.append(ChainNode(id: "bound", status: .fail,
+                title: "key in report_data, but the quote didn't verify",
+                detail: "the public key matches report_data, but the quote's signature or certificate chain failed, so nothing proves this key lives inside the enclave.",
+                everydayTitle: "couldn't lock this chat",
+                everydayDetail: "\(DeviceNoun.subject) couldn't confirm \(modelName) holds the key — so nothing has been sent."))
         case .some(false):
             nodes.append(ChainNode(id: "bound", status: .fail,
                 title: "key binding · could not be established",
@@ -250,6 +240,10 @@ extension TrustLadderView {
                 detail: summary.provenanceDetail,
                 everydayTitle: "couldn't confirm the code",
                 everydayDetail: "teemoon couldn't confirm the running software matches the published code."))
+        case .some(.unchecked):
+            nodes.append(ChainNode(id: "source", status: .alert,
+                title: ProvenanceUncheckedText.step, detail: "",
+                everydayTitle: ProvenanceUncheckedText.step, everydayDetail: ""))
         case .some, .none:
             // Async check still in flight — PENDING, never a default green
             // (same temporal-honesty rule as the everyday identity node).
@@ -292,6 +286,9 @@ extension TrustLadderView {
                 detail: "recovering each reply to the enclave signing key…"))
         }
 
+        for (i, status) in TrustVerdict.settleChain(nodes.map(\.status), halted: verdict.chainHalted).enumerated() {
+            nodes[i].status = status
+        }
         dimDownstream(&nodes)
         return nodes
     }
@@ -302,6 +299,8 @@ extension TrustLadderView {
         if let breakIdx = nodes.firstIndex(where: { $0.status == .fail }) {
             for i in nodes.indices where i > breakIdx { nodes[i].dimmed = true }
         }
+        for i in nodes.indices where nodes[i].status == .notChecked { nodes[i].dimmed = true }
+        for (i, grey) in TrustVerdict.greyRails(nodes.map(\.status), halted: verdict.chainHalted).enumerated() { nodes[i].railGrey = grey }
     }
 
 

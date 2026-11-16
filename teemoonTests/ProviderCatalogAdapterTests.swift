@@ -193,19 +193,18 @@ struct ModelCatalogTests {
     /// read-only verifier, which reports live serverless models missing from this
     /// table and needs `FIREWORKS_API_KEY`, so it runs by hand rather than in CI.
     ///
-    /// What IS testable is the table itself, which is why this pins the id that was
-    /// missing — and the shape of the fix, since inkling's rate is published only on
-    /// its model page, not in the pricing table a refresh reads.
+    /// What IS testable is the table itself, and the shape of the fix: a rate published only on a model's page, not
+    /// in the pricing table a refresh reads (inkling then; minimax-m3p1-flash since inkling's deprecation, 2026-11-07).
     @Test func everyKnownFireworksModelHasAPrice() {
         for id in KnownModel.fireworksPrices.keys {
             #expect(!FireworksAdapter.price(forID: id).isEmpty)
         }
-        // The row from the device report.
-        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/inkling")
-                == "$1.00/$4.05")
+        // A model-page-only rate.
+        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/minimax-m3p1-flash")
+                == "$0.15/$0.60")
         // Slug matching still carries a namespace or quant change over.
-        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/inkling-fp8")
-                == "$1.00/$4.05")
+        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/minimax-m3p1-flash-fp8")
+                == "$0.15/$0.60")
         // A model nobody has priced yet is EMPTY, never a wrong number borrowed
         // from a neighbour — the invariant that makes a blank row the honest state.
         #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/not-a-model").isEmpty)
@@ -237,11 +236,9 @@ struct ModelCatalogTests {
         // A dated snapshot of something NOT in the table stays blank. The
         // stripping must not become a way to borrow a neighbour's number.
         #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/mystery-model-0731").isEmpty)
-        // And a numeric-looking segment that ISN'T a date suffix must survive:
-        // this would otherwise become "gpt-oss" and match nothing, blanking a
-        // row that works today.
-        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/gpt-oss-120b")
-                == "$0.15/$0.60")
+        // A dated id that is still served is keyed in full and keeps its own row.
+        #expect(FireworksAdapter.price(forID: "accounts/fireworks/models/deepseek-v4p1-flash-1017")
+                == "$0.30/$1.20")
     }
 
     @Test func priceAndContextFormatting() {
@@ -507,6 +504,50 @@ struct FireworksAdapterTests {
         #expect(query.contains("supports_serverless%3Dtrue") || query.contains("supports_serverless=true"))
         #expect(query.contains("pageSize=200"))
         #expect(StubFireworksAPI.authHeaders == ["Bearer fw-key"])
+    }
+
+    /// 2026-10-28: Fireworks began sending `deprecationDate` as `{"day":7,"month":11,"year":2026}` on four
+    /// serverless rows. A `String?` field threw on them, the whole list failed, and the picker fell back to
+    /// `/inference/v1/models`: no capabilities, no prices, retiring models offered. The fixture is that
+    /// day's serverless payload, unedited.
+    @Test func todaysPayloadWithObjectDatesStaysOnTheControlPlane() async throws {
+        StubFireworksAPI.reset()
+        StubFireworksAPI.routes = [
+            "/v1/accounts/fireworks/models": (200, try fixture("fireworks_serverless_models_2026-10-28.json")),
+            "/inference/v1/models": (200, Data("""
+            {"data":[{"id":"accounts/fireworks/models/fallback-only","object":"model"}]}
+            """.utf8)),
+        ]
+        let result = await FireworksAdapter.listModels(
+            baseURL: URL(string: "https://api.fireworks.ai/inference/v1")!,
+            apiKey: "fw-key", session: stubSession(StubFireworksAPI.self))
+        guard case .connected(let models) = result else {
+            Issue.record("expected .connected, got \(result)"); return
+        }
+        let ids = Set(models.map { $0.id.replacingOccurrences(of: "accounts/fireworks/models/", with: "") })
+        #expect(!ids.contains("fallback-only"), "fell back to the generic list")
+        #expect(ids.isDisjoint(with: ["gpt-oss-120b", "inkling", "nemotron-3-ultra-nvfp4", "nemotron-lightning-3p5-30b-a3b"]),
+                "a model with a retirement date is not offered")
+        let flash = try #require(models.first { $0.id == "accounts/fireworks/models/glm-5p3-flash" })
+        #expect(flash.capabilities == [.tools, .vision])
+    }
+
+    @Test func anObjectDateDecodes() throws {
+        let rows = try JSONDecoder().decode(FireworksAdapter.ModelsResponse.self,
+                                            from: fixture("fireworks_serverless_models_2026-10-28.json")).models
+        #expect(rows.count == 18)
+        let gptOss = try #require(rows.first { $0.name.hasSuffix("/gpt-oss-120b") })
+        #expect(gptOss.deprecationDate != nil)
+    }
+
+    /// One row the decoder cannot read drops that row, never the catalogue.
+    @Test func aBadRowDropsOnlyItself() throws {
+        let body = Data("""
+        {"models":[{"name":"accounts/fireworks/models/good","state":"READY","contextLength":8192},
+                   {"name":"accounts/fireworks/models/bad","contextLength":"not a number"}]}
+        """.utf8)
+        let rows = try JSONDecoder().decode(FireworksAdapter.ModelsResponse.self, from: body).models
+        #expect(rows.map(\.name) == ["accounts/fireworks/models/good"])
     }
 
     /// A key that can't read the control plane still gets a usable picker: the
@@ -822,7 +863,7 @@ struct BraveProviderTests {
          "msg":"Field required","type":"missing"}]},"status":422},"type":"ErrorResponse"}
         """
         let message = apiErrorMessage(from: body, httpStatus: 422, provider: "brave answers")
-        #expect(message == "brave answers (HTTP 422): Unable to validate request parameter(s) — Field required (header x-subscription-token)")
+        #expect(message == "brave answers (http 422): Unable to validate request parameter(s) — Field required (header x-subscription-token)")
 
         let bodyField = """
         {"error":{"code":"VALIDATION","detail":"Unable to validate request parameter(s)",

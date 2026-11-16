@@ -35,6 +35,11 @@ struct RecordDCAPVerification: Equatable, Sendable {
         [gateway, model, gpu].compactMap { $0 }.contains { $0.isHardFailure }
     }
 
+    /// Some quote couldn't be checked (Intel's collateral didn't arrive): soft, the send asks.
+    var hasUnchecked: Bool {
+        [gateway, model, gpu].compactMap { $0 }.contains { $0.isUnchecked }
+    }
+
     /// The least-trusted TCB status among verified quotes (for the sheet row).
     var worstTcbStatus: DCAPTcbStatus? {
         let statuses = [gateway, model, gpu].compactMap { outcome -> DCAPTcbStatus? in
@@ -76,6 +81,7 @@ extension DCAPVerification {
         switch self {
         case .verified(let tcb, _, _): return !tcb.isAccepted
         case .failed: return true
+        case .unchecked: return false
         }
     }
 }
@@ -96,24 +102,38 @@ struct DCAPService {
     func verify(record: AttestationRecord, nowSecs: UInt64? = nil) async -> RecordDCAPVerification {
         let now = nowSecs ?? UInt64(record.fetchedAt.timeIntervalSince1970)
         var result = RecordDCAPVerification()
-        result.gateway = await verifyQuote(record.intelQuote, label: "gateway",
-                                           crossCheck: record.quoteVerification, nowSecs: now)
-        result.model = await verifyQuote(record.modelIntelQuote, label: "model",
-                                         crossCheck: record.modelQuoteVerification, nowSecs: now)
-        result.gpu = await verifyQuote(record.gpuIntelQuote, label: "gpu",
-                                       crossCheck: record.gpuQuoteVerification, nowSecs: now)
+        result.gateway = await verifyQuote(record.intelQuote, label: "gateway", crossCheck: record.quoteVerification,
+                                           advertised: record.gatewayAdvertisedReportData, nowSecs: now)
+        result.model = await verifyQuote(record.modelIntelQuote, label: "model", crossCheck: record.modelQuoteVerification,
+                                         advertised: record.modelAdvertisedReportData, nowSecs: now)
+        result.gpu = await verifyQuote(record.gpuIntelQuote, label: "gpu", crossCheck: record.gpuQuoteVerification,
+                                       advertised: record.gpuAdvertisedReportData, nowSecs: now)
         return result
+    }
+
+    /// One quote on its own: trust scope (a) checks the compose manager's quote exactly as the node's.
+    func verify(quoteHex: String, label: String, nowSecs: UInt64) async -> DCAPVerification? {
+        await verifyQuote(quoteHex, label: label, crossCheck: nil, nowSecs: nowSecs)
     }
 
     private func verifyQuote(
         _ quoteHex: String?, label: String,
-        crossCheck: TDXVerificationResult?, nowSecs: UInt64
+        crossCheck: TDXVerificationResult?, advertised: String? = nil, nowSecs: UInt64
     ) async -> DCAPVerification? {
         guard let quoteHex, !quoteHex.isEmpty else { return nil }
+        // teemoon's own evidence first: it must not wait on Intel answering, nor lean on dcap-qvl's policy.
+        if let why = QuoteChecks.failure(quoteHex: quoteHex, advertisedReportData: advertised) {
+            logger.warning("[dcap] \(label, privacy: .public) quote failed teemoon's own check: \(why, privacy: .public)")
+            return .failed(why)
+        }
         let outcome = await verifier.verify(quoteHex: quoteHex, nowSecs: nowSecs)
         guard case .verified(let tcb, let mrConfig, let reportData) = outcome else {
             logger.warning("[dcap] \(label, privacy: .public) quote failed: \(String(describing: outcome), privacy: .public)")
             return outcome
+        }
+        guard QuoteChecks.advertisedMatches(advertised, quoteReportDataHex: reportData) else {
+            logger.fault("[dcap] \(label, privacy: .public) advertised report_data is not the verified quote's")
+            return .failed(QuoteChecks.reportDataDisagrees)
         }
         // Cross-check tripwire: the Swift parser and dcap-qvl must agree on
         // the measurements. A disagreement means one of them is wrong about

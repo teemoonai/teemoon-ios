@@ -73,6 +73,19 @@ final class StructuredTextMeasurementTests: XCTestCase {
                                             height: UIView.layoutFittingExpandedSize.height)).height
     }
 
+    /// Long code lines wrap inside the block (the maintainer via pm, 2026-10-25): Textual's default scrolled them
+    /// sideways with nothing to say so, and the stream rig filmed lines cut at the right edge
+    /// (pm/evidence/1.1-ui/ios/stream/3-code-block-20tps.mp4).
+    func testALongCodeLineWrapsInsideTheBlock() {
+        func block(_ line: String) -> some View {
+            StructuredText.cached("```swift\n\(line)\n```").chatTextualStyles()
+        }
+        let long = "let jitter = Double.random(in: 0.8...1.2) * Double(attempt) * base.timeInterval * someLongMultiplierName"
+        let oneLine = settledHeight(of: block("let a = 1"))
+        let wrapped = settledHeight(of: block(long))
+        XCTAssertGreaterThan(wrapped, oneLine + 10, "a \(long.count)-character line stayed on one line")
+    }
+
     /// THE HAND-OFF MUST NOT REFLOW PROSE. A reply with no block markdown
     /// streamed through Textual and then, once persisted, rendered through a
     /// plain `Text` (`MessageView.needsStructuredText` was false) — 13pt

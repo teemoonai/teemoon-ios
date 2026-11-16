@@ -27,7 +27,9 @@ struct AttestationHeroCopyTests {
         attestationFetchFailed: Bool = false,
         imageProvenance: ProvenanceService.ManifestProvenance? = nil,
         degradeIsHardFailure: Bool = false,
-        e2eeIntact: Bool = false
+        e2eeIntact: Bool = false,
+        auditState: EverydayAuditState? = .reviewed,
+        leaksExposure: String? = nil
     ) -> AttestationSummary {
         AttestationSummary(
             attestation: attestation, state: state, timedOut: false, provider: .nearAI,
@@ -37,7 +39,8 @@ struct AttestationHeroCopyTests {
             dcapVerification: nil, nrasVerification: nil, tlsAttestation: nil,
             modelLayerVerification: nil,
             degradeIsHardFailure: degradeIsHardFailure,
-            e2eeIntact: e2eeIntact)
+            e2eeIntact: e2eeIntact,
+            auditState: auditState, leaksExposure: leaksExposure)
     }
 
     // MARK: - Nothing was verified
@@ -102,6 +105,16 @@ struct AttestationHeroCopyTests {
 
         #expect(s.headerTitle == "verification failed")
         #expect(s.headerSeverity == .failed)
+    }
+
+    /// trust-leaks-wording (the maintainer 2026-11-06): no "only you … can read" over an unreviewed or leaking build.
+    @Test func okState_claimsReadingOnlyOverAReviewedBuild() {
+        for state: EverydayAuditState? in [nil, .incomplete, .reviewedWithCaveat] {
+            #expect(summary(state: .ok, auditState: state).headerSubtitle == AuditedSealText.notReviewed)
+        }
+        #expect(summary(state: .ok, auditState: .leaks).headerSubtitle == AuditedSealText.notReviewed, "no exposure recorded")
+        #expect(summary(state: .ok, auditState: .leaks, leaksExposure: "every prompt is logged.").headerSubtitle
+                == "sealed to the model's hardware on the way in. a review of this exact build found: every prompt is logged.")
     }
 
     @Test func okState_isUnchanged() {

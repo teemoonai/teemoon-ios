@@ -115,6 +115,8 @@ final class SSEStreamParser {
     /// against the test harness server; the stop control sat live for minutes
     /// under a fully-streamed answer).
     private(set) var sawDone = false
+    /// The last non-tool finish_reason the stream carried; nil when it sent none.
+    var lastFinishReason: String? = nil
     /// The `id` field from the first SSE event (e.g. "chatcmpl-abc123"). Used for signature fetch.
     var chatCompletionID: String? = nil
     var completionTokens: Int? = nil
@@ -361,6 +363,7 @@ final class SSEStreamParser {
                 if reason == "tool_calls" {
                     toolCallDetected = true
                 } else {
+                    lastFinishReason = reason
                     elider.finish()
                     // Non-tool finish: production launches TEE verification NOW,
                     // before AnyLanguageModel cancels the URLSession task.

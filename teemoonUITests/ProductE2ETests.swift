@@ -6,6 +6,7 @@
 //  This is the suite CI runs — not the whole teemoonUITests target.
 //
 
+import UIKit
 import XCTest
 
 final class ProductE2ETests: XCTestCase {
@@ -34,19 +35,35 @@ final class ProductE2ETests: XCTestCase {
         XCTAssertFalse(send.isEnabled, "send should be disabled when the composer is empty")
     }
 
+    /// A tap on the paperclip opens the menu. It used to open the photo picker straight away, leaving
+    /// "take photo" behind a long-press nobody found (the maintainer, 2026-10-30). The simulator has no camera,
+    /// so "take photo" itself is only listed on a device.
+    func testPaperclipTapOpensTheAttachMenu() {
+        let app = ProductE2E.launchLocal(server: server, extraEnv: ["UITEST_SEED_LOCAL_SEES_IMAGES": "1"])
+        let clip = app.buttons["chat.attach"].firstMatch
+        XCTAssertTrue(clip.waitForExistence(timeout: 15), "paperclip missing")
+        clip.tap()
+        XCTAssertTrue(app.buttons["choose photos"].firstMatch.waitForExistence(timeout: 5),
+                      "a tap on the paperclip did not open the attach menu")
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            XCTAssertTrue(app.buttons["take photo"].firstMatch.exists, "the menu has no take photo")
+        }
+    }
+
     // MARK: - Chat
 
     // MARK: - Switching providers mid-session
 
     /// NVIDIA on the dev build, 2026-09-12: after a near.ai session whose
     /// verifier was still running, every send on a plain-TLS provider was
-    /// refused with "Verification is still running, so nothing was sent".
+    /// refused with "verification is still running, so nothing was sent".
     /// The provider smokes never see this — they bypass the gate. This is
     /// the sequence a user does constantly: verify on near.ai, switch, send.
     func testSwitchingFromAVerifyingAttestedSessionToALocalProviderSends() {
         let app = ProductE2E.launch(environment: [
             "UITEST_SEED_NEARAI_MODEL": "zai-org/GLM-5.1-FP8",
             "UITEST_SEED_ATTESTATION": "verifyingPending",
+            "UITEST_RESET_LOCAL_MODELS": "1",
             "UITEST_SEED_ALSO_LOCAL_ENDPOINT": server.baseURL,
             "UITEST_SEED_LOCAL_MODEL": "fake-model",
         ])
@@ -68,7 +85,8 @@ final class ProductE2ETests: XCTestCase {
         ProductE2E.sendAndWait(app, "after-switch")
         XCTAssertTrue(ProductE2E.elementContaining(app, "first-reply-alpha").waitForExistence(timeout: 10),
                       "the reply never arrived after switching providers")
-        XCTAssertFalse(app.alerts.firstMatch.exists, "no alert on a plain-TLS send: \(app.alerts.firstMatch.label)")
+        let dialog = ProductE2E.sendGateDialog(app)
+        XCTAssertFalse(dialog.exists, "no send-gate question on a plain-TLS send: \(dialog.label)")
         XCTAssertFalse(app.descendants(matching: .any)["chat.error"].firstMatch.exists,
                        "a plain-TLS send after an attested session must not raise the error surface")
     }
@@ -100,6 +118,16 @@ final class ProductE2ETests: XCTestCase {
                        "local two-turn invented a mismatch: \(ProductE2E.titleLabel(app))")
     }
 
+    /// The first send titles the chat with its message, in place (the cut itself is checked on a recording:
+    /// MotionClipsUITests.test00TitleOnFirstSend, the maintainer 2026-11-14).
+    func testTheFirstSendTitlesTheChatWithItsMessage() {
+        let app = ProductE2E.launchLocal(server: server)
+        XCTAssertTrue(ProductE2E.folded(ProductE2E.titleLabel(app)).contains("chat"), ProductE2E.titleLabel(app))
+        ProductE2E.sendAndWait(app, "what makes liquid glass look right")
+        XCTAssertTrue(ProductE2E.folded(ProductE2E.titleLabel(app)).contains("what makes liquid glass look right"),
+                      "the title: \(ProductE2E.titleLabel(app))")
+    }
+
     func testRetryAfterErrorResends() {
         server.statusCode = 500
         let app = ProductE2E.launchLocal(server: server)
@@ -107,7 +135,7 @@ final class ProductE2ETests: XCTestCase {
 
         let error = app.descendants(matching: .any)["chat.error"].firstMatch
         XCTAssertTrue(error.waitForExistence(timeout: 10) ||
-                      ProductE2E.elementContaining(app, "HTTP 500").waitForExistence(timeout: 5),
+                      ProductE2E.elementContaining(app, "http 500").waitForExistence(timeout: 5),
                       "error surface never appeared after a 500")
 
         server.statusCode = 200
@@ -137,7 +165,7 @@ final class ProductE2ETests: XCTestCase {
             arguments: ["--uitesting", "-braveGroundingEnabled", "YES"],
             environment: ["UITEST_SEED_LOCAL_ENDPOINT": server.baseURL, "UITEST_SEED_LOCAL_MODEL": "fake-model"])
         ProductE2E.sendAndWait(app, "weather-please")
-        XCTAssertTrue(ProductE2E.elementContaining(app, "HTTP 400").waitForExistence(timeout: 10),
+        XCTAssertTrue(ProductE2E.elementContaining(app, "http 400").waitForExistence(timeout: 10),
                       "a tool-refusing model did not produce the 400 card")
         let turnOff = ProductE2E.elementContaining(app, "turn off & retry")
         XCTAssertTrue(turnOff.waitForExistence(timeout: 5), "a 400 with search on offered no 'turn off & retry'")
@@ -292,6 +320,21 @@ final class ProductE2ETests: XCTestCase {
                       "composer gone after dismissing settings")
     }
 
+    /// 2026-10-31, the maintainer's phone at default size: the places & keys row lost its label and stood ~5× tall while
+    /// a ViewThatFits picked its layout. It must read like 1.0.6's row: label shown, as tall as its neighbours.
+    func testThePlacesAndKeysRowKeepsItsLabelAndHeight() {
+        let app = ProductE2E.launchLocal(server: server)
+        ProductE2E.openSettings(app)
+        let row = app.buttons["settings.providers"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "no places & keys row")
+        let label = row.staticTexts["places & keys"].firstMatch
+        XCTAssertTrue(label.exists && label.frame.width > 40, "the row's label is missing: \(row.debugDescription)")
+        let chats = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "chats")).firstMatch
+        XCTAssertTrue(chats.exists, "no chats row to compare with")
+        XCTAssertLessThan(row.frame.height, chats.frame.height * 1.5,
+                          "places & keys is \(row.frame.height) pt tall against chats' \(chats.frame.height)")
+    }
+
     func testAppearanceChangeSticksInSession() {
         // Font size, not tint: `-appTintColor` as a launch argument overlays
         // UserDefaults for the whole process and silently drops writes.
@@ -395,10 +438,30 @@ final class ProductE2ETests: XCTestCase {
 
     // MARK: - Offline trust seeds (iOS)
 
+    /// 2026-10-31: on a fresh install (no saved near.ai tier list) a degraded near.ai send went out as plain TLS
+    /// without the question; near.ai answered 401. With no list it must ask, and nothing may reach near.ai.
+    func testAFreshInstallsNearAISendAsksBeforeAnythingLeaves() {
+        let app = ProductE2E.launch(environment: [
+            "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.2",
+            "UITEST_SEED_ATTESTATION": "degraded",
+            "UITEST_RESET_LOCAL_MODELS": "1",
+        ])
+        XCTAssertTrue(ProductE2E.titleBlock(app).waitForExistence(timeout: 15), "title block missing")
+        ProductE2E.typeIntoComposer(app, "fresh-install-unseen")
+        app.buttons["chat.send"].tap()
+        let dialog = ProductE2E.sendGateDialog(app)
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "a fresh install sent to near.ai without asking")
+        app.buttons["don't send"].firstMatch.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["chat.error"].firstMatch.waitForExistence(timeout: 3),
+                       "an error card: the request reached near.ai")
+        XCTAssertTrue((ProductE2E.composer(app).value as? String ?? "").contains("fresh-install-unseen"), "the draft was lost")
+    }
+
     func testHardFailureBlocksSend() {
         let app = ProductE2E.launch(environment: [
             "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.2",
             "UITEST_SEED_ATTESTATION": "hardFailure",
+            "UITEST_RESET_LOCAL_MODELS": "1",
         ])
         XCTAssertTrue(ProductE2E.titleBlock(app).waitForExistence(timeout: 15), "title block missing")
         XCTAssertTrue(ProductE2E.titleLooksBlocked(app),
@@ -406,7 +469,7 @@ final class ProductE2ETests: XCTestCase {
 
         ProductE2E.typeIntoComposer(app, "should-not-leave")
         app.buttons["chat.send"].tap()
-        let alert = app.alerts.firstMatch
+        let alert = ProductE2E.sendGateDialog(app)
         XCTAssertTrue(alert.waitForExistence(timeout: 5),
                       "hard-failure send should raise the blocked alert")
         XCTAssertTrue(ProductE2E.folded(alert.label + alert.staticTexts.allElementsBoundByIndex.map(\.label).joined())
@@ -414,6 +477,11 @@ final class ProductE2ETests: XCTestCase {
                       || ProductE2E.folded(alert.label).contains("verification failed"),
                       "alert is not the hard-block: \(alert.label)")
         XCTAssertFalse(app.buttons["chat.stop"].exists, "send went out under a hard block")
+        let dontSend = app.buttons["don't send"].firstMatch
+        XCTAssertTrue(dontSend.waitForExistence(timeout: 5) && dontSend.isHittable,
+                      "the hard block has no visible way out: \(alert.buttons.allElementsBoundByIndex.map(\.label))")
+        dontSend.tap()
+        XCTAssertTrue((ProductE2E.composer(app).value as? String ?? "").contains("should-not-leave"), "don't send lost the draft")
     }
 
     /// The no-plaintext-fallback guarantee, end-to-end: an ATTESTED provider whose verdict allows the
@@ -436,8 +504,8 @@ final class ProductE2ETests: XCTestCase {
         app.buttons["chat.send"].tap()
 
         // The send gate allows, so no confirm/block alert may appear …
-        XCTAssertFalse(app.alerts.firstMatch.waitForExistence(timeout: 2),
-                       "no alert expected — the refusal surfaces as an error, not the send gate")
+        XCTAssertFalse(ProductE2E.sendGateDialog(app).waitForExistence(timeout: 2),
+                       "no send-gate question expected — the refusal surfaces as an error, not the send gate")
         // … and the refusal lands on the generation-error surface, naming
         // the fail-closed outcome.
         let error = app.descendants(matching: .any)["chat.error"].firstMatch
@@ -469,6 +537,7 @@ final class ProductE2ETests: XCTestCase {
             "UITEST_SEED_LOCAL_ENDPOINT": server.baseURL,
             "UITEST_SEED_LOCAL_MODEL": "fake-model",
             "UITEST_SEED_ATTESTATION": "mismatch",
+            "UITEST_RESET_LOCAL_MODELS": "1",
         ])
         XCTAssertTrue(ProductE2E.titleBlock(app).waitForExistence(timeout: 15))
         XCTAssertTrue(ProductE2E.titleLooksMismatched(app),
@@ -485,6 +554,7 @@ final class ProductE2ETests: XCTestCase {
         let app = ProductE2E.launch(environment: [
             "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.2",
             "UITEST_SEED_ATTESTATION": "mismatch",
+            "UITEST_RESET_LOCAL_MODELS": "1",
         ])
         let title = ProductE2E.titleBlock(app)
         XCTAssertTrue(title.waitForExistence(timeout: 15), "title block missing")
@@ -542,6 +612,7 @@ final class ProductE2ETests: XCTestCase {
             "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.2",
             "UITEST_SEED_ATTESTATION": "hardFailure",
             "UITEST_DEVELOPER_MODE": "1",
+            "UITEST_RESET_LOCAL_MODELS": "1",
         ])
         XCTAssertTrue(ProductE2E.titleBlock(app).waitForExistence(timeout: 15), "title block missing")
         XCTAssertTrue(ProductE2E.titleLooksBlocked(app),
@@ -549,7 +620,7 @@ final class ProductE2ETests: XCTestCase {
 
         ProductE2E.typeIntoComposer(app, "should-not-leave")
         app.buttons["chat.send"].tap()
-        let alert = app.alerts.firstMatch
+        let alert = ProductE2E.sendGateDialog(app)
         XCTAssertTrue(alert.waitForExistence(timeout: 5),
                       "hard-failure send should raise the blocked alert with the debug panel on")
         XCTAssertFalse(app.buttons["chat.stop"].exists, "send went out under a hard block")
@@ -559,6 +630,7 @@ final class ProductE2ETests: XCTestCase {
         let app = ProductE2E.launch(environment: [
             "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.2",
             "UITEST_SEED_ATTESTATION": "mismatch",
+            "UITEST_RESET_LOCAL_MODELS": "1",
             "UITEST_DEVELOPER_MODE": "1",
         ])
         let title = ProductE2E.titleBlock(app)
@@ -591,6 +663,7 @@ final class ProductE2ETests: XCTestCase {
             // Nothing to attest, so the ladder draws its none branch, which is
             // the only screen that carries this button.
             "UITEST_SEED_ATTESTATION": "none",
+            "UITEST_RESET_LOCAL_MODELS": "1",
         ])
         let title = ProductE2E.titleBlock(app)
         XCTAssertTrue(title.waitForExistence(timeout: 15), "title block missing")
@@ -640,6 +713,7 @@ final class ProductE2ETests: XCTestCase {
         let app = ProductE2E.launch(environment: [
             "UITEST_SEED_NEARAI_MODEL": "z-ai/glm-5.2",
             "UITEST_SEED_ATTESTATION": "verifying",
+            "UITEST_RESET_LOCAL_MODELS": "1",
         ])
         let title = ProductE2E.titleBlock(app)
         XCTAssertTrue(title.waitForExistence(timeout: 15), "title block missing")

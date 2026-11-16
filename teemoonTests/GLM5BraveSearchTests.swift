@@ -47,7 +47,7 @@ struct GLM5BraveSearchTests {
     @MainActor
     private func makeThread(userMessage: String) throws -> (thread: teemoon.Thread, container: ModelContainer) {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: teemoon.Thread.self, Message.self, configurations: config)
+        let container = try ModelContainer(for: teemoon.Thread.self, Message.self, ImageAttachment.self, configurations: config)
         let context = container.mainContext
         let thread = teemoon.Thread()
         context.insert(thread)

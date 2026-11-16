@@ -10,21 +10,57 @@ import Foundation
 func prettyJSON(from data: Data, excludingKey key: String) -> String? {
     guard var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
     json.removeValue(forKey: key)
-    guard let pretty = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) else { return nil }
+    guard let pretty = try? JSONSerialization.data(withJSONObject: WireImageSummary.summarized(json), options: .prettyPrinted)
+    else { return nil }
     return String(data: pretty, encoding: .utf8)
 }
 
 func prettyMessages(from data: Data) -> String? {
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let messages = json["messages"] else { return nil }
-    guard let pretty = try? JSONSerialization.data(withJSONObject: messages, options: .prettyPrinted) else { return nil }
+    guard let pretty = try? JSONSerialization.data(withJSONObject: WireImageSummary.summarized(messages), options: .prettyPrinted)
+    else { return nil }
     return String(data: pretty, encoding: .utf8)
+}
+
+/// Images in a shown or copied body read as `image · jpeg · 412 KB · 1536×2048`, never base64 (IMAGES.md §4).
+enum WireImageSummary {
+    /// Sizes of images put on the wire, keyed by their data URL's length and head (no decoding needed).
+    private static let sizes = LockedBox<[String: (Int, Int)]>([:])
+
+    private static func key(_ dataURL: String) -> String { "\(dataURL.utf8.count)#\(dataURL.prefix(160))" }
+
+    static func register(_ image: WireImage, dataURL: String) {
+        sizes.value[key(dataURL)] = (image.width, image.height)
+        if sizes.value.count > 64 { sizes.value.removeAll() }
+    }
+
+    static func describe(_ string: String) -> String? {
+        guard string.hasPrefix("data:image/"), let comma = string.firstIndex(of: ","),
+              string[..<comma].hasSuffix(";base64") else { return nil }
+        let type = string.dropFirst("data:image/".count).prefix { $0 != ";" }
+        let bytes = string[string.index(after: comma)...].utf8.count * 3 / 4
+        let size = bytes >= 1024 * 1024 ? String(format: "%.1f MB", Double(bytes) / 1_048_576) : "\(max(1, bytes / 1024)) KB"
+        var out = "image · \(type) · \(size)"
+        if let (w, h) = sizes.value[key(string)] { out += " · \(w)×\(h)" }
+        return out
+    }
+
+    /// The JSON value with every image data URL replaced by its description.
+    static func summarized(_ value: Any) -> Any {
+        switch value {
+        case let s as String: return describe(s) ?? s
+        case let a as [Any]: return a.map(summarized)
+        case let d as [String: Any]: return d.mapValues(summarized)
+        default: return value
+        }
+    }
 }
 
 func prettyPrintedJSON(_ string: String) -> String {
     guard let data = string.data(using: .utf8),
           let obj = try? JSONSerialization.jsonObject(with: data),
-          let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
+          let pretty = try? JSONSerialization.data(withJSONObject: WireImageSummary.summarized(obj), options: .prettyPrinted),
           let result = String(data: pretty, encoding: .utf8)
     else { return string }
     return result
@@ -102,7 +138,7 @@ func apiErrorMessage(from responseBody: String, httpStatus: Int, provider: Strin
     guard !parts.isEmpty else {
         return LLMError.providerMessage(httpStatus: httpStatus, provider: provider)
     }
-    return "\(provider) (HTTP \(httpStatus)): \(parts.joined(separator: " — "))"
+    return "\(provider) (http \(httpStatus)): \(parts.joined(separator: " — "))"
 }
 
 /// A body with a top-level `detail` and no `error` envelope — NVIDIA's:
@@ -115,8 +151,8 @@ enum ProblemDetails {
     static func message(json: [String: Any], httpStatus: Int, provider: String) -> String? {
         guard json["error"] == nil, let detail = json["detail"] as? String, !detail.isEmpty else { return nil }
         if httpStatus == 404, detail.hasPrefix("Function ") {
-            return "\(provider) does not serve this model on your account (HTTP 404). Pick another model in where."
+            return "\(provider) doesn't serve this model on your account (http 404). pick another model in where."
         }
-        return "\(provider) (HTTP \(httpStatus)): \(detail)"
+        return "\(provider) (http \(httpStatus)): \(detail)"
     }
 }

@@ -36,7 +36,8 @@ exactly what the attestation code does — see [`ATTESTATION.md`](ATTESTATION.md
   checks do and do not prove is spelled out in
   [`ATTESTATION.md`](ATTESTATION.md#what-this-does-not-prove).
 - **on-device inference** with Gemma 4 E2B (the default) or E4B via LiteRT-LM, tool calling
-  included. no key, works offline, nothing leaves the device.
+  included. no key, works offline, and nothing leaves the device unless you turn on web search,
+  which sends the model's search queries to Brave.
 - **a computer you own, or a cloud you pick.** ollama, LM Studio, or any OpenAI-compatible
   server (llama.cpp included) on your own hardware; bring your own key for near.ai, Grok,
   Fireworks, OpenRouter, NVIDIA, Brave Answers, and other OpenAI-compatible providers.
@@ -65,6 +66,13 @@ also:
 - stop a reply mid-stream, retry a message that failed, and a notice when a server silently
   truncates the conversation to fit its context window.
 - a Siri shortcut sends a question to the current model.
+- photos in a chat: choose from your library, paste, or take one with the camera, and send it to a
+  model that reads images. the camera is used only when you take a photo, and photos go only to
+  the model you send them to. to a near.ai end-to-end encrypted model the photo is sealed with
+  the rest of the message. the models on the phone read images too, when this phone has the memory
+  for it: teemoon checks at the moment you send, and says so when it can't.
+- import your near.ai private chat history from its export file (settings, chats). it is read and
+  saved on the phone only.
 
 ## where your model runs
 
@@ -76,7 +84,7 @@ also:
     </td>
     <td align="center">
       <img src="assets/on-device.png" width="250"
-           alt="The phone tab: Gemma runs entirely on this device — no key, nothing leaves the phone.">
+           alt="The phone tab: Gemma runs entirely on this device — no key; nothing leaves the phone unless web search is on.">
     </td>
   </tr>
   <tr>
@@ -100,7 +108,8 @@ also:
 </table>
 
 - **this phone** — Gemma 4 E2B/E4B via LiteRT-LM, tool calling included. no key,
-  works offline, nothing leaves the device.
+  works offline, and nothing leaves the device unless you turn on web search (its queries go
+  to Brave).
 - **a computer you own** — ollama, LM Studio, or any OpenAI-compatible server
   (llama.cpp included). the app can even browse and download models onto your own
   ollama server.

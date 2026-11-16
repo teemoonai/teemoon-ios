@@ -76,9 +76,12 @@ struct AttestationPillarTests {
 
     @Test func e2eeDown_onlyPrivacyPillarNeedsAttention() {
         // E2EE failed on the last request, but hardware + code are fine — the
-        // privacy failure must not drag the other pillars down.
+        // privacy failure must not drag the other pillars down. Hardware has its verdicts: a pending one is
+        // "checking", never "verified" (T1).
+        var dcap = RecordDCAPVerification()
+        dcap.gateway = .verified(tcbStatus: .upToDate, mrConfigIdHex: "01", reportDataHex: "")
         let s = summary(attestation: .preview, state: .degraded, lastRequestUsedE2EE: false,
-                        imageProvenance: .allVerified(verified: [], thirdParty: []))
+                        imageProvenance: .allVerified(verified: [], thirdParty: []), dcap: dcap, nras: .verified)
         #expect(pillar(s, "private")?.state == .attention)
         #expect(pillar(s, "hardware")?.state == .verified)
         #expect(pillar(s, "code")?.state == .verified)
@@ -105,7 +108,9 @@ struct AttestationPillarTests {
     }
 
     @Test func hardwareLineNamesGPUWhenPresent() {
-        let s = summary(attestation: .preview)  // preview has gpuArch HOPPER
+        var dcap = RecordDCAPVerification()
+        dcap.gateway = .verified(tcbStatus: .upToDate, mrConfigIdHex: "01", reportDataHex: "")
+        let s = summary(attestation: .preview, dcap: dcap, nras: .verified)  // preview has gpuArch HOPPER
         #expect(pillar(s, "hardware")?.summaryLine.contains("NVIDIA") == true)
     }
 }

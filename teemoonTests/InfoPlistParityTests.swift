@@ -8,12 +8,11 @@
 //  WHY THERE ARE TWO AT ALL
 //
 //  The split ORIGINALLY existed for CFBundleDocumentTypes: iOS requires
-//  `LSSupportsOpeningDocumentsInPlace = NO` beside declared document types
+//  `LSSupportsOpeningDocumentsInPlace` beside declared document types
 //  (ITMS-90737), and macOS rejects that key outright — so one file could not
-//  serve both. The .teemoon backup document machinery was excised 2026-08-30
-//  (no importer or exporter ever existed), which took the key with it. The split stays for the two genuinely
-//  iOS-only keys in `allowedIOSOnlyKeys`. Restoring the backup feature means
-//  reverting BOTH the excision commit and this one.
+//  serve both. The .teemoon backup document machinery was excised 2026-08-30;
+//  the near.ai import (1.1.0) declares JSON on iOS again. The iOS-only keys are
+//  listed in `allowedIOSOnlyKeys`.
 //
 //  This test is what makes the duplication safe. Two plists drift silently: someone
 //  adds a URL scheme, a usage description, a document type to the one they had
@@ -41,9 +40,17 @@ struct InfoPlistParityTests {
     ///   Network permission dialog, which macOS does not have. (The ATS
     ///   `NSAllowsLocalNetworking` exception it accompanies IS in both
     ///   plists: both platforms speak plain HTTP to a Mac running Ollama.)
+    /// - `CFBundleDocumentTypes` + `LSSupportsOpeningDocumentsInPlace` — the near.ai import (1.1.0): a JSON
+    ///   export opened from Files or the share sheet. iOS requires the second key beside the first (ITMS-90737)
+    ///   and macOS rejects it; the Mac imports from Settings only.
+    /// - `CFBundleURLTypes` — share to teemoon (1.1.0): the share extension opens `<bundle id>://share/<uuid>`. iOS
+    ///   only; the Mac has no share extension.
     static let allowedIOSOnlyKeys: Set<String> = [
         "CADisableMinimumFrameDurationOnPhone",
         "NSLocalNetworkUsageDescription",
+        "CFBundleDocumentTypes",
+        "LSSupportsOpeningDocumentsInPlace",
+        "CFBundleURLTypes",
     ]
 
     private static func plist(_ name: String, file: String = #filePath) throws -> [String: Any] {
@@ -89,21 +96,23 @@ struct InfoPlistParityTests {
         }
     }
 
-    /// The backup document machinery was EXCISED (2026-08-30): no importer or
-    /// exporter ever existed, so the Owner claim was a promise the OS repeated
-    /// and the app could not keep. ABSENCE is the contract until the feature
-    /// is real — if any of these keys reappears, it must be a deliberate
-    /// revert of the excision, never drift.
+    /// The backup document machinery was EXCISED (2026-08-30): no importer or exporter existed, so an Owner
+    /// claim was a promise the app could not keep. The one declaration now is the near.ai import's: iOS views
+    /// JSON at Alternate rank (offered, never the default JSON app), with an importer behind it
+    /// (ChatImportModel). No exported type, no Owner role, and nothing on the Mac.
     @Test(.enabled(if: TestFixture.sourceTreeAvailable()))
-    func neitherPlatformDeclaresDocumentMachinery() throws {
+    func onlyTheImportDeclaresADocumentType() throws {
+        let ios = try Self.plist("Info.plist")
+        let types = try #require(ios["CFBundleDocumentTypes"] as? [[String: Any]])
+        #expect(types.count == 1)
+        #expect(types.first?["CFBundleTypeRole"] as? String == "Viewer")
+        #expect(types.first?["LSHandlerRank"] as? String == "Alternate")
+        #expect(types.first?["LSItemContentTypes"] as? [String] == ["public.json"])
+        #expect(ios["LSSupportsOpeningDocumentsInPlace"] != nil, "ITMS-90737: declared document types need it")
         for name in ["Info.plist", "Info-macOS.plist"] {
-            let p = try Self.plist(name)
-            #expect(p["CFBundleDocumentTypes"] == nil,
-                    "\(name) regrew CFBundleDocumentTypes without an importer")
-            #expect(p["UTExportedTypeDeclarations"] == nil,
-                    "\(name) regrew UTExportedTypeDeclarations without an exporter")
-            #expect(p["LSSupportsOpeningDocumentsInPlace"] == nil,
-                    "\(name) declares in-place document behaviour with no document types")
+            #expect(try Self.plist(name)["UTExportedTypeDeclarations"] == nil, "\(name) exports a type with no exporter")
         }
+        let mac = try Self.plist("Info-macOS.plist")
+        #expect(mac["CFBundleDocumentTypes"] == nil && mac["LSSupportsOpeningDocumentsInPlace"] == nil)
     }
 }

@@ -118,8 +118,21 @@ final class E2EEPeer: @unchecked Sendable {
 
         let encrypted: [[String: Any]] = try messages.map { msg in
             var m = msg
-            if let content = msg["content"] as? String, !content.isEmpty {
-                m["content"] = try encrypt(content)
+            switch msg["content"] {
+            case let content as String:
+                if !content.isEmpty { m["content"] = try encrypt(content) }
+            case let parts as [Any]:
+                // Text and image parts: serialized whole and sealed as one string, as near's SDK
+                // does (inference-sdk 4bb1de0, e2ee-chat.ts:271-273). Only a string was sealed
+                // before, so an array would have gone out in the clear.
+                guard let data = try? JSONSerialization.data(withJSONObject: parts, options: [.sortedKeys]),
+                      let text = String(data: data, encoding: .utf8)
+                else { throw E2EEError.unsealableContent }
+                m["content"] = try encrypt(text)
+            case nil, is NSNull:
+                break
+            default:
+                throw E2EEError.unsealableContent
             }
             // `name` identifies the speaker and `refusal` is model-authored
             // prose; the spec lists both.
@@ -205,6 +218,9 @@ enum E2EEError: Error, LocalizedError {
     /// the transport throws this BEFORE anything touches the wire — plaintext
     /// is never sent as a fallback under an E2EE promise.
     case encryptionFailed
+    /// A message `content` that is neither a string, an array of parts nor null: there is no
+    /// sealed form for it, so the request is not sent.
+    case unsealableContent
 
     var errorDescription: String? {
         switch self {
@@ -214,6 +230,7 @@ enum E2EEError: Error, LocalizedError {
         case .invalidKeyLength: "Invalid key length (expected 32 bytes)"
         case .decryptionFailed: "Decryption failed"
         case .encryptionFailed: "Encryption failed — the request was not sent"
+        case .unsealableContent: "A message could not be sealed — the request was not sent"
         }
     }
 }

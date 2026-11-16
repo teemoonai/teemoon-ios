@@ -427,9 +427,8 @@ struct LiteRTLiveTests {
     ///   - the real persona (`AppSettings.defaultSystemPrompt`, datetime
     ///     resolved), not a one-line "use tools when asked"
     ///   - the real prompt shape a user types, not an instruction naming the tool
-    ///   - `LocalLanguageModel`'s real defaults, including temperature 0.7 —
-    ///     transport tests pinned 0, and at 0.7 the decision is a different
-    ///     distribution
+    ///   - `LocalLanguageModel`'s real defaults (LiteRT's own sampler; no
+    ///     temperature is passed)
     ///
     /// So this goes through `LocalLanguageModel` + `LanguageModelSession` +
     /// `GenerationEngine`, exactly as `ChatGeneration` does, and changes nothing
@@ -466,7 +465,7 @@ struct LiteRTLiveTests {
             priorMessages: [WireMessage(role: "system", content: persona)],
             events: StreamCallbacks(onSourcesFound: { _ in }, onQueriesFound: { _ in },
                                     onToolExecutionEnded: {}, onSuccess: { _ in })
-            // temperature / maxTokens / enableThinking left at their defaults on
+            // maxTokens / enableThinking left at their defaults on
             // purpose — overriding them here would rebuild the gap this test
             // exists to close.
         )
@@ -479,8 +478,8 @@ struct LiteRTLiveTests {
         // wrong — it asked for an invented "depot access code", the model
         // sensibly asked what that meant, and `toolRan=false` looked like a
         // broken app path. `isolatesWhyTheAppStackDeclinesToCall` settled it:
-        // 3/3 on this question, 0/3 on the invented one with the persona and the
-        // temperature held constant. The question was the variable.
+        // 3/3 on this question, 0/3 on the invented one with the persona held
+        // constant. The question was the variable.
         var text = ""
         for try await snapshot in session.streamResponse(to: "What's the price of oil right now?") {
             text = snapshot.content
@@ -667,19 +666,19 @@ struct LiteRTLiveTests {
 
     /// Why the app stack didn't call the tool when the transport test did.
     ///
-    /// Three things change between them at once — persona, prompt wording, and
-    /// temperature — so the first run tells you only that *something* differs.
+    /// Two things change between them at once — persona and prompt wording —
+    /// so the first run tells you only that *something* differs.
     /// This varies them one at a time. Reports rates; asserts nothing, because
     /// the answer is a measurement, not a contract.
     ///
     ///   A  real persona  + a realistic grounded question
     ///   B  real persona  + the invented-term question the app test used
     ///   C  toy prompt    + the invented-term question  (≈ the transport test)
-    ///   D  real persona  + invented term, temperature 0 (transport used 0)
     ///
     /// A high but B low means the invented term was simply an ambiguous
     /// question and there is no app bug. C high but B low indicts the persona.
-    /// D high but B low indicts temperature. All low indicts the app path.
+    /// All low indicts the app path. (No temperature arm: the app passes none
+    /// to LiteRT, so one would measure nothing.)
     @Test(.enabled(if: Self.diagnosticsEnabled, "set LITERT_DIAGNOSTICS=1 (slow: 12 generations)"),
           .timeLimit(.minutes(30)))
     @MainActor
@@ -696,14 +695,13 @@ struct LiteRTLiveTests {
         let invented = "What's the current depot access code?"
         let realistic = "What's the price of oil right now?"
 
-        func trial(systemPrompt: String, prompt: String, temperature: Float) async -> Bool {
+        func trial(systemPrompt: String, prompt: String) async -> Bool {
             let ran = LockedBox<Bool>(false)
             let lm = LocalLanguageModel(
                 model: ref,
                 priorMessages: [WireMessage(role: "system", content: systemPrompt)],
                 events: StreamCallbacks(onSourcesFound: { _ in }, onQueriesFound: { _ in },
-                                        onToolExecutionEnded: {}, onSuccess: { _ in }),
-                temperature: temperature
+                                        onToolExecutionEnded: {}, onSuccess: { _ in })
             )
             let session = LanguageModelSession(
                 model: lm, tools: [BridgePlantedTool(result: "The depot access code is ZX9-QUARTZ.", ran: ran)]
@@ -722,20 +720,19 @@ struct LiteRTLiveTests {
         // from noise — the mistake that produced the disproved persona theory on
         // the MLX path.
         let trials = 3
-        let arms: [(String, String, String, Float)] = [
-            ("A persona + realistic", persona, realistic, 0.7),
-            ("B persona + invented ", persona, invented, 0.7),
-            ("C toy     + invented ", toy, invented, 0.7),
-            ("D persona + invented ", persona, invented, 0),
+        let arms: [(String, String, String)] = [
+            ("A persona + realistic", persona, realistic),
+            ("B persona + invented ", persona, invented),
+            ("C toy     + invented ", toy, invented),
         ]
-        for (label, systemPrompt, prompt, temperature) in arms {
+        for (label, systemPrompt, prompt) in arms {
             var called = 0
             for _ in 1...trials {
-                if await trial(systemPrompt: systemPrompt, prompt: prompt, temperature: temperature) {
+                if await trial(systemPrompt: systemPrompt, prompt: prompt) {
                     called += 1
                 }
             }
-            print("[litert-live] arm \(label) temp=\(temperature): called \(called)/\(trials)")
+            print("[litert-live] arm \(label): called \(called)/\(trials)")
         }
     }
 

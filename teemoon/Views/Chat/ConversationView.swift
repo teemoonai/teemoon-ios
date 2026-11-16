@@ -136,8 +136,7 @@ struct TranscriptRowChrome: ViewModifier {
             .environment(llm)
             .environment(settings)
             .environment(providerStore)
-            .textual.tableStyle(MinimalChatTableStyle())
-            .textual.tableCellStyle(MinimalChatTableCellStyle())
+            .chatTextualStyles()
             .blockingRemoteTranscriptAttachments()
     }
 }
@@ -245,9 +244,8 @@ struct ConversationView: View {
 
     @ViewBuilder
     private var pendingChip: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            GenerationActivityChipView(state: llm.superseding.isActive ? .thinkingHarder : .thinking,
-                                       elapsedTime: llm.elapsedTime)
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            GenerationActivityChipView(state: .init(llm.pendingReplyPhase(at: context.date)), elapsedTime: llm.elapsedTime)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -269,7 +267,7 @@ struct ConversationView: View {
             .padding(.bottom, 8)
             .id("weboffer-\(message.id.uuidString)")
             .accessibilityIdentifier("chat.webSearchOffer")
-            .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+            .transition(.opacity.animation(Motion.fade))
         }
     }
 
@@ -419,9 +417,12 @@ struct ConversationView: View {
                             // under a lazy stack that would additionally fire
                             // every time an old row scrolled back into view.
                             let isLast = message.id == sortedMessages.last?.id
+                            let retryQuestion = ReplyMarkerWords.offersRetry(message, isNewest: isLast && !isGenerating)
+                                ? sortedMessages[..<index].last(where: { $0.role == .user }) : nil
                             MessageView(message: message,
                                         isLLMRunning: isGenerating && isLast && !llm.superseding.replyIDs.contains(message.id),
-                                        onRetry: showRetry ? { onRetry?(message) } : nil,
+                                        onRetry: showRetry ? { onRetry?(message) }
+                                            : retryQuestion.map { question in { onRetry?(question) } },
                                         onThinkHarder: thinkHarderAction(for: message),
                         thinkHarderAvailable: thinkHarderAvailable)
                                 .padding()
@@ -821,8 +822,7 @@ struct ConversationView: View {
                 }
             }
         }
-        .textual.tableStyle(MinimalChatTableStyle())
-        .textual.tableCellStyle(MinimalChatTableCellStyle())
+        .chatTextualStyles()
         .blockingRemoteTranscriptAttachments()
     }
     #endif
@@ -1063,13 +1063,15 @@ struct ConversationView: View {
         if let message = messages.first(where: { $0.id == id }) {
             let showRetry = shape.hasError && message.role == .user
                 && message.id == shape.lastUserMessageID
+            let retryQuestion = ReplyMarkerWords.offersRetry(message, isNewest: message.id == messages.last?.id && !isGenerating)
+                ? messages.prefix(while: { $0.id != message.id }).last(where: { $0.role == .user }) : nil
             // `isLLMRunning` stays scoped to the turn in flight. Passed to
             // every row it auto-expands every historic reasoning block the
             // moment a generation starts.
             MessageView(message: message,
                         isLLMRunning: isGenerating && message.id == messages.last?.id
                             && !llm.superseding.replyIDs.contains(message.id),
-                        onRetry: showRetry ? { onRetry?(message) } : nil,
+                        onRetry: showRetry ? { onRetry?(message) } : retryQuestion.map { question in { onRetry?(question) } },
                         onThinkHarder: thinkHarderAction(for: message),
                         thinkHarderAvailable: thinkHarderAvailable)
                 .padding()

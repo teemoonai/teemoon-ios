@@ -16,17 +16,18 @@ struct ChatView: View {
     @Binding var currentThread: Thread?
     @Environment(ChatGeneration.self) var llm
     @Environment(\.scenePhase) private var scenePhase
+    #if os(iOS)
+    @Environment(ComposerFocus.self) private var composerFocus: ComposerFocus?
+    #endif
     @Namespace var bottomID
     @State private var viewModel: ChatViewModel = {
         let vm = ChatViewModel()
         vm.onPlayHaptic = { Haptics.play() }
-        vm.onBatchUpdate = { work in
-            withAnimation(.spring(duration: 0.35, bounce: 0.1), work)
-        }
         return vm
     }()
     @State private var showNoProviderAlert = false
     @State private var showNoKeyAlert = false
+    @State private var showImagesUnsupportedAlert = false
     /// The keyless setup the no-key alert sends the user to edit.
     @State private var keylessProviderToEdit: Provider?
     @State private var showE2EEDegradedAlert = false
@@ -66,14 +67,19 @@ struct ChatView: View {
     private var fadeBand: ChatFadeBand {
         ChatFadeBand(chipTop: chipFrameInInset.minY,
                      chipBottom: chipFrameInInset.maxY,
-                     insetHeight: bottomInsetHeight)
+                     insetHeight: bottomInsetHeight,
+                     chipMinX: chipFrameInInset.minX,
+                     chipWidth: chipFrameInInset.width)
     }
     /// Deep link empty setups into Get (add provider), not Settings.
     @State private var whereOpenToGet = false
+    /// "find a model that reads images": the where sheet opens the browser filtered to them.
+    /// The where sheet with "reads images" on (§4e), from the attach sheet's "choose an image-capable model". An item,
+    /// not a flag beside showWhereSheet: the sheet's content read that flag stale (measured, S44c).
+    @State private var imageWhere: ImageWhere?
+    struct ImageWhere: Identifiable { let id = UUID() }
     /// When the degraded-send alert is raised by a message RETRY (not a fresh
     /// send), the message to retry — so the same gate covers both paths.
-    @State private var pendingRetryMessage: Message?
-    @State private var pendingRetryEffort: ReasoningEffort = .chatDefault
     @FocusState.Binding var isPromptFocused: Bool
     @Binding var showChats: Bool
     @Binding var showSettings: Bool
@@ -149,6 +155,10 @@ struct ChatView: View {
     private var chipMenuItems: some View {
         if let model = activeKnownModel {
             Button {
+                // The keyboard goes before the page covers the composer, or a menu on the page brings it back.
+                #if os(iOS)
+                ComposerTextView.dropKeyboard()
+                #endif
                 showActiveModelDetail = true
             } label: {
                 Label("model info", systemImage: "info.circle")
@@ -176,8 +186,191 @@ struct ChatView: View {
         return settings.braveGroundingEnabled ? .on : .off
     }
 
+    /// The composer panel's row rules for this model and text size (docs/COMPOSER_PANEL.md).
+    private var panelPolicy: ComposerPanelPolicy {
+        ComposerPanelPolicy(modelTakesTools: providerStore.activeProvider?.modelCapabilities.map { $0.contains(.tools) },
+                            chipHasStatus: arrivingAnywhere != nil,
+                            accessibilitySize: dynamicTypeSize.isAccessibilitySize,
+                            chipShowsLevel: chipReasoningLevel != nil)
+    }
+
+    /// Developer mode's reasoning level on the where chip; nil when it shows none (docs/REASONING_LEVEL.md). Held, not
+    /// computed per draw: it searches the saved model list, and only a model, mode or pick change moves it.
+    @State private var chipReasoningLevel: String?
+
+    private func refreshChipReasoningLevel() {
+        let level = providerStore.activeProvider.flatMap { provider -> String? in
+            // While a Think Harder runs: the level its request carries; on end, stop, failure or a refusal, the pick.
+            if settings.developerModeEnabled, llm.running, let turn = viewModel.thinkHarderLevel,
+               !ReasoningEffort.wasRefused(by: provider) {
+                return turn
+            }
+            return ReasoningLevel.Setup(provider, model: provider.model, store: providerStore)
+                .chipLevel(developerMode: settings.developerModeEnabled)
+        }
+        if level != chipReasoningLevel { chipReasoningLevel = level }
+    }
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Where the model runs, then web answers: the panel's row on iOS, the row above the field elsewhere.
+    @ViewBuilder
+    private var whereAndWebChips: some View {
+        #if os(macOS)
+        WhereChip(
+            provider: providerStore.activeProvider,
+            // nil unless the selected model's weights are still
+            // arriving — the chip is the only place that says so
+            // now, and the send button is disabled to match.
+            progress: arrivingAnywhere?.fraction,
+            progressLabel: arrivingWaitingLabel,
+            // A HOME pull with no fraction yet has started and is
+            // simply pre-bytes, so it must not read as "needs
+            // download" — that badge means the weights aren't
+            // coming, which for a phone model is true and here
+            // isn't.
+            needsDownload: arrivingModel != nil && arrivingModel?.fraction == nil,
+            action: {
+                Haptics.play()
+                runImageEvent(.tapWhereChip)
+            }
+        )
+        // A POPUP BUTTON OPENS A POPOVER, NOT A MODAL.
+        //
+        // This chip is a popup button in everything but name: it
+        // shows the current value, carries the up/down chevron
+        // that means "there is a list behind this", and its whole
+        // job is picking one item from that list.
+        //
+        // It was opening a modal sheet — a card centred in the
+        // window, dimming everything behind it, anchored to
+        // nothing. On a Mac that is the vocabulary of a
+        // consequential interruption: a save panel, a
+        // confirmation. Choosing which model answers your next
+        // message is neither. Safari's downloads, Xcode's scheme
+        // picker, the Notes format menu — all popovers hanging
+        // off the control you clicked.
+        //
+        // The anchoring is the point, not the chrome. A popover
+        // points at its source, so the list is visibly ABOUT the
+        // chip; the modal made the connection something you had
+        // to remember. It also stops dimming a conversation the
+        // user is likely re-reading while they choose.
+        .popover(isPresented: $showWhereSheet,
+                 attachmentAnchor: .rect(.bounds),
+                 arrowEdge: .top) {
+            WhereSheetView(openToGet: whereOpenToGet)
+                .onDisappear { whereOpenToGet = false }
+        }
+        #else
+        // A MENU, NOT A CONTEXT MENU.
+        //
+        // `.contextMenu` LIFTS its source out of the layout for
+        // as long as it is open, and this HStack then re-centres
+        // around the hole — pressing the where chip visibly slid
+        // the web chip to the middle of the screen. `.fixedSize()`
+        // was tried and did nothing: the chip's size was never
+        // the problem, its ABSENCE was.
+        //
+        // `Menu(primaryAction:)` anchors a popover instead of
+        // lifting anything, so nothing moves. It is also the
+        // right control for a chip rather than a content row:
+        // tap still opens Where — switching models is what this
+        // is for and stays one tap — and a long press gets the
+        // menu.
+        Menu {
+            chipMenuItems
+        } label: {
+            WhereChip(
+                provider: providerStore.activeProvider,
+                // nil unless the selected model's weights are
+                // still arriving — the chip is the only place
+                // that says so now, and the send button is
+                // disabled to match.
+                progress: arrivingAnywhere?.fraction,
+            progressLabel: arrivingWaitingLabel,
+                // A HOME pull with no fraction yet has started
+                // and is simply pre-bytes, so it must not read as
+                // "needs download" — that badge means the weights
+                // aren't coming, which for a phone model is true
+                // and here isn't.
+                needsDownload: arrivingModel != nil && arrivingModel?.fraction == nil,
+                // The chip's own button never fires: `Menu` owns
+                // the gestures now, and hit testing is off below
+                // so the inner Button cannot swallow the tap.
+                action: {},
+                inPanel: true,
+                reasoningLevel: chipReasoningLevel
+            )
+            .allowsHitTesting(false)
+        } primaryAction: {
+            Haptics.play()
+            runImageEvent(.tapWhereChip)
+        }
+        .buttonStyle(.plain)
+        // The Menu is what VoiceOver lands on; the chip's own label stays inside it unless said here.
+        .accessibilityLabel(WhereChip.accessibilityLabel(for: providerStore.activeProvider,
+                                                         reasoningLevel: chipReasoningLevel))
+        .accessibilityHint("opens where the model runs")
+        .onReceive(UserDefaults.standard.publisher(for: \.reasoningLevels)) { _ in refreshChipReasoningLevel() }
+        .onChange(of: providerStore.activeProvider, initial: true) { refreshChipReasoningLevel() }
+        .onChange(of: settings.developerModeEnabled) { refreshChipReasoningLevel() }
+        // A refusal is noted during the turn, not in defaults: the chip drops its level when the turn ends.
+        .onChange(of: llm.running) { refreshChipReasoningLevel() }
+        .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelRefused).receive(on: RunLoop.main)) { _ in
+            refreshChipReasoningLevel()
+        }
+        // The chip stops growing at xxxLarge; a long press there shows its label large.
+        .accessibilityShowsLargeContentViewer()
+        // The name gives way before web's word or the + and send do (docs/COMPOSER_PANEL.md).
+        .layoutPriority(1)
+        .modifier(PanelHitArea())
+        #endif
+        // WEB ANSWERS, second — never first. The Where chip
+        // answers "who is replying", which has no default and
+        // gates send; this one answers "may it look things up",
+        // which has a working default either way. Reading order
+        // is the priority order.
+        if panelPolicy.showsWebChip {
+            WebSearchChip(
+                state: webSearchState,
+                pointHereToken: webChipPointToken,
+            iconOnly: panelPolicy.webIconOnly,
+                action: {
+                    Haptics.play()
+                    if settings.braveSearchKey.isEmpty {
+                        // Nothing to toggle — send them to the one
+                        // screen that can change that, deep-linked
+                        // so they land ON search, not on an index.
+                        showSettingsSearch = true
+                        showSettings = true
+                    } else {
+                        settings.braveGroundingEnabled.toggle()
+                    }
+                }
+            )
+            // Never shrinks: the where chip's name gives way first (docs/COMPOSER_PANEL.md).
+            .fixedSize()
+            #if os(iOS)
+            .modifier(PanelHitArea())
+            #endif
+        }
+    }
+
+    private var rowChips: AnyView? {
+        #if os(iOS)
+        // Each chip keeps a 44 hit area reaching 5 past its 34 capsule, so -2 between them draws the table's 8.
+        AnyView(HStack(spacing: -2) { whereAndWebChips })
+        #else
+        nil
+        #endif
+    }
+
     var chatInput: some View {
-        ChatComposer(viewModel: viewModel, isPromptFocused: $isPromptFocused, onSend: generate)
+        ChatComposer(viewModel: viewModel, isPromptFocused: $isPromptFocused, onSend: generate,
+                     onChooseImageModel: { imageWhere = ImageWhere() }, rowChips: rowChips, maxLines: panelPolicy.maxLines)
+            .onChange(of: providerStore.activeProvider?.localModelID, initial: true) { _, localModelID in
+                viewModel.imageLimit = ChatViewModel.imagesPerSend(localModelID: localModelID)
+            }
     }
 
     var chatTitle: String {
@@ -227,9 +420,12 @@ struct ChatView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            // ONE container, not a Group: a Group hands its modifiers to each branch, so the composer's safeAreaInset
+            // below was a different view per branch and the first send of a new chat crossfaded two composers
+            // (the maintainer's recording, 2026-11-13; tools/measure_send_motion.py).
+            ZStack {
                 if let currentThread {
-                    ConversationView(messages: llm.superseding.visible(currentThread.sortedMessages), threadID: currentThread.id, generatingThreadID: viewModel.generatingThreadID, onRetry: { retry(from: $0) }, onThinkHarder: thinkHarder, thinkHarderAvailable: { canThinkHarder }, onSetUpWebSearch: {
+                    ConversationView(messages: viewModel.replies.transcriptRows(llm.superseding.visible(currentThread.sortedMessages)), threadID: currentThread.id, generatingThreadID: viewModel.generatingThreadID, onRetry: { retry(from: $0) }, onThinkHarder: thinkHarder, thinkHarderAvailable: { canThinkHarder }, onSetUpWebSearch: {
                         // Same destination as the composer chip's unconfigured
                         // tap. Two entry points, one screen — if they diverged,
                         // the card would be teaching a route the chip doesn't use.
@@ -299,123 +495,22 @@ struct ChatView: View {
             .chatScrollEdgeEffects()
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 8) {
+                    #if os(iOS)
+                    // One panel (docs/COMPOSER_PANEL.md): the chips ride in the composer's bottom row.
+                    HStack(alignment: .bottom) { chatInput }
+                    // The fade band starts HERE — at the chip's top edge, not at
+                    // the top of the inset. Measured in the inset's own coordinate
+                    // space rather than derived from padding constants, so it
+                    // can't drift when the padding or the note changes.
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        proxy.frame(in: .named(Self.insetSpace))
+                    } action: { frame in
+                        chipFrameInInset = frame
+                    }
+                    #else
                     // Option B: model·place chip opens Where; title stays trust.
                     HStack {
-                        #if os(macOS)
-                        WhereChip(
-                            provider: providerStore.activeProvider,
-                            // nil unless the selected model's weights are still
-                            // arriving — the chip is the only place that says so
-                            // now, and the send button is disabled to match.
-                            progress: arrivingAnywhere?.fraction,
-                            progressLabel: arrivingWaitingLabel,
-                            // A HOME pull with no fraction yet has started and is
-                            // simply pre-bytes, so it must not read as "needs
-                            // download" — that badge means the weights aren't
-                            // coming, which for a phone model is true and here
-                            // isn't.
-                            needsDownload: arrivingModel != nil && arrivingModel?.fraction == nil,
-                            action: {
-                                Haptics.play()
-                                showWhereSheet = true
-                            }
-                        )
-                        // A POPUP BUTTON OPENS A POPOVER, NOT A MODAL.
-                        //
-                        // This chip is a popup button in everything but name: it
-                        // shows the current value, carries the up/down chevron
-                        // that means "there is a list behind this", and its whole
-                        // job is picking one item from that list.
-                        //
-                        // It was opening a modal sheet — a card centred in the
-                        // window, dimming everything behind it, anchored to
-                        // nothing. On a Mac that is the vocabulary of a
-                        // consequential interruption: a save panel, a
-                        // confirmation. Choosing which model answers your next
-                        // message is neither. Safari's downloads, Xcode's scheme
-                        // picker, the Notes format menu — all popovers hanging
-                        // off the control you clicked.
-                        //
-                        // The anchoring is the point, not the chrome. A popover
-                        // points at its source, so the list is visibly ABOUT the
-                        // chip; the modal made the connection something you had
-                        // to remember. It also stops dimming a conversation the
-                        // user is likely re-reading while they choose.
-                        .popover(isPresented: $showWhereSheet,
-                                 attachmentAnchor: .rect(.bounds),
-                                 arrowEdge: .top) {
-                            WhereSheetView(openToGet: whereOpenToGet)
-                                .onDisappear { whereOpenToGet = false }
-                        }
-                        #else
-                        // A MENU, NOT A CONTEXT MENU.
-                        //
-                        // `.contextMenu` LIFTS its source out of the layout for
-                        // as long as it is open, and this HStack then re-centres
-                        // around the hole — pressing the where chip visibly slid
-                        // the web chip to the middle of the screen. `.fixedSize()`
-                        // was tried and did nothing: the chip's size was never
-                        // the problem, its ABSENCE was.
-                        //
-                        // `Menu(primaryAction:)` anchors a popover instead of
-                        // lifting anything, so nothing moves. It is also the
-                        // right control for a chip rather than a content row:
-                        // tap still opens Where — switching models is what this
-                        // is for and stays one tap — and a long press gets the
-                        // menu.
-                        Menu {
-                            chipMenuItems
-                        } label: {
-                            WhereChip(
-                                provider: providerStore.activeProvider,
-                                // nil unless the selected model's weights are
-                                // still arriving — the chip is the only place
-                                // that says so now, and the send button is
-                                // disabled to match.
-                                progress: arrivingAnywhere?.fraction,
-                            progressLabel: arrivingWaitingLabel,
-                                // A HOME pull with no fraction yet has started
-                                // and is simply pre-bytes, so it must not read as
-                                // "needs download" — that badge means the weights
-                                // aren't coming, which for a phone model is true
-                                // and here isn't.
-                                needsDownload: arrivingModel != nil && arrivingModel?.fraction == nil,
-                                // The chip's own button never fires: `Menu` owns
-                                // the gestures now, and hit testing is off below
-                                // so the inner Button cannot swallow the tap.
-                                action: {}
-                            )
-                            .allowsHitTesting(false)
-                        } primaryAction: {
-                            Haptics.play()
-                            showWhereSheet = true
-                        }
-                        .buttonStyle(.plain)
-                        // The Menu is what VoiceOver lands on; the chip's own label stays inside it unless said here.
-                        .accessibilityLabel(WhereChip.accessibilityLabel(for: providerStore.activeProvider))
-                        .accessibilityHint("opens where the model runs")
-                        #endif
-                        // WEB ANSWERS, second — never first. The Where chip
-                        // answers "who is replying", which has no default and
-                        // gates send; this one answers "may it look things up",
-                        // which has a working default either way. Reading order
-                        // is the priority order.
-                        WebSearchChip(
-                            state: webSearchState,
-                            pointHereToken: webChipPointToken,
-                            action: {
-                                Haptics.play()
-                                if settings.braveSearchKey.isEmpty {
-                                    // Nothing to toggle — send them to the one
-                                    // screen that can change that, deep-linked
-                                    // so they land ON search, not on an index.
-                                    showSettingsSearch = true
-                                    showSettings = true
-                                } else {
-                                    settings.braveGroundingEnabled.toggle()
-                                }
-                            }
-                        )
+                        whereAndWebChips
                         Spacer(minLength: 0)
                     }
                     // The fade band starts HERE — at the chip's top edge, not at
@@ -428,6 +523,7 @@ struct ChatView: View {
                         chipFrameInInset = frame
                     }
                     HStack(alignment: .bottom) { chatInput }
+                    #endif
                 }
                     // 8 under the field, not 16: the home indicator (or the
                     // keyboard) already keeps its own distance, and 16 on top
@@ -503,7 +599,10 @@ struct ChatView: View {
                             // it knows, this view does not decide.
                             confidentiality: model.confidentialityNote,
                             liveLoader: activeModelLiveLoader(),
-                            offersLoader: activeModelOffersLoader()
+                            offersLoader: activeModelOffersLoader(),
+                            reasoning: providerStore.activeProvider.map {
+                                ReasoningLevel.Setup($0, model: $0.model, store: providerStore)
+                            }
                         )
                     }
                     .presentationDetents([.large])
@@ -518,6 +617,9 @@ struct ChatView: View {
                 whereOpenToGet = false
             }) {
                 WhereSheetView(openToGet: whereOpenToGet)
+            }
+            .sheet(item: $imageWhere) { _ in
+                WhereSheetView(showingOnly: [.vision])
             }
             #endif
             #if os(iOS)
@@ -585,29 +687,43 @@ struct ChatView: View {
                 } message: {
                     Text("\(providerStore.activeProvider?.name.lowercased() ?? "this provider") needs an api key, and none is saved on this phone. add one under setups, then send again.")
                 }
-                .alert(e2eeAlertTitle, isPresented: $showE2EEDegradedAlert) {
-                    Button("retry verification") {
-                        retryE2EEAndGenerate()
-                    }
-                    // HARD integrity break (tamper / MITM / replay / unbound key):
-                    // no bypass. Sending is blocked, not merely confirmed — you
-                    // cannot send into a compromised or unverified enclave; only
-                    // re-verify or cancel. The send option appears ONLY for soft
-                    // degrades, and with an honest label per mode: when E2EE is
-                    // intact and only provenance failed, a send is still sealed
-                    // end-to-end, so "send unencrypted" would be false and scarier
-                    // than the truth (unverified image inside the enclave, not
-                    // plaintext on the wire).
-                    if !confidentialSession.degradeIsHardFailure {
-                        Button(confidentialSession.provenanceBlockedButE2EEIntact
-                               ? "send anyway (still encrypted)"
-                               : "send unencrypted") {
-                            generateBypassing()
+                .alert(imageRefusal.title, isPresented: $showImagesUnsupportedAlert) {
+                    ForEach(imageRefusal.buttons, id: \.self) { label in
+                        switch label {
+                        case ImageRefusalAlert.chooseModel: Button(label) { runImageEvent(.alertChooseModel) }
+                        case ImageRefusalAlert.sendTextOnly: Button(label) { runImageEvent(.sendWithoutImages) }
+                        case ImageRefusalAlert.cancel, ImageRefusalAlert.ok: Button(label, role: .cancel) {}
+                        default: Button(label) { useSmallerPhoneModel() }
                         }
                     }
-                    Button("cancel", role: .cancel) { pendingRetryMessage = nil }
                 } message: {
-                    Text(e2eeAlertMessage)
+                    if !imageRefusal.message.isEmpty { Text(imageRefusal.message) }
+                }
+                // 1.0.6's alert (the maintainer, 2026-10-31: "Revert all to 1.0.6"). E2EESendChoice owns the order and the
+                // rule that a hard integrity break offers no send.
+                .alert(e2eeAsk.title, isPresented: $showE2EEDegradedAlert) {
+                    ForEach(e2eeAsk.choices, id: \.label) { choice in
+                        switch choice {
+                        case .retryVerification: Button(choice.label) { retryE2EEAndGenerate() }
+                        case .sendAnyway: Button(choice.label, role: choice.isDestructive ? .destructive : nil) { generateBypassing() }
+                        case .sendSealedUnconfirmed: Button(choice.label) { generateBypassing() }
+                        case .dontSend, .wait: Button(choice.label, role: .cancel) {
+                            viewModel.clearPendingRetry()
+                            viewModel.returnGatedQuestion(currentThread: currentThread, modelContext: modelContext)
+                        }
+                        }
+                    }
+                } message: {
+                    Text(e2eeAsk.message)
+                }
+                .onChange(of: confidentialSession.sendPending) {
+                    viewModel.settleSentBeforeConfirmed(session: confidentialSession, modelContext: modelContext)
+                }
+                .onChange(of: viewModel.hardwareConfirmRequested) { _, asked in
+                    if asked { showE2EEDegradedAlert = true }
+                }
+                .onChange(of: showE2EEDegradedAlert) { _, shown in
+                    if !shown { viewModel.hardwareConfirmRequested = false }
                 }
                 .toolbar {
                     #if os(macOS)
@@ -622,7 +738,7 @@ struct ChatView: View {
                     // name, and the same fact twice in one frame is noise.
                     ToolbarItem(placement: .navigation) {
                         MacTrustChip(
-                            state: confidentialSession.attestationState,
+                            state: confidentialSession.chipState,
                             isHardFailure: confidentialSession.degradeIsHardFailure,
                             unpublishedButSealed: confidentialSession.unpublishedOnlyButE2EEIntact,
                             provider: providerStore.activeProvider
@@ -650,7 +766,7 @@ struct ChatView: View {
                     ToolbarItem(placement: .principal) {
                         E2EETitleBlock(
                             title: chatTitle,
-                            state: confidentialSession.attestationState,
+                            state: confidentialSession.chipState,
                             provider: providerStore.activeProvider,
                             // Surface the RED states the plain attestationState can't:
                             // a hard integrity break (sending blocked) and a reply
@@ -658,6 +774,7 @@ struct ChatView: View {
                             // than the sheet's hero.
                             isHardFailure: confidentialSession.degradeIsHardFailure,
                             unpublishedButSealed: confidentialSession.unpublishedOnlyButE2EEIntact,
+                            hardwareUnconfirmedButSealed: confidentialSession.sealedButHardwareUnconfirmed,
                             mismatchCount: confidentialSession.effectiveMismatchCount,
                             // The WhereChip above the composer owns the model
                             // name. Two copies on one screen was the cost of
@@ -692,34 +809,34 @@ struct ChatView: View {
                 // Back from the background: an on-device turn cut off while the
                 // app was away is re-asked. Policy lives on the view-model; the
                 // retry goes through the same send gate as any other.
-                .onChange(of: scenePhase) { _, phase in
-                    guard phase == .active,
-                          let message = viewModel.interruptedUserMessage(in: currentThread, llm: llm)
-                    else { return }
-                    retry(from: message)
+                // A share waiting in the inbox opens after that, in a new chat (docs/SHARE_IN.md).
+                .onChange(of: scenePhase, initial: true) { _, phase in
+                    guard phase == .active else { return }
+                    if let message = viewModel.interruptedUserMessage(in: currentThread, llm: llm) {
+                        retry(from: message)
+                    }
+                    #if os(iOS)
+                    openShare()
+                    if shareKeyboardPending {
+                        shareKeyboardPending = false
+                        askForKeyboard()
+                    }
+                    #endif
                 }
+                #if os(iOS)
+                .onReceive(NotificationCenter.default.publisher(for: .teemoonShareArrived)) { _ in openShare() }
+                #endif
         }
     }
 
-    /// Alert title per degrade mode — a hard integrity break is a blocked send,
-    /// not merely "E2EE unavailable"; a provenance-only gap is about unverified
-    /// code, not encryption.
-    private var e2eeAlertTitle: String {
-        if confidentialSession.degradeIsHardFailure { return "verification failed — sending blocked" }
-        if confidentialSession.provenanceBlockedButE2EEIntact { return "couldn't verify the running code" }
-        return "end-to-end encryption unavailable"
-    }
-
-    private var e2eeAlertMessage: String {
-        if confidentialSession.provenanceBlockedButE2EEIntact {
-            return "your message would still be sealed to the model's verified hardware key — but one running image on this server couldn't be verified as published code. re-verifying may reach a different server of this model."
-        }
-        let cause = confidentialSession.e2eeDegradedReason ?? "E2EE could not be established for this provider."
-        // Hard break: name the cause AND state the policy — there is no bypass.
-        if confidentialSession.degradeIsHardFailure {
-            return "\(cause) Sending is blocked until this re-verifies — this could mean the enclave was tampered with or the connection intercepted."
-        }
-        return cause
+    private var e2eeAsk: E2EEAsk {
+        E2EEAsk.make(hardFailure: confidentialSession.degradeIsHardFailure,
+                     pendingAsk: viewModel.hardwareConfirmRequested ? viewModel.pendingAskKind : nil,
+                     provenanceUnchecked: confidentialSession.provenanceUncheckedAsks,
+                     softButSealed: confidentialSession.softButSealed,
+                     provenanceBlocked: confidentialSession.provenanceBlockedButE2EEIntact,
+                     cause: confidentialSession.e2eeDegradedReason,
+                     deadlinePassed: confidentialSession.deadlinePassed)
     }
 
     /// "waiting for wi-fi" for a parked phone download, else nil (show progress).
@@ -786,24 +903,112 @@ struct ChatView: View {
         retry(from: message)
     }
 
+    /// While a home recheck runs, a second refusal goes straight to the alert (no loop).
+    @State private var imageRecheckRunning = false
+    #if os(iOS)
+    /// A share that arrived before the scene was active asks for the keyboard once it is (ShareFocus).
+    @State private var shareKeyboardPending = false
+    #endif
+
+    private var imageRefusal: ImageRefusalAlert {
+        let provider = providerStore.activeProvider
+        let name = provider.map { WhereProviderPresentation.chipLabel(for: $0) } ?? "this model"
+        if let id = provider?.localModelID, PhoneImageMemory.refused(modelID: id) {
+            return ImageRefusalAlert(phoneModel: name.lowercased(),
+                                     smaller: smallerPhoneModel.map { WhereProviderPresentation.chipLabel(for: $0).lowercased() })
+        }
+        return ImageRefusalAlert(modelName: name, hasText: !viewModel.isPromptEmpty)
+    }
+
+    /// The smaller phone model that fits, when it is already on the phone (as Android offers it).
+    private var smallerPhoneModel: Provider? {
+        guard let id = providerStore.activeProvider?.localModelID,
+              let smaller = PhoneImageMemory.smallerModel(than: id) else { return nil }
+        return providerStore.providers.first { $0.localModelID == smaller }
+    }
+
+    private func useSmallerPhoneModel() {
+        guard let provider = smallerPhoneModel else { return }
+        providerStore.activate(modelID: provider.model, on: provider)
+    }
+
+    #if os(iOS)
+    /// A shared entry lands in a new chat with the keyboard up. Do not send from here: the user presses send.
+    private func openShare() {
+        guard viewModel.takeShare(from: ShareInbox.inApp()) != nil else { return }
+        currentThread = nil
+        switch ShareFocus.plan(sceneActive: scenePhase == .active) {
+        case .now: askForKeyboard()
+        case .dropThenOnActive:
+            ComposerTextView.dropKeyboard()
+            shareKeyboardPending = true
+        }
+    }
+
+    private func askForKeyboard() {
+        isPromptFocused = true
+        composerFocus?.request()
+    }
+    #endif
+
+    /// The composer's images, as ComposerImageMachine sees them.
+    private var imageState: ComposerImageMachine.State { viewModel.pendingImages.isEmpty ? .empty : .attached }
+
+    /// Runs the machine's effects for an event the chat screen owns, in the order it gives (§4d).
+    private func runImageEvent(_ event: ComposerImageMachine.Event) {
+        let effects = ComposerImageMachine.next(imageState, event).1
+        #if os(iOS)
+        // The keyboard goes BEFORE an alert or sheet covers the composer: otherwise UIKit hands it back to the composer
+        // when that closes, and the composer shows on the way to the where sheet (the maintainer 2026-11-12).
+        if effects.contains(where: { [.openWhere, .openWhereReadsImages, .showRefusedAlert].contains($0) }) {
+            ComposerTextView.dropKeyboard()
+        }
+        #endif
+        for effect in effects {
+            switch effect {
+            case .openWhere: showWhereSheet = true
+            case .openWhereReadsImages: imageWhere = ImageWhere()
+            case .showRefusedAlert: showImagesUnsupportedAlert = true
+            case .removeAll: viewModel.pendingImages.removeAll()
+            case .sendText: generate()
+            case .openAttachSheet, .openAttachSheetCantSee, .closeAttachSheet, .attach, .remove, .sendImages: break
+            }
+        }
+    }
+
     private func generate() {
         presentSend(viewModel.prepareSend(
             hasProvider: providerStore.activeProvider != nil,
             hasKey: activeProviderHasKey,
             isDownloading: arrival != nil,
-            trust: confidentialSession.sendPolicy
+            trust: confidentialSession.sendPolicyAfterConfirmations,
+            seesImages: providerStore.activeProvider?.modelSeesImages ?? false
         )) { performGenerate() }
     }
 
     /// Present the matching alert, or run `ready`.
     private func presentSend(_ prep: ChatViewModel.SendPrep, ready: () -> Void) {
         switch prep {
-        case .blockedEmptyPrompt: return
+        case .blockedEmptyPrompt, .blockedImagesLoading, .blockedTooManyImages: return
+        case .blockedImagesUnsupported: recheckHomeImagesThenRefuse()
         case .blockedNoProvider: showNoProviderAlert = true
         case .blockedNoKey: showNoKeyAlert = true
         case .blockedDownloading: showDownloadingAlert = true
         case .confirmE2EE, .blockedE2EE: showE2EEDegradedAlert = true
         case .ready: ready()
+        }
+    }
+
+    /// A home model's own machine is asked once before its photo is refused (HomeCapabilityRefresh); a yes sends.
+    private func recheckHomeImagesThenRefuse() {
+        guard !imageRecheckRunning, let provider = providerStore.activeProvider else { return runImageEvent(.sendBlind) }
+        imageRecheckRunning = true
+        Task {
+            let sees = await HomeCapabilityRefresh.shared.recheckBeforeRefusing(
+                provider, kind: providerStore.storedKind(of: provider),
+                adopt: { providerStore.adoptCapabilities(from: $0, forServer: $1) })
+            if sees { generate() } else { runImageEvent(.sendBlind) }
+            imageRecheckRunning = false
         }
     }
 
@@ -813,28 +1018,37 @@ struct ChatView: View {
     }
 
     private func performGenerate(acceptedDegrade: Bool = false) {
-        viewModel.generate(
-            currentThread: &currentThread,
-            modelContext: modelContext,
-            settings: settings,
-            providers: providerStore,
-            session: confidentialSession,
-            llm: llm,
-            acceptedDegrade: acceptedDegrade
-        )
+        // One motion (the maintainer 2026-11-12): the keyboard starts down in the same frame the strip and text clear, and the
+        // panel shrinks with it; the strip used to vanish un-animated while the keyboard slid.
+        // Only a send that goes drops the keyboard; a refused one leaves it and the text where they were.
+        #if os(iOS)
+        if viewModel.canSend { ComposerTextView.dropKeyboard() }
+        #endif
+        withAnimation(sendMotion) {
+            viewModel.generate(
+                currentThread: &currentThread,
+                modelContext: modelContext,
+                settings: settings,
+                providers: providerStore,
+                session: confidentialSession,
+                llm: llm,
+                acceptedDegrade: acceptedDegrade
+            )
+        }
         isPromptFocused = false
     }
+
+    /// The keyboard's own curve and length; Reduce Motion: none.
+    private var sendMotion: Animation? { reduceMotion ? nil : .easeOut(duration: 0.25) }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The user chose to proceed from the degraded alert (soft degrades only —
     /// the hard-failure alert offers no bypass). Runs the pending retry if the
     /// alert was raised by one, else a fresh send.
     private func generateBypassing() {
-        if let message = pendingRetryMessage {
-            pendingRetryMessage = nil
-            performRetry(from: message, acceptedDegrade: true, effort: pendingRetryEffort)
-        } else {
-            performGenerate(acceptedDegrade: true)
-        }
+        viewModel.sendAnyway(currentThread: &currentThread, modelContext: modelContext, settings: settings,
+                             providers: providerStore, session: confidentialSession, llm: llm)
+        isPromptFocused = false
     }
 
     private func retryE2EEAndGenerate() {
@@ -845,20 +1059,23 @@ struct ChatView: View {
         // here would slip through in that window. Re-verify and require the user
         // to re-initiate against the SETTLED state.
         let wasHardBlock = confidentialSession.degradeIsHardFailure
-        let pending = pendingRetryMessage
+        // Re-verify answers a still-checking ask by declining it (F3): a fresh send's question returns to the composer;
+        // a held retry stays pending so a later "send anyway" resends it.
+        viewModel.reverify(currentThread: currentThread, modelContext: modelContext)
+        let captured = viewModel.reverifyCapture(in: currentThread)
         e2eeRetrying = true
         confidentialSession.refreshAttestation()
         Task {
             await confidentialSession.attestationOutcome(waitingUpTo: .seconds(10))
             e2eeRetrying = false
-            if wasHardBlock || confidentialSession.requiresE2EEConfirmation {
+            guard viewModel.reverifyStillCurrent(captured, in: currentThread) else { return }
+            if wasHardBlock || confidentialSession.sendPolicy != .allow {
                 // Still (or was) blocked → don't auto-send; surface the state.
-                // Keep the pending retry so a subsequent confirm still targets it.
-                pendingRetryMessage = pending
+                // The pending retry stays in the view model, so a subsequent confirm still targets it.
                 showE2EEDegradedAlert = true
-            } else if let message = pending {
-                pendingRetryMessage = nil
-                performRetry(from: message, effort: pendingRetryEffort)
+            } else if let retry = viewModel.pendingRetry {
+                viewModel.clearPendingRetry()
+                performRetry(from: retry.question, effort: retry.effort)
             } else {
                 performGenerate()
             }
@@ -892,8 +1109,7 @@ struct ChatView: View {
             requirePrompt: false
         )
         if prep == .confirmE2EE || prep == .blockedE2EE {
-            pendingRetryMessage = message
-            pendingRetryEffort = effort
+            viewModel.holdRetryForAlert(message, effort: effort)
         }
         presentSend(prep) { performRetry(from: message, effort: effort) }
     }
@@ -1061,3 +1277,12 @@ struct ChatView: View {
         .environment(ConfidentialSession(providers: store))
         .environment(ChatGeneration())
 }
+
+#if os(iOS)
+/// A 34-tall panel item in a 44 hit area: 5 past it on each side (docs/COMPOSER_PANEL.md spacing).
+private struct PanelHitArea: ViewModifier {
+    func body(content: Content) -> some View {
+        content.padding(.horizontal, 5).frame(minHeight: 44).contentShape(Rectangle())
+    }
+}
+#endif

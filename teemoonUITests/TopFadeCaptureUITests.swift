@@ -11,6 +11,8 @@ import XCTest
 
 final class TopFadeCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     func testCaptureTitleOverlap() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting"]

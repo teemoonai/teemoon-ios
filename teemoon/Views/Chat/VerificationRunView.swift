@@ -32,6 +32,17 @@ struct VerificationRunView: View {
 
     /// Built live from the session each render — so a check that resolves after
     /// the screen is pushed (e.g. TLS) updates here instead of staying pending.
+    private var audit: (state: EverydayAuditState?, leaksExposure: String?) {
+        ModelNodeAudit.state(
+            groups: EnclaveGrouping(attestation: session.attestation, imageProvenance: session.imageProvenance,
+                                    modelLayerManifest: session.modelLayerManifest,
+                                    modelLayerVerification: session.modelLayerVerification).groups(),
+            hasAttestation: session.attestation != nil,
+            chatPath: session.trustScope?.chatPath,
+            runningSources: session.trustScope?.running.map(\.service.source) ?? [],
+            composeManager: session.trustScope?.composeManager)
+    }
+
     private var summary: AttestationSummary {
         AttestationSummary(
             attestation: session.attestation, state: session.attestationState, timedOut: timedOut,
@@ -44,7 +55,9 @@ struct VerificationRunView: View {
             tlsAttestation: session.tlsAttestation,
             modelLayerVerification: session.modelLayerVerification,
             degradeIsHardFailure: session.degradeIsHardFailure,
-            e2eeIntact: session.e2eeBindingIntact)
+            e2eeIntact: session.e2eeBindingIntact,
+            provenanceInconclusive: session.provenanceInconclusive,
+            auditState: audit.state, leaksExposure: audit.leaksExposure)
     }
 
     private var reportText: String {
@@ -107,7 +120,7 @@ struct VerificationRunView: View {
                 .accessibilityLabel("re-run verification")
             }
         }
-        .task(id: session.attestationState) {
+        .task(id: session.firstRecordWaitID) {
             timedOut = false
             guard session.awaitsFirstRecord else { return }
             try? await Task.sleep(nanoseconds: 8_000_000_000)
@@ -129,7 +142,7 @@ struct VerificationRunView: View {
         Section {
             VStack(spacing: 8) {
                 Image(systemName: summary.headerIcon)
-                    .font(.system(size: 50, weight: .semibold))
+                    .scaledFont(size: 50, weight: .semibold, relativeTo: .title2)
                     .foregroundStyle(heroColor)
                 Text(summary.headerTitle)
                     .font(.title2.weight(.bold))
@@ -157,7 +170,7 @@ struct VerificationRunView: View {
 
     private func rerun() {
         timedOut = false
-        session.refreshAttestation(keepExisting: true)
+        session.refreshAttestation()
     }
 
     private var heroColor: Color {
@@ -260,10 +273,10 @@ struct VerificationRunView: View {
                 Spacer(minLength: 8)
                 Button {
                     Clipboard.copy(script)
-                    withAnimation(.spring(duration: 0.35, bounce: 0.1)) { scriptCopied = true }
+                    withAnimation(Motion.swap) { scriptCopied = true }
                     Task {
                         try? await Task.sleep(nanoseconds: 1_600_000_000)
-                        await MainActor.run { withAnimation { scriptCopied = false } }
+                        await MainActor.run { withAnimation(Motion.swap) { scriptCopied = false } }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -312,6 +325,7 @@ struct VerificationRunView: View {
 
 private struct RunSectionRow: View {
     let section: VerificationSection
+    @Environment(\.dynamicTypeSize) private var typeSize
     // collapsed by default; -DesignTourExpandAll opens every section so the
     // per-step rows are capturable headlessly
     #if os(iOS)
@@ -352,7 +366,7 @@ private struct RunSectionRow: View {
             }
             ForEach(section.steps) { step in
                 HStack(alignment: .top, spacing: 10) {
-                    stepIcon(step.status).frame(width: 18)
+                    stepIcon(step.status).glyphColumn(18, relativeTo: .body)
                     VStack(alignment: .leading, spacing: 4) {
                         if let url = step.url, let destination = URL(string: url) {
                             // the step itself navigates to the code that's running
@@ -398,12 +412,16 @@ private struct RunSectionRow: View {
             .padding(.top, 4)
         } label: {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // At the accessibility sizes the chip goes under the title: beside it, both broke mid-word ("pas sed").
+                let titleLine = typeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 6))
+                titleLine {
                     // title stays on one line; the "added by teemoon" tag sits
                     // beneath it, never orphaned in the wrap gap
                     Text(section.command).font(.callout).fontWeight(.medium)
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
+                        .lineLimitGrowing(1)
+                    if !typeSize.isAccessibilitySize { Spacer(minLength: 6) }
                     ResultChip(result: section.result)
                 }
                 if section.isExtra {
@@ -442,6 +460,7 @@ private struct ResultChip: View {
             Image(systemName: result.chipIcon).font(.caption2)
             Text(result.chipLabel).font(.caption).fontWeight(.medium)
         }
+        .fixedSize()
         .foregroundStyle(color)
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(color.opacity(0.15), in: Capsule())
@@ -477,7 +496,7 @@ struct GlossaryEntry: Identifiable, Equatable {
     /// dense wall of text at exactly their moment of anxiety).
     static let primer = GlossaryEntry(
         id: "primer", title: "how teemoon proves your privacy",
-        definition: "your messages are processed inside a **sealed region of the chip** (a TEE) that even the machine’s operator can’t read into.\n\nbefore each conversation, teemoon checks **Intel- and NVIDIA-signed proofs** that the hardware is genuine, that it booted near.ai’s published open-source code, and that your connection is encrypted all the way into that sealed hardware.\n\nit runs the same checks near.ai documents — automatically, on your live data — and **shows you the signed values** so you can re-verify everything yourself.",
+        definition: "your messages are processed inside a **sealed region of the chip** (a TEE) that even the machine’s operator can’t read into.\n\nbefore each conversation, teemoon checks **Intel- and NVIDIA-signed proofs** that the hardware is genuine, that the images its launch config names are near.ai’s published source, and that your connection is encrypted all the way into that sealed hardware.\n\nit runs the same checks near.ai documents — automatically, on your live data — and **shows you the signed values** so you can re-verify everything yourself.",
         url: "https://docs.near.ai/cloud/verification/")
 }
 
@@ -542,7 +561,10 @@ struct GlossarySheet: View {
     // Plant fixtures; freeze before any path that would re-fetch and clobber
     // the GLM-5.1 AWQ/FP8 quant-drift artifact with live production YAML.
     session.freezeAttestationFixtures = true
-    session.attestation = .preview
+    // The fixture claims NVIDIA verified, so the record carries GPU evidence; without it the row spins forever.
+    var record = AttestationRecord.preview
+    record.nvidiaPayload = "{}"
+    session.attestation = record
     var dcap = RecordDCAPVerification()
     dcap.gateway = .verified(tcbStatus: allPass ? .upToDate : .outOfDate, mrConfigIdHex: "01", reportDataHex: "")
     dcap.model = .verified(tcbStatus: .upToDate, mrConfigIdHex: "01", reportDataHex: "")

@@ -95,7 +95,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp()
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20), "composer never appeared")
         composer.tap()
         composer.typeText("anchor me")
@@ -189,7 +189,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp(developerMode: true)
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -232,7 +232,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp()
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20), "composer never appeared")
         composer.tap()
         composer.typeText("go")
@@ -363,7 +363,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp(developerMode: false)
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -439,7 +439,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp(developerMode: false)
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -474,7 +474,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp(developerMode: true)
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -497,7 +497,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp()
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -560,7 +560,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp()
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -617,7 +617,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp()
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -680,7 +680,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp()
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -721,7 +721,7 @@ final class LongThreadStreamingUITests: XCTestCase {
         let app = try launchedApp()
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")

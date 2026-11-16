@@ -30,8 +30,17 @@ final class OllamaDownloadCenter {
         var isFinished: Bool { phase == .done || { if case .failed = phase { return true } else { return false } }() }
     }
 
+    typealias Puller = (_ ref: String, _ baseURL: URL) -> AsyncThrowingStream<OllamaPullProgress, Error>
+
     private(set) var downloads: [Download] = []
     private var tasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private let pull: Puller
+    /// Who to tell when a pull finishes; the sheet that started it has usually closed by then.
+    @ObservationIgnored private var onDone: [String: (String) -> Void] = [:]
+
+    init(pull: @escaping Puller = { OllamaAdapter.pullModel($0, baseURL: $1) }) {
+        self.pull = pull
+    }
 
     /// Active or reconnecting pulls (drive the progress banner).
     var inProgress: [Download] { downloads.filter { $0.phase == .active || $0.phase == .reconnecting } }
@@ -39,9 +48,10 @@ final class OllamaDownloadCenter {
     func isDownloading(_ ref: String) -> Bool { tasks[OllamaAdapter.normalizePullRef(ref)] != nil }
 
     /// Start (or no-op if already running) a resilient server-side pull.
-    func start(ref rawRef: String, baseURL: URL) {
+    func start(ref rawRef: String, baseURL: URL, onDone: ((String) -> Void)? = nil) {
         let ref = OllamaAdapter.normalizePullRef(rawRef)
         guard !ref.isEmpty, tasks[ref] == nil else { return }
+        self.onDone[ref] = onDone
         upsert(Download(id: ref, baseURL: baseURL, status: "starting…",
                         fraction: nil, bytes: nil, phase: .active))
         tasks[ref] = Task { [weak self] in await self?.run(ref: ref, baseURL: baseURL) }
@@ -52,6 +62,7 @@ final class OllamaDownloadCenter {
     func cancel(ref: String) {
         let ref = OllamaAdapter.normalizePullRef(ref)
         tasks[ref]?.cancel(); tasks[ref] = nil
+        onDone[ref] = nil
         downloads.removeAll { $0.id == ref }
     }
 
@@ -68,7 +79,7 @@ final class OllamaDownloadCenter {
             var succeeded = false
             var advanced = false
             do {
-                for try await p in OllamaAdapter.pullModel(ref, baseURL: baseURL) {
+                for try await p in pull(ref, baseURL) {
                     if Task.isCancelled { return }
                     if p.isSuccess { succeeded = true; break }
                     if let c = p.completed, c > lastCompleted {   // REAL byte progress
@@ -122,11 +133,13 @@ final class OllamaDownloadCenter {
     }
     private func markFailed(ref: String, msg: String) {
         tasks[ref] = nil
+        onDone[ref] = nil
         mutate(ref) { $0.phase = .failed(msg); $0.status = "failed" }
     }
     private func finish(ref: String) {
         tasks[ref] = nil
         mutate(ref) { $0.phase = .done; $0.status = "ready"; $0.fraction = 1 }
+        onDone.removeValue(forKey: ref)?(ref)
     }
 
     /// What went wrong with a pull, in terms a user can act on.

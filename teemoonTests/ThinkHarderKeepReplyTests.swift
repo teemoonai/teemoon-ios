@@ -53,7 +53,7 @@ import Testing
         let settings = AppSettings()
 
         init(_ transport: Transport) throws {
-            container = try ModelContainer(for: ChatThread.self, Message.self,
+            container = try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
             let context = container.mainContext
             thread = ChatThread()
@@ -176,6 +176,8 @@ import Testing
         #expect(transport.sawCancel)
         #expect(transport.lateWrites == 0)
         #expect(rig.llm.output.isEmpty)
-        #expect(rig.contents == ["why is the sky blue", "OLD ANSWER", "and the sunset?"])
+        // reply-machine.json G3: a stopped send keeps its reply row, empty and reading stopped (marker.stopped).
+        #expect(rig.contents == ["why is the sky blue", "OLD ANSWER", "and the sunset?", ""])
+        #expect(rig.thread.sortedMessages.last?.statusRaw == "stopped")
     }
 }

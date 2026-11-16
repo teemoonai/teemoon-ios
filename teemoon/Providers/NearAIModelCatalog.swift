@@ -28,9 +28,17 @@ enum NearAIModelCatalog {
         case teeOwn          // near.ai's own attested enclave
         case teeThirdParty   // attested, third-party hardware (Chutes)
         case proxied         // passthrough to an upstream API — no enclave
+        /// No id rule names it and the catalogue has not said. Claims nothing, and is
+        /// never "ordinary": a missing host degrades the session (gardener #7).
+        case unknown
+
+        /// How lists order the tiers: what teemoon can seal, near.ai's attested third
+        /// party, not yet confirmed, then plain proxies. Every list of tiers uses this,
+        /// so a new tier cannot fall out of one of them.
+        static let displayOrder: [Confidentiality] = [.teeOwn, .teeThirdParty, .unknown, .proxied]
 
         /// Whether a model in this tier can present a verifiable attestation.
-        var isAttestable: Bool { self != .proxied }
+        var isAttestable: Bool { self == .teeOwn || self == .teeThirdParty }
 
         /// ONE VOCABULARY for the tier, so a section header, a row tag and the
         /// model detail page cannot describe the same guarantee three ways.
@@ -41,6 +49,7 @@ enum NearAIModelCatalog {
             case .teeOwn:        return "end-to-end encrypted"
             case .teeThirdParty: return "attested on third-party hardware"
             case .proxied:       return "proxied"
+            case .unknown:       return "not yet confirmed"
             }
         }
     }
@@ -50,8 +59,15 @@ enum NearAIModelCatalog {
     /// loaded. Before then, `classify` provides an id-based fallback.
     private static let tierCache = OSAllocatedUnfairLock(initialState: [String: Confidentiality]())
 
+    /// Whether near.ai's tier list (saved or live) has been recorded since launch. Not cleared by
+    /// `resetTierCache`; a test chooses with `$tierListSeenOverride`.
+    static var tierListSeen: Bool { tierListSeenOverride ?? tierListSeenFlag.withLock { $0 } }
+    @TaskLocal static var tierListSeenOverride: Bool?
+    private static let tierListSeenFlag = OSAllocatedUnfairLock(initialState: false)
+
     static func recordTiers(_ tiers: [String: Confidentiality]) {
         guard !tiers.isEmpty else { return }
+        tierListSeenFlag.withLock { $0 = true }
         tierCache.withLock { cache in
             for (id, tier) in tiers { cache[id.lowercased()] = tier }
         }
@@ -98,6 +114,8 @@ enum NearAIModelCatalog {
         let byID = classify(id)
         if byID == .proxied { return .proxied }
         if let cached = tierCache.withLock({ $0[id.lowercased()] }) { return cached }
+        // Before near.ai's tier list has been seen once, no guess claims own fleet.
+        if byID == .teeOwn, !tierListSeen { return .unknown }
         return byID
     }
 
@@ -138,8 +156,14 @@ enum NearAIModelCatalog {
         // Vendor namespaces near.ai only proxies. `deepseek/…` is proxied,
         // `deepseek-ai/…` is a near.ai node — keep the Python mirror in step.
         if l.hasPrefix("x-ai/") || l.hasPrefix("deepseek/") || l.hasPrefix("typesafe/") { return .proxied }
-        return .teeOwn
+        // Own-fleet only by a namespace near.ai hosts itself. Anything else waits for the
+        // catalogue's owned_by: guessing own-fleet put an e2ee tag on unseen ids.
+        if ownFleetNamespaces.contains(where: { l.hasPrefix($0) }) { return .teeOwn }
+        return .unknown
     }
+
+    /// The namespaces of near.ai's own fleet (keep the Python mirror in step).
+    static let ownFleetNamespaces = ["z-ai/", "zai-org/", "deepseek-ai/", "qwen/", "meta-llama/", "nearai/"]
 
     // Identity/formatting helpers are catalog-generic — see `ModelCatalog`,
     // which every adapter shares. Kept here as forwarders so near.ai call sites
@@ -191,11 +215,7 @@ enum NearAIModelCatalog {
     /// then the plain proxies; newest first inside each tier.
     static func ordered(_ models: [KnownModel]) -> [KnownModel] {
         func rank(_ m: KnownModel) -> Int {
-            switch confidentiality(forID: m.id) {
-            case .teeOwn: return 0
-            case .teeThirdParty: return 1
-            case .proxied: return 2
-            }
+            Confidentiality.displayOrder.firstIndex(of: confidentiality(forID: m.id)) ?? Int.max
         }
         return models.enumerated().sorted { a, b in
             let (ra, rb) = (rank(a.element), rank(b.element))

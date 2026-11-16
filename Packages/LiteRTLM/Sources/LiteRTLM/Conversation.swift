@@ -67,6 +67,9 @@ public final class Conversation: Sendable {
   private let enableResponseFormat: Bool
   private let visualTokenBudget: Int32?
 
+  /// teemoon patch: the id its tool calls carry (`ToolInvocation.managerID`).
+  public var toolManagerID: UUID { toolManager.id }
+
   /// Whether the conversation is alive and ready to be used.
   public var isAlive: Bool {
     return handle != nil

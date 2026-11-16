@@ -214,3 +214,38 @@ struct AddEditProviderModelRequiredKeyTests {
         #expect(store.count(for: .fireworks, apiKey: "key-two") == nil)  // not written
     }
 }
+
+/// A probe for the endpoint the field held a moment ago finished after the
+/// field was edited, and wrote its model list and model into the form — so
+/// save stored the new endpoint with the old server's model.
+@MainActor
+@Suite("AddEditProviderModel stale probe")
+struct AddEditProviderModelStaleProbeTests {
+
+    @Test func aProbeForAnEditedAwayEndpointWritesNothing() async {
+        let gate = AsyncGate()
+        let old = KnownModel(id: "old-server-model", displayName: "old", vendor: "", price: "")
+        let form = AddEditProviderModel(mode: .add)
+        form.scheme = .https
+        form.endpointHost = "old.example.com/v1"
+        form.probeCatalog = EndpointProbe.Catalog(
+            detectKind: { _ in .unknown },
+            listOllama: { _ in .failed(.offline) },
+            listLMStudio: { _ in .failed(.offline) },
+            liveCatalog: { _, _, _, _ in await gate.pass(); return .connected([old]) },
+            loadedOllama: { _ in [] },
+            loadedLMStudio: { _ in [] },
+            validateKey: { _, _ in .otherFailure }
+        )
+        let probe = Task { await form.probe() }
+        await gate.reached()
+        form.endpointHost = "new.example.com/v1"
+        form.endpointEdited("new.example.com/v1")
+        await gate.open()
+        await probe.value
+
+        #expect(form.model.isEmpty, "the new endpoint must not inherit the old server's model")
+        #expect(form.fetchedModels.isEmpty)
+        #expect(form.conn == .idle)
+    }
+}

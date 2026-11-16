@@ -46,6 +46,7 @@ struct ModelBrowserQueryTests {
                             tier: { id in
                                 if id.hasPrefix("own/") { return .teeOwn }
                                 if id.hasPrefix("third/") { return .teeThirdParty }
+                                if id.hasPrefix("new/") { return .unknown }
                                 return .proxied
                             })
     }
@@ -87,9 +88,14 @@ struct ModelBrowserQueryTests {
     @Test func aTieredCatalogueGroupsByTrust() {
         let models = [model("proxy/one", vendor: "V", price: "$3.00/$9.00"),
                       model("own/one", vendor: "V", price: "$1.00/$2.00"),
-                      model("third/one", vendor: "V", price: "$2.00/$4.00")]
+                      model("third/one", vendor: "V", price: "$2.00/$4.00"),
+                      model("new/one", vendor: "V", price: "$1.50/$3.00")]
         let grouped = listing(models, ModelBrowserQuery(), tiered: true)
-        #expect(grouped.sections.map(\.id) == ["teeOwn", "teeThirdParty", "proxied"])
+        // A tier the catalogue has not confirmed is listed under its own header, never dropped
+        // (gardener #7 follow-up: the unknown tier first matched no section).
+        #expect(grouped.sections.map(\.id) == ["teeOwn", "teeThirdParty", "unknown", "proxied"])
+        #expect(grouped.sections.first { $0.id == "unknown" }?.header == "not yet confirmed")
+        #expect(grouped.sections.flatMap(\.rows).count == models.count, "every model is listed")
         // The header says the tier, so the rows do not repeat it.
         #expect(grouped.sections.allSatisfy { $0.rows.allSatisfy { !$0.showsTier } })
         // Ranked, the headers are gone and each row carries its own tag.

@@ -58,7 +58,7 @@ struct ChatGenerationTests {
     @MainActor
     func makeThread(userMessage: String) throws -> (thread: ChatThread, container: ModelContainer) {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: ChatThread.self, Message.self, configurations: config)
+        let container = try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self, configurations: config)
         let context = container.mainContext
         let thread = ChatThread()
         context.insert(thread)
@@ -312,7 +312,7 @@ struct ChatGenerationTests {
         )
         #expect(result.isEmpty)
         #expect(llm.lastError != nil)
-        #expect(llm.lastError?.userMessage.contains("empty response") == true)
+        #expect(llm.lastError?.userMessage.contains("empty answer") == true)
         #expect(llm.lastErrorThreadID == thread.id)
     }
 

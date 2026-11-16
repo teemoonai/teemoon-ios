@@ -9,7 +9,7 @@ struct DataModelTests {
     @MainActor
     private func makeContainer() throws -> ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return try ModelContainer(for: ChatThread.self, Message.self, configurations: config)
+        return try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self, configurations: config)
     }
 
     // MARK: - Message

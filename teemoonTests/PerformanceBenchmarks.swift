@@ -398,7 +398,7 @@ final class PerformanceBenchmarks: XCTestCase {
 
     private func seededThreads(threadCount: Int, messagesPerThread: Int) throws -> (ModelContainer, [ChatThread]) {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: ChatThread.self, Message.self, configurations: config)
+        let container = try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self, configurations: config)
         let ctx = container.mainContext
         let base = Date(timeIntervalSince1970: 1_700_000_000)
         for t in 0..<threadCount {

@@ -15,7 +15,22 @@ struct GenerationActivityChipView: View {
         case sourcesFound(Int)
         /// Shown once one request has had no response headers for `ProviderWait.threshold`.
         case waitingForProvider(String)
+        /// An on-device engine loading, in EngineLoadLine's words.
+        case loadingModel(String)
+        /// The attestation gate holds the send: nothing has left yet.
+        case waitingForVerification
+
+        init(_ phase: PendingReplyPhase) {
+            switch phase {
+            case .waitingForVerification: self = .waitingForVerification
+            case .thinking: self = .thinking
+            case .thinkingHarder: self = .thinkingHarder
+            case .loadingModel(let line): self = .loadingModel(line)
+            }
+        }
     }
+
+    static let waitingForVerificationLabel = "waiting for verification…"
 
     let state: ActivityState
     var elapsedTime: TimeInterval?
@@ -23,7 +38,7 @@ struct GenerationActivityChipView: View {
 
     private var isActive: Bool {
         switch state {
-        case .thinking, .thinkingHarder, .searching, .waitingForProvider: return true
+        case .thinking, .thinkingHarder, .searching, .waitingForProvider, .loadingModel, .waitingForVerification: return true
         case .sourcesFound: return false
         }
     }
@@ -34,25 +49,30 @@ struct GenerationActivityChipView: View {
         case .thinkingHarder: return "brain"
         case .searching, .sourcesFound: return "globe"
         case .waitingForProvider: return "hourglass"
+        case .loadingModel: return "cpu"
+        case .waitingForVerification: return "lock.shield"
         }
     }
 
-    private var label: String {
+    private var label: String { Self.label(for: state, elapsed: elapsedTime) }
+
+    static func label(for state: ActivityState, elapsed elapsedTime: TimeInterval?) -> String {
         switch state {
         case .thinking:
-            if let t = elapsedTime, t >= 1 {
-                return "thinking... \(Int(t))s"
-            }
-            return "thinking..."
+            return ThinkingClock.liveLabel(elapsed: elapsedTime)
         case .thinkingHarder:
-            if let t = elapsedTime, t >= 1 { return "thinking harder... \(Int(t))s" }
-            return "thinking harder..."
-        case .searching: return "searching..."
+            if let t = elapsedTime, t >= 1 { return "thinking harder… \(Int(t))s" }
+            return "thinking harder…"
+        case .searching: return "searching…"
         case .sourcesFound(let n): return "\(n) source\(n == 1 ? "" : "s")"
         case .waitingForProvider(let name):
             return ProviderWait.label(providerName: name, seconds: Int(elapsedTime ?? 0))
+        case .loadingModel(let line): return line
+        case .waitingForVerification: return waitingForVerificationLabel
         }
     }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 4) {
@@ -61,7 +81,7 @@ struct GenerationActivityChipView: View {
                 // so the transition crossfades rather than snapping.
                 .id(iconName)
                 .font(.caption2)
-                .transition(.opacity.combined(with: .scale(0.8)))
+                .transition(Motion.grow(from: 0.8, reduceMotion: reduceMotion))
             Text(label)
                 .font(.caption)
                 .fontWeight(.medium)
@@ -81,7 +101,7 @@ struct GenerationActivityChipView: View {
         .foregroundStyle(.secondary)
         .background(Capsule().fill(.fill))
         // One element with a stable id so a UI test can ask "is the chip on
-        // screen right now" without matching on label text — "thinking..."
+        // screen right now" without matching on label text — "thinking…"
         // also appears in the collapsible reasoning block above, and matching
         // that would report the chip as present when it isn't.
         .accessibilityElement(children: .combine)
@@ -117,6 +137,7 @@ struct GenerationActivityChipView: View {
         GenerationActivityChipView(state: .sourcesFound(1))
         GenerationActivityChipView(state: .sourcesFound(5))
         GenerationActivityChipView(state: .waitingForProvider("fireworks"), elapsedTime: 12)
+        GenerationActivityChipView(state: .waitingForVerification, elapsedTime: 4)
     }
     .padding()
     .frame(maxWidth: .infinity, alignment: .leading)

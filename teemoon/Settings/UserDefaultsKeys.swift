@@ -15,6 +15,8 @@ enum UserDefaultsKey {
     static let currentProviderID = "currentProviderID"
     static let braveGroundingEnabled = "braveGroundingEnabled"
     static let developerModeEnabled = "developerModeEnabled"
+    /// Developer mode's reasoning level per model: [API host | model id: level] (docs/REASONING_LEVEL.md).
+    static let reasoningLevels = "reasoningLevels"
     static let providers = "providers"
     static let systemPromptVersion = "systemPromptVersion"
     /// Last N Where-sheet picks (provider id + model id), JSON-encoded.

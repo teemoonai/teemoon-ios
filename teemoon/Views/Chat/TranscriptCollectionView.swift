@@ -377,11 +377,13 @@ final class PinningCollectionView: UICollectionView {
         // 890-917ms against a ~250ms keyboard. When the previous pass also
         // resized we are already riding a real animation, so snap and let it
         // carry us.
-        if resized, !resizedLastPass, abs(delta) > FollowGlide.startThreshold {
+        // Reduce Motion: no glides; the explicit pin below snaps instead.
+        let glides = !UIAccessibility.isReduceMotionEnabled
+        if glides, resized, !resizedLastPass, abs(delta) > FollowGlide.startThreshold {
             startGlide(to: target, duration: Self.resizeGlideDuration, eased: true)
             return
         }
-        if FollowGlide.shouldStart(delta: delta, mode: mode) {
+        if glides, FollowGlide.shouldStart(delta: delta, mode: mode) {
             if FollowGlide.isJump(delta: delta) {
                 startGlide(to: target, duration: Self.jumpGlideDuration, eased: true)
             } else {
@@ -616,6 +618,8 @@ final class TranscriptViewController: UIViewController {
     /// cover cells and the streaming host the same way.
     private let topFadeView = GlassEdgeFadeView(edge: .top)
     private let bottomFadeView = GlassEdgeFadeView(edge: .bottom)
+    private let panelFrostView = GlassEdgeFadeView(edge: .bottom)
+    /// Under the composer panel's glass: an even frost, shaped like the panel (the band has a hole there).
     var chrome = ChatChrome(bottom: ChatFadeBand(chipTop: 16, chipBottom: 60, insetHeight: 132)) {
         didSet {
             bottomChromeInset = chrome.bottom.insetHeight
@@ -759,6 +763,15 @@ final class TranscriptViewController: UIViewController {
     private func installFadeOverlays() {
         view.addSubview(topFadeView)
         view.addSubview(bottomFadeView)
+        view.addSubview(panelFrostView)
+        panelFrostView.layer.cornerRadius = ChatGlassFade.panelCornerRadius
+        panelFrostView.layer.cornerCurve = .continuous
+        panelFrostView.clipsToBounds = true
+        panelFrostView.isHidden = true
+        NotificationCenter.default.addObserver(forName: UIAccessibility.reduceTransparencyStatusDidChangeNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateFadeOverlays() }
+        }
     }
 
     /// Everything `updateFadeOverlays` reads. Unchanged inputs, no work.
@@ -767,6 +780,8 @@ final class TranscriptViewController: UIViewController {
         var titleMaxY: CGFloat
         var chrome: ChatChrome
         var home: CGFloat
+        var reduceTransparency: Bool
+        var accessibilityText: Bool
     }
     private var lastFadeInputs: FadeOverlayInputs?
 
@@ -790,7 +805,9 @@ final class TranscriptViewController: UIViewController {
         // while an offset animates.
         let measuredTitle = measuredTitleMaxY()
         let inputs = FadeOverlayInputs(bounds: bounds, titleMaxY: measuredTitle,
-                                       chrome: chrome, home: windowBottomInset)
+                                       chrome: chrome, home: fadeHomeInset,
+                                       reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+                                       accessibilityText: traitCollection.preferredContentSizeCategory.isAccessibilityCategory)
         guard inputs != lastFadeInputs else { return }
         lastFadeInputs = inputs
         let titleH = chrome.topChromeHeight(titleMaxYInCanvas: measuredTitle)
@@ -807,8 +824,17 @@ final class TranscriptViewController: UIViewController {
         let bottomH = band.overlayHeight(homeIndicator: home)
         bottomFadeView.frame = CGRect(x: 0, y: bounds.height - bottomH,
                                       width: bounds.width, height: bottomH)
-        bottomFadeView.setStops(ChatGlassFade.bottomStops(
-            ramp: band.ramp, hidden: band.hidden, home: home))
+        bottomFadeView.setStops(ChatGlassFade.bottomStops(ramp: band.ramp, hidden: band.hidden, home: home))
+        let hole = ChatGlassFade.panelHole(overlayWidth: bounds.width, band: band,
+                                           reduceTransparency: inputs.reduceTransparency)
+        bottomFadeView.setHole(hole, cornerRadius: ChatGlassFade.panelCornerRadius)
+        if let hole, let f = ChatGlassFade.panelFrost(accessibilityText: inputs.accessibilityText) {
+            panelFrostView.isHidden = false
+            panelFrostView.frame = hole.offsetBy(dx: 0, dy: bottomFadeView.frame.minY)
+            panelFrostView.setStops([.init(location: 0, blur: f.blur, dim: f.dim), .init(location: 1, blur: f.blur, dim: f.dim)])
+        } else {
+            panelFrostView.isHidden = true
+        }
     }
 
     // MARK: Snapshot
@@ -1116,6 +1142,15 @@ final class TranscriptViewController: UIViewController {
     /// bounds, which do extend under the indicator.
     private var windowBottomInset: CGFloat {
         collectionView.window?.safeAreaInsets.bottom ?? 0
+    }
+
+    /// The home indicator as far as it lies in this view's bounds: what the bottom fade reserves under the panel.
+    /// Not `windowBottomInset`: with the keyboard up the view ends at the keyboard and that put the band 34 pt high.
+    private var fadeHomeInset: CGFloat {
+        guard let window = view.window else { return 0 }
+        let bottom = view.convert(view.bounds, to: window).maxY
+        return ChatGlassFade.homeIndicatorInView(safeAreaBottom: window.safeAreaInsets.bottom,
+                                                 gapBelowView: window.bounds.height - bottom)
     }
 
     /// Bottom of the nav title in this view's coordinates.
@@ -1506,7 +1541,7 @@ final class TranscriptViewController: UIViewController {
     /// unanimated — it rides the keyboard's own animation via the inset.
     func scrollToEnd(animated: Bool = false) {
         guard !interrupted else { return }
-        if animated {
+        if animated, !UIAccessibility.isReduceMotionEnabled {
             settleDeadline = 0
             collectionView.layoutIfNeeded()
             let target = collectionView.maxContentOffsetY
@@ -1929,6 +1964,7 @@ private final class GlassEdgeFadeView: UIView {
         fadeMask.frame = bounds
         blurMask.frame = bounds
         dim.frame = bounds
+        updateHoleMask()
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -1937,6 +1973,28 @@ private final class GlassEdgeFadeView: UIView {
     }
 
     private var cachedStops: [ChatGlassFade.Stop] = []
+    private var hole: (rect: CGRect, radius: CGFloat)?
+    private let holeMask = CAShapeLayer()
+
+    /// Cuts the composer panel out of the band (its own frost sits there); nil: no hole.
+    func setHole(_ rect: CGRect?, cornerRadius: CGFloat) {
+        hole = rect.map { ($0, cornerRadius) }
+        updateHoleMask()
+    }
+
+    private func updateHoleMask() {
+        guard let hole else { layer.mask = nil; return }
+        let path = UIBezierPath(rect: bounds)
+        path.append(UIBezierPath(roundedRect: hole.rect, cornerRadius: hole.radius))
+        // A bare mask layer animates its path implicitly: the hole would trail the panel through a keyboard move.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        holeMask.path = path.cgPath
+        holeMask.fillRule = .evenOdd
+        holeMask.frame = bounds
+        CATransaction.commit()
+        layer.mask = holeMask
+    }
 
     func setStops(_ stops: [ChatGlassFade.Stop]) {
         cachedStops = stops

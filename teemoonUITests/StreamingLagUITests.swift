@@ -76,7 +76,7 @@ final class StreamingLagUITests: XCTestCase {
         let app = try self.app(turns: turns)
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")
@@ -137,7 +137,7 @@ final class StreamingLagUITests: XCTestCase {
         let app = try self.app(turns: 200)
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30))
         composer.tap()
         composer.typeText("go")

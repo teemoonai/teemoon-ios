@@ -24,6 +24,10 @@ class Message {
     var sourcesJSON: String? = nil
     /// Whether this message was sent/received with application-layer E2EE.
     var isE2EE: Bool = false
+    /// The reply machine's persisted status (V3). nil = complete; rows written before V3 read as complete.
+    var statusRaw: String? = nil
+    /// "pending|<recordKey>" or "failed|<recordKey>" when sent before the record's checks confirmed (V3); nil otherwise.
+    var sentBeforeConfirmed: String? = nil
 
     @Relationship(inverse: \Thread.messages) var thread: Thread?
 

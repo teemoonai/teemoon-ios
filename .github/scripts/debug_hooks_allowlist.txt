@@ -1,0 +1,146 @@
+# Debug/test hooks that exist in the published source, one line per occurrence.
+# `path: trimmed line`; identical lines repeat. Written by
+# check_no_debug_hooks.py --update — a new entry here is a pm decision.
+Vendor/textual/Sources/Textual/Internal/Helpers/Bundle.swift: #if DEBUG
+teemoon/App/ContentView.swift: #if DEBUG
+teemoon/App/ContentView.swift: let override = env["UITEST_SEED_MODEL"] ?? (seeded.isNearAI ? env["UITEST_SEED_NEARAI_MODEL"] : nil)
+teemoon/App/ContentView.swift: guard !ProcessInfo.processInfo.arguments.contains("--uitesting") else { return }
+teemoon/App/ContentView.swift: let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
+teemoon/App/ContentView.swift: if let storeURL = TeemoonApp.conversationStoreURL, !isUITesting {
+teemoon/App/ContentView.swift: #if DEBUG
+teemoon/App/ContentView.swift: if isUITesting,
+teemoon/App/ContentView.swift: let json = ProcessInfo.processInfo.environment["UITEST_SEED_SETUP"],
+teemoon/App/ContentView.swift: if isUITesting,
+teemoon/App/ContentView.swift: let presetName = env["UITEST_SEED_PRESET"]
+teemoon/App/ContentView.swift: ?? (env["UITEST_SEED_NEARAI_MODEL"] != nil ? "nearai" : nil)
+teemoon/App/ContentView.swift: if env["UITEST_SEED_NO_KEY"] == "1" {
+teemoon/App/ContentView.swift: } else if env["UITEST_SEED_ATTESTATION"] != nil {
+teemoon/App/ContentView.swift: if isUITesting, Self.didSeedForUITests,
+teemoon/App/ContentView.swift: let endpoint = ProcessInfo.processInfo.environment["UITEST_SEED_ALSO_LOCAL_ENDPOINT"],
+teemoon/App/ContentView.swift: let model = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MODEL"] ?? "local-model"
+teemoon/App/ContentView.swift: if isUITesting,
+teemoon/App/ContentView.swift: let endpoint = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_ENDPOINT"] {
+teemoon/App/ContentView.swift: let model = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MODEL"] ?? "local-model"
+teemoon/App/ContentView.swift: var seeded = Provider(name: ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_NAME"] ?? "local",
+teemoon/App/ContentView.swift: if let max = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MAX_MESSAGES"].flatMap(Int.init) {
+teemoon/App/ContentView.swift: if let other = ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_MODEL_B"],
+teemoon/App/ContentView.swift: if ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_SEES_IMAGES"] == "1" {
+teemoon/App/ContentView.swift: if ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_KIND"] == "ollama" {
+teemoon/App/ContentView.swift: if isUITesting,
+teemoon/App/ContentView.swift: let repoID = ProcessInfo.processInfo.environment["UITEST_SEED_ONDEVICE_MODEL"] {
+teemoon/App/ContentView.swift: if isUITesting,
+teemoon/App/ContentView.swift: ProcessInfo.processInfo.environment["UITEST_SEED_GROUNDING"] == "1" {
+teemoon/App/ContentView.swift: if isUITesting, ProcessInfo.processInfo.environment["UITEST_SEED_GROUNDING"] == "placeholder" {
+teemoon/App/ContentView.swift: if isUITesting {
+teemoon/App/ContentView.swift: if isUITesting, !["1", "placeholder"].contains(ProcessInfo.processInfo.environment["UITEST_SEED_GROUNDING"] ?? "") {
+teemoon/App/NetworkPathObserver.swift: #if DEBUG
+teemoon/App/UITestHostSecrets.swift: #if DEBUG
+teemoon/App/UITestHostSecrets.swift: ProcessInfo.processInfo.environment["UITEST_NO_HOST_KEYS"] == "1"
+teemoon/App/UITestHostSecrets.swift: let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"]
+teemoon/App/UITestSetupSeed.swift: #if DEBUG
+teemoon/App/UITestStoreSeeding.swift: #if DEBUG
+teemoon/App/UITestStoreSeeding.swift: if let raw = ProcessInfo.processInfo.environment["UITEST_SEED_LONG_THREAD"],
+teemoon/App/UITestStoreSeeding.swift: if ProcessInfo.processInfo.environment["UITEST_SEED_SHAPED_THREAD"] == "bundled",
+teemoon/App/UITestStoreSeeding.swift: guard ProcessInfo.processInfo.environment["UITEST_SEED_THREADS"] == "1" else { return }
+teemoon/App/teemoonApp.swift: #if DEBUG
+teemoon/App/teemoonApp.swift: if !ProcessInfo.processInfo.arguments.contains("--uitesting") {
+teemoon/App/teemoonApp.swift: if ProcessInfo.processInfo.arguments.contains("--uitesting"),
+teemoon/App/teemoonApp.swift: ProcessInfo.processInfo.environment["UITEST_DEVELOPER_MODE"] == "1" {
+teemoon/App/teemoonApp.swift: #if DEBUG
+teemoon/App/teemoonApp.swift: #if DEBUG
+teemoon/App/teemoonApp.swift: if ProcessInfo.processInfo.arguments.contains("--uitesting"),
+teemoon/App/teemoonApp.swift: ProcessInfo.processInfo.environment["UITEST_RESET_LOCAL_MODELS"] == "1" {
+teemoon/App/teemoonApp.swift: if ProcessInfo.processInfo.arguments.contains("--uitesting"),
+teemoon/App/teemoonApp.swift: let repoID = ProcessInfo.processInfo.environment["UITEST_SEED_STANDIN_WEIGHTS"],
+teemoon/App/teemoonApp.swift: #if DEBUG
+teemoon/App/teemoonApp.swift: if ProcessInfo.processInfo.arguments.contains("--uitesting") {
+teemoon/App/teemoonApp.swift: if ProcessInfo.processInfo.environment["UITEST_COPY_REAL_STORE"] == "1" {
+teemoon/App/teemoonApp.swift: #if DEBUG
+teemoon/App/teemoonApp.swift: guard arguments.contains("--uitesting"), let kind = environment["UITEST_SEED_CONFIG"] else { return nil }
+teemoon/App/teemoonApp.swift: #if DEBUG
+teemoon/App/teemoonApp.swift: return arguments.contains("--uitesting")
+teemoon/App/teemoonApp.swift: #if DEBUG && os(iOS)
+teemoon/App/teemoonApp.swift: if let tour = DesignTour.current {
+teemoon/Confidential/AttestationService.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession+Refresh.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession+Refresh.swift: if let seeded = Self.seededState, seeded.suppressLiveAttestation {
+teemoon/Confidential/ConfidentialSession+Verdict.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession+Verdict.swift: if let seeded = Self.seededState, seeded.mismatchCount > 0 { return seeded.mismatchCount }
+teemoon/Confidential/ConfidentialSession+Verdict.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession+Verdict.swift: if let seeded = Self.seededState { return seeded.state }
+teemoon/Confidential/ConfidentialSession+Verdict.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession+Verdict.swift: if let seeded = Self.seededState { return seeded.hardFailure }
+teemoon/Confidential/ConfidentialSession.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession.swift: if Self.seededState?.suppressLiveAttestation == true {
+teemoon/Confidential/ConfidentialSession.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession.swift: static var seededState: SeededAttestation? {
+teemoon/Confidential/ConfidentialSession.swift: guard ProcessInfo.processInfo.arguments.contains("--uitesting"),
+teemoon/Confidential/ConfidentialSession.swift: let raw = ProcessInfo.processInfo.environment["UITEST_SEED_ATTESTATION"]
+teemoon/Confidential/ConfidentialSession.swift: #if DEBUG
+teemoon/Confidential/ConfidentialSession.swift: return arguments.contains("-DesignTour")
+teemoon/Inference/BraveWebSearchTool.swift: #if DEBUG
+teemoon/Inference/BraveWebSearchTool.swift: if info.arguments.contains("--uitesting"),
+teemoon/Inference/BraveWebSearchTool.swift: let override = info.environment["UITEST_BRAVE_ENDPOINT"],
+teemoon/Inference/ChatGeneration+Stream.swift: #if DEBUG
+teemoon/Inference/ChatGeneration+Stream.swift: #if DEBUG
+teemoon/Inference/ChatGeneration+Stream.swift: #if DEBUG
+teemoon/Inference/ChatGeneration+Stream.swift: #if DEBUG
+teemoon/Inference/HTTPTransport.swift: #if DEBUG
+teemoon/Inference/HTTPTransport.swift: #if DEBUG
+teemoon/Inference/HTTPTransport.swift: #if DEBUG
+teemoon/Inference/LiteRTTransport.swift: #if DEBUG
+teemoon/Inference/ReasoningEffort.swift: #if DEBUG
+teemoon/Inference/ReasoningEffort.swift: #if DEBUG
+teemoon/Providers/LocalModelCatalog.swift: #if DEBUG
+teemoon/Providers/LocalModelCatalog.swift: if let override = ProcessInfo.processInfo.environment["UITEST_HUB_BASE_URL"],
+teemoon/Settings/AppSettings.swift: #if DEBUG
+teemoon/Support/MainThreadHangReporter.swift: #if DEBUG
+teemoon/Views/Chat/ConversationView.swift: #if DEBUG
+teemoon/Views/Chat/ConversationView.swift: #if DEBUG
+teemoon/Views/Chat/ConversationView.swift: #if DEBUG
+teemoon/Views/Chat/DebugHeaderRedaction.swift: private static let active = ProcessInfo.processInfo.arguments.contains("--uitesting")
+teemoon/Views/Chat/MarkdownParseCache.swift: #if DEBUG
+teemoon/Views/Chat/MarkdownParseCache.swift: #if DEBUG
+teemoon/Views/Chat/ScrollTrace.swift: #if DEBUG
+teemoon/Views/Chat/ScrollTrace.swift: #if DEBUG
+teemoon/Views/Chat/ScrollTrace.swift: #if DEBUG
+teemoon/Views/Chat/ScrollTrace.swift: #if DEBUG
+teemoon/Views/Chat/StreamingMessageView.swift: #if DEBUG
+teemoon/Views/Chat/StreamingMessageView.swift: #if DEBUG
+teemoon/Views/Chat/StreamingMessageView.swift: #if DEBUG
+teemoon/Views/Chat/StreamingMessageView.swift: #if DEBUG
+teemoon/Views/Chat/StreamingMessageView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
+teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG && (os(iOS) || os(visionOS))
+teemoon/Views/Chat/TrustLadderView.swift: _rung = State(initialValue: initialRung ?? DesignTour.initialRung ?? .everyday)
+teemoon/Views/Chat/TrustLadderView.swift: let target = DesignTour.scrollTarget ?? initialScroll ?? (DesignTour.scrollToBottom ? "known code" : nil)
+teemoon/Views/Chat/VerificationRunView.swift: guard DesignTour.scrollToBottom else { return }
+teemoon/Views/Chat/VerificationRunView.swift: @State private var isExpanded = DesignTour.expandAll
+teemoon/Views/DesignTour.swift: enum DesignTour: String {
+teemoon/Views/DesignTour.swift: #if DEBUG
+teemoon/Views/DesignTour.swift: static let current: DesignTour? = {
+teemoon/Views/DesignTour.swift: guard let i = args.firstIndex(of: "-DesignTour"),
+teemoon/Views/DesignTour.swift: return DesignTour(rawValue: args[i + 1])
+teemoon/Views/DesignTour.swift: static let expandAll = ProcessInfo.processInfo.arguments.contains("-DesignTourExpandAll")
+teemoon/Views/DesignTour.swift: static let scrollToBottom = ProcessInfo.processInfo.arguments.contains("-DesignTourBottom")
+teemoon/Views/DesignTour.swift: guard let i = args.firstIndex(of: "-DesignTourScrollTo"),
+teemoon/Views/DesignTour.swift: guard let i = args.firstIndex(of: "-DesignTourRung"),
+teemoon/Views/DesignTour.swift: static let current: DesignTour? = nil
+teemoon/Views/DesignTour.swift: #if DEBUG
+teemoon/Views/Settings/DownloadingModelRow.swift: #if DEBUG

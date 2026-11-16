@@ -40,7 +40,7 @@ final class MacUserFlowUITests: XCTestCase {
     }
 
     private var composer: XCUIElement {
-        app.textFields["chat.composer"]
+        app.textViews["chat.composer"]
     }
 
     /// macOS PERSISTS SPLIT-VIEW STATE ACROSS LAUNCHES, so a test that needs the

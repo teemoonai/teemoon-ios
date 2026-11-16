@@ -65,6 +65,15 @@ struct ProviderCatalogValidationTests {
         }
     }
 
+    /// near.ai's live attested third-party ids on 2026-11-14 (cloud-api.near.ai/v1/models): offline, with no list
+    /// loaded, none reads as own-fleet (an E2EE tag). z-ai/glm-5.3 sits in an own-fleet namespace and was missing from
+    /// the shipped set until the 1.1.0 price refresh; update_providers.py is the live check for the next one.
+    @Test func todaysAttestedThirdPartyIdsAreNeverOwnFleetOffline() {
+        for id in ["deepseek/deepseek-v3.2", "moonshotai/kimi-k2.6", "moonshotai/kimi-k3", "z-ai/glm-5.3"] {
+            #expect(NearAIModelCatalog.classify(id) == .teeThirdParty, "\(id)")
+        }
+    }
+
     /// Every published host is an https near.ai `/v1` base. The directory picks
     /// where sealed prompts go, so a row that is anything else is dropped.
     @Test func directHostsAreWellFormed() throws {

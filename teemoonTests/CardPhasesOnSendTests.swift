@@ -26,7 +26,7 @@ import Testing
     }
 
     @Test func aPlainSendHasPhasesAndACacheFigure() async throws {
-        let container = try ModelContainer(for: ChatThread.self, Message.self,
+        let container = try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let store = ProviderStore(inMemory: true)
         let provider = Provider(name: "p", endpoint: "http://127.0.0.1:9/v1", model: "m", requiresAPIKey: false)
@@ -67,7 +67,7 @@ import Testing
                 return out
             }
         }
-        let container = try ModelContainer(for: ChatThread.self, Message.self,
+        let container = try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let store = ProviderStore(inMemory: true)
         let provider = Provider(name: "p", endpoint: "http://127.0.0.1:9/v1", model: "m", requiresAPIKey: false)

@@ -53,17 +53,39 @@ extension ChatGeneration {
     /// Gated on the key being ABSENT. A configured provider always gets the
     /// tool: declining an offer to set up search says nothing about whether
     /// search should run once it exists.
+    ///
+    /// ON DEVICE the model pays for the schema in prefill, so (the maintainer, 2026-10-28): a key with the web chip off
+    /// sends nothing, and keyless sends `WebSearchOfferTool`, the offer trigger with `query` only.
     func makeGroundingTools(
         provider: Provider,
         groundingAPIKey: String?,
-        threadID: UUID
+        searchTurnedOff: Bool = false,
+        threadID: UUID,
+        today: String = DisclosurePolicy(tier: .private).toolDay(Date())
     ) -> [any Tool] {
         let offerDeclined = declinedOfferThreadIDs.contains(threadID)
         let keyless = (groundingAPIKey ?? "").isEmpty
         guard !provider.capabilities.contains(.builtInGrounding),
               provider.modelSupportsTools,
-              !(keyless && offerDeclined)
+              !(keyless && offerDeclined),
+              !(provider.isLocal && searchTurnedOff)
         else { return [] }
+        let token = turnToken
+        let onUnconfiguredSearch: (String) -> Void = { [weak self] query in
+            Task { @MainActor [weak self] in
+                guard self?.turnToken == token else { return }   // a stopped turn's search offer
+                // FIRST query only. A model that asks twice wanted the web
+                // once; two cards for one turn reads as a malfunction.
+                guard let self, self.unconfiguredSearchQuery == nil else { return }
+                self.unconfiguredSearchQuery = query
+                self.unconfiguredSearchThreadID = threadID
+            }
+        }
+        if provider.isLocal && keyless {
+            var offer = WebSearchOfferTool()
+            offer.onUnconfiguredSearch = onUnconfiguredSearch
+            return [offer]
+        }
 
         let groundingKey = groundingAPIKey ?? ""
         // Every provider gets the FULL grounding payload, self-hosted or not.
@@ -95,16 +117,8 @@ extension ChatGeneration {
         // On-device models pay for prefill of these results themselves, and
         // that cost is superlinear (10 sources = 13s on an iPhone 16 Pro vs
         // 3.6s for 5). See GroundingBudget.onDeviceURLCap.
-        var searchTool = BraveWebSearchTool(apiKey: groundingKey, onDevice: provider.isLocal)
-        searchTool.onUnconfiguredSearch = { [weak self] query in
-            Task { @MainActor [weak self] in
-                // FIRST query only. A model that asks twice wanted the web
-                // once; two cards for one turn reads as a malfunction.
-                guard let self, self.unconfiguredSearchQuery == nil else { return }
-                self.unconfiguredSearchQuery = query
-                self.unconfiguredSearchThreadID = threadID
-            }
-        }
+        var searchTool = BraveWebSearchTool(apiKey: groundingKey, onDevice: provider.isLocal, today: today)
+        searchTool.onUnconfiguredSearch = onUnconfiguredSearch
         return [searchTool]
     }
 }

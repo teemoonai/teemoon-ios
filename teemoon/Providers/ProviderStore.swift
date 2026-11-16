@@ -210,6 +210,39 @@ final class ProviderStore {
         currentProviderID = updated.id.uuidString
     }
 
+    /// A fresh `/models` answer is what each equipped model on that server can do now. Equipping took a
+    /// copy that nothing read again, so a model later listed with image input stayed "can't see images".
+    /// A row the list leaves undescribed (nil) keeps what it knew.
+    func adoptCapabilities(from models: [KnownModel], forServer serverID: UUID) {
+        let fresh = Dictionary(models.compactMap { m in m.capabilities.map { (m.id, $0) } },
+                               uniquingKeysWith: { first, _ in first })
+        guard !fresh.isEmpty else { return }
+        var snapshot = config.snapshot
+        var rowsChanged = false
+        for i in snapshot.equipped.indices where snapshot.equipped[i].serverID == serverID {
+            if let caps = fresh[snapshot.equipped[i].modelID], snapshot.equipped[i].capabilities != caps {
+                snapshot.equipped[i].capabilities = caps
+                rowsChanged = true
+            }
+        }
+        if rowsChanged { config.write(snapshot) }
+        if let i = providers.firstIndex(where: { $0.id == serverID }),
+           let caps = fresh[providers[i].model], providers[i].modelCapabilities != caps {
+            providers[i].modelCapabilities = caps
+        }
+    }
+
+    /// Keeps equipped capabilities on each server's saved list: once now (a list saved before this ran is
+    /// already newer than the rows), then on every list recorded.
+    func followCapabilities(of catalogue: LiveCatalogStore) {
+        catalogue.onRecorded = { [weak self] provider, models in
+            self?.adoptCapabilities(from: models, forServer: provider.id)
+        }
+        for provider in providers {
+            adoptCapabilities(from: catalogue.models(for: provider, apiKey: credential(for: provider)), forServer: provider.id)
+        }
+    }
+
     /// What the config knows a model can do, or nil when it has never been
     /// fetched for that model.
     func capabilities(ofModel modelID: String, on serverID: UUID) -> ModelCapabilities? {

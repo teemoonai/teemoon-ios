@@ -31,7 +31,7 @@ final class OnePageFollowProbeUITests: XCTestCase {
         app.launchEnvironment["UITEST_SEED_LOCAL_MODEL"] = "fake-model"
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         composer.tap()
         composer.typeText("go")
@@ -60,7 +60,7 @@ final class OnePageFollowProbeUITests: XCTestCase {
         app.launchEnvironment["UITEST_SEED_LOCAL_MODEL"] = "fake-model"
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         composer.tap()
         composer.typeText("go")

@@ -140,6 +140,9 @@ struct ProviderStoreTests {
 
 @Suite("ConfidentialSession")
 struct ConfidentialSessionTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     /// A verifier handle that never answers within the test.
     private func neverAnswers() -> Task<Void, Never> {
@@ -267,6 +270,33 @@ struct ConfidentialSessionTests {
                                                  verdictsPending: session.verdictsPending) != nil)
     }
 
+    /// F2 (TLA+ model, 2026-11-06): a record with GPU evidence followed by one without left the cancelled
+    /// NVIDIA handle behind, so verdictsPending read true for the new record's whole life: the chip stayed
+    /// "verifying" and every send waited out the settle and asked.
+    @Test @MainActor func aRecordWithoutGPUEvidenceAfterOneWithItLeavesNothingPending() async {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.lastRequestUsedE2EE = true
+        #expect(session.attestationState == .ok, "precondition: the preview record verifies")
+
+        var withGPU = AttestationRecord.preview
+        withGPU.nvidiaPayload = "{\"evidence_list\":[]}"
+        session.verifyGPU(for: withGPU)
+        #expect(session.verdictsPending, "precondition: record A's NVIDIA check is in flight")
+
+        var withoutGPU = AttestationRecord.preview
+        withoutGPU.nvidiaPayload = nil
+        session.verifyGPU(for: withoutGPU)
+        #expect(!session.verdictsPending, "record B has no NVIDIA check to wait for")
+        #expect(session.attestationState != .verifying)
+
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(!session.verdictsPending, "the cancelled check for record A must not hold record B")
+        #expect(session.gpuAttestation == nil)
+        #expect(session.attestationState == .ok)
+    }
+
     /// The simulator, 2026-09-12: "end-to-end encrypted" at 1.4 s, "image
     /// unpublished" at 4.5 s. A sealed session read green while its image
     /// provenance was still being fetched; now it reads verifying until the
@@ -292,6 +322,141 @@ struct ConfidentialSessionTests {
         // An inconclusive pass leaves no result but does settle: not verifying forever.
         session.imageProvenance = nil
         #expect(session.attestationState == .ok)
+    }
+
+    /// T1 (pm's state-machine sweep, 2026-11-06; also in 1.0.6): the chip went green while DCAP, the GPU
+    /// check or TLS was still running — only provenance had a verifying path. The send gate was never wrong
+    /// (it asks `verdictsPending`); the screens were. A pending hard verdict reads as verifying everywhere.
+    @Test @MainActor func aPendingHardVerdictNeverReadsAsVerified() {
+        for pending in ["dcap", "gpu", "tls"] {
+            let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+            session.attestationTask?.cancel()
+            session.attestation = .preview
+            session.lastRequestUsedE2EE = true
+            session.imageProvenance = .allVerified(verified: [], thirdParty: [])
+            session.provenanceSettled = true
+            #expect(session.attestationState == .ok, "precondition: the preview record verifies")
+            switch pending {
+            case "dcap": session.dcapTask = neverAnswers()
+            case "gpu": session.nrasTask = neverAnswers()
+            default: session.tlsTask = neverAnswers()
+            }
+            #expect(session.verdictsPending)
+            #expect(session.attestationState == .verifying, "\(pending) in flight read as \(session.attestationState)")
+            #expect(session.sendPolicy == .allow, "the gate's own wait is unchanged")
+            let summary = AttestationSummary(
+                attestation: session.attestation, state: session.attestationState, timedOut: false,
+                provider: session.activeProvider, lastRequestUsedE2EE: true, lastE2EEFailReason: nil,
+                verifiedResponseCount: 0, mismatchedResponseCount: 0, attestationFetchFailed: false,
+                imageProvenance: session.imageProvenance, dcapVerification: nil)
+            #expect(summary.headerSeverity != .ok)
+            #expect(!summary.pillars.contains { $0.state == .verified && $0.checks.contains { $0.state == .pending } })
+            session.dcapTask?.cancel(); session.nrasTask?.cancel(); session.tlsTask?.cancel()
+        }
+    }
+
+    /// Found in the T1 capture (2026-11-06): with an unpublished image (a GitHub 404, which asks nothing at the
+    /// gate) the hero read "encrypted — one image unpublished · verified just now" while DCAP was still running.
+    @Test @MainActor func anUnpublishedImageDoesNotSkipThePendingHardwareChecks() {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.lastRequestUsedE2EE = true
+        let ref = ProvenanceService.ImageRef(image: "nearaidev/compose-manager-launcher", digest: String(repeating: "a", count: 64))
+        session.imageProvenance = .incomplete(verified: [], failures: [.init(ref: ref, reason: .unverified(.fetchFailed("HTTP 404")))],
+                                              thirdParty: [])
+        session.provenanceSettled = true
+        #expect(session.imageProvenance?.isUnpublishedOnly == true, "precondition")
+        #expect(session.attestationState == .degraded, "precondition: unpublished-only reads orange once verified")
+        session.dcapTask = neverAnswers()
+        defer { session.dcapTask?.cancel() }
+        #expect(session.attestationState == .verifying)
+    }
+
+    /// T1 knock-on (android, 2026-11-06): the expert GPU row read "GPU node unreachable — verified via gateway"
+    /// beside its spinner while NVIDIA hadn't answered. Pending says it is checking.
+    @Test func theGPURowSaysCheckingUntilNVIDIAAnswers() {
+        func summary(_ nras: NRASVerification?) -> AttestationSummary {
+            AttestationSummary(attestation: .preview, state: .verifying, timedOut: false, provider: nil,
+                               lastRequestUsedE2EE: true, lastE2EEFailReason: nil, verifiedResponseCount: 0,
+                               mismatchedResponseCount: 0, attestationFetchFailed: false, nrasVerification: nras)
+        }
+        #expect(summary(nil).gpuRowDetail == "Checking GPU evidence with NVIDIA…")
+        // Freeze A2 (the maintainer 2026-11-08) supersedes trust-blocked-chain-and-gateway-row (b): a pass is NVIDIA's.
+        #expect(summary(.verified).gpuRowDetail == "NVIDIA confirmed genuine attested GPUs for this request")
+        // trust-hardware-fail-lines (the maintainer 2026-11-06): a failed or inconclusive check says why, not "verified via gateway".
+        #expect(summary(.failed("NVIDIA rejected the evidence")).gpuRowDetail == "NVIDIA rejected the evidence")
+        #expect(summary(.inconclusive("NRAS unreachable")).gpuRowDetail == "NRAS unreachable")
+    }
+
+    /// Q4 of trust-pending-state (the maintainer, 2026-11-06): "sealed so only <model> can open it" drew a pass while
+    /// DCAP and NVIDIA were still checking. It reads checking until both answer; no new words.
+    @Test func theSealStepWaitsForTheHardwareChecks() {
+        func summary(dcap: RecordDCAPVerification?, nras: NRASVerification?) -> AttestationSummary {
+            AttestationSummary(attestation: .preview, state: .verifying, timedOut: false, provider: nil,
+                               lastRequestUsedE2EE: true, lastE2EEFailReason: nil, verifiedResponseCount: 0,
+                               mismatchedResponseCount: 0, attestationFetchFailed: false,
+                               dcapVerification: dcap, nrasVerification: nras)
+        }
+        var ok = RecordDCAPVerification()
+        ok.gateway = .verified(tcbStatus: .upToDate, mrConfigIdHex: "01", reportDataHex: "")
+        ok.model = .verified(tcbStatus: .upToDate, mrConfigIdHex: "01", reportDataHex: "")
+        #expect(summary(dcap: nil, nras: .verified).hardwareChecksPending)
+        #expect(!summary(dcap: ok, nras: nil).hardwareChecksPending, "the preview record has no NVIDIA evidence: nothing to wait for")
+        #expect(!summary(dcap: ok, nras: .verified).hardwareChecksPending)
+        func sealed(_ pending: Bool) -> TrustClaim? {
+            TrustVerdict.make(.init(attestationState: .verifying, requiresConfirmation: false, degradeIsHardFailure: false,
+                                    mismatchedResponseCount: 0, modelName: "m", quant: nil, providerDisplayName: "near.ai",
+                                    isLocal: false, isSelfHosted: false, e2eeKeyBound: true, hardwareChecksPending: pending))
+                .everydayClaims.first { $0.id == "sealed" }
+        }
+        #expect(sealed(true)?.status == .pending && sealed(false)?.status == .ok)
+        #expect(sealed(true)?.title == sealed(false)?.title, "no new words")
+    }
+
+    /// T6's expert node: a key in a quote that didn't verify is named as such, not as "not found".
+    @Test func aKeyInAFailedQuoteIsTheExpertNodesOwnFailure() {
+        #expect(!AttestationSummary(attestation: .preview, state: .ok, timedOut: false, provider: nil,
+                                    lastRequestUsedE2EE: true, lastE2EEFailReason: nil, verifiedResponseCount: 0,
+                                    mismatchedResponseCount: 0, attestationFetchFailed: false).keyInUnverifiedQuote)
+    }
+
+    /// T4 (pm's state-machine sweep): a cancelled TLS check whose directory lookup found no host wrote
+    /// `.notPerformed` over the newer check's pending verdict, ending the wait early.
+    @Test @MainActor func aCancelledTLSLookupWritesNothing() async {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.directBase = { _ in try? await Task.sleep(for: .milliseconds(300)); return nil }
+        let provider = Provider.nearAI
+        session.verifyTLS(for: provider)
+        session.verifyTLS(for: provider)   // the second cancels the first
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(session.tlsAttestation == nil, "the cancelled lookup ended the newer check's wait")
+        session.tlsTask?.cancel()
+    }
+
+    /// trust-pending-state (the maintainer 2026-11-06, android's fix): timed out with no record or no key, nothing is
+    /// encrypted yet, so the hero must not say it is.
+    @Test func aTimedOutHeroClaimsEncryptionOnlyWithAKey() {
+        func subtitle(_ record: AttestationRecord?) -> String {
+            AttestationSummary(attestation: record, state: .verifying, timedOut: true, provider: nil,
+                               lastRequestUsedE2EE: nil, lastE2EEFailReason: nil, verifiedResponseCount: 0,
+                               mismatchedResponseCount: 0, attestationFetchFailed: false).headerSubtitle
+        }
+        #expect(subtitle(.preview).hasPrefix("messages are encrypted"))
+        #expect(subtitle(nil) == "confirming this conversation runs inside sealed hardware.")
+        #expect(!subtitle(.previewDegraded).contains("encrypted"), "no key: \(subtitle(.previewDegraded))")
+    }
+
+    /// The run's rollup: one step still pending among passes is still running, never passed.
+    @Test func aRunWithAPendingStepIsStillRunning() {
+        let summary = AttestationSummary(
+            attestation: .preview, state: .ok, timedOut: false, provider: nil, lastRequestUsedE2EE: true,
+            lastE2EEFailReason: nil, verifiedResponseCount: 0, mismatchedResponseCount: 0,
+            attestationFetchFailed: false, dcapVerification: nil)
+        let model = summary.verificationRun.first { $0.id == "model" }
+        #expect(model?.steps.contains { $0.status == .pending } == true, "precondition: DCAP has no verdict")
+        #expect(model?.result != .passed)
     }
 
     /// NVIDIA, 2026-09-12: every send was refused with "Verification is still
@@ -515,7 +680,7 @@ struct ConfidentialSessionTests {
         // Switch the model, then refresh the way the re-verify button does.
         provider.model = "z-ai/glm-5.2"
         store.updateProvider(provider)
-        session.refreshAttestation(keepExisting: true)
+        session.refreshAttestation()
         // The 5.1 artifact must be gone — the switch invalidates it even though
         // the caller asked to keep existing state for a same-context refresh.
         #expect(session.modelArtifact == nil)
@@ -523,7 +688,7 @@ struct ConfidentialSessionTests {
         session.modelArtifact = ModelArtifact(
             modelPath: "PhalaCloud/GLM-5.2-W4AFP8", revision: nil,
             servedName: "z-ai/glm-5.2", quant: "W4AFP8")
-        session.refreshAttestation(keepExisting: true)
+        session.refreshAttestation()
         #expect(session.modelArtifact != nil)
     }
 
@@ -759,6 +924,117 @@ struct ConfidentialSessionTests {
         #expect(session.gatewayTrustResponseCount == 1)
         #expect(session.verifiedResponseCount == 0)
     }
+
+    /// T3 (pm's state-machine sweep): a turn's outcome was booked to whatever model was selected when it
+    /// finished. Switch mid-stream and model B showed "E2EE used", A's message count and A's signatures.
+    @Test @MainActor func aTurnFinishingAfterASwitchCreditsNothingToTheNewProvider() {
+        let store = Self.storeMatchingPreviewRecord()
+        let session = ConfidentialSession(providers: store)
+        session.attestation = .preview
+        let place = ConfidentialSession.TurnPlace(try! #require(store.activeProvider))
+        var other = try! #require(store.activeProvider)
+        other.model = "another-model"
+        store.updateProvider(other)          // same server, another model: not this turn's place
+        #expect(!session.ownsTurn(place))
+        let info = LastRequestDebugInfo(
+            providerName: "near.ai", modelID: "m", url: URL(string: "https://example.com")!, requestHeaders: nil,
+            requestBodyJSON: nil, responseBody: "hi", toolCalls: [], threadID: UUID(), totalDuration: nil,
+            timeToFirstToken: nil, outputTokens: nil, isE2EEActive: true,
+            teeVerification: .unverified(.gatewayTrustOnly(signingAddress: "0xabc")))
+        session.finishTurn(for: place, debugInfo: info, error: nil)
+        session.abandonTurn(for: place, reason: "x")
+        #expect(session.lastRequestUsedE2EE == nil && session.lastE2EEFailReason == nil)
+        #expect(session.e2eeMessageCount == 0 && session.gatewayTrustResponseCount == 0)
+    }
+
+    /// T5 (trust-stale-record, the maintainer 2026-11-06): a record older than 10 minutes whose refetch failed stayed
+    /// green with no age cap. It now degrades SOFTLY — the send asks — with the existing reason.
+    @Test @MainActor func aStaleRecordWhoseRefetchFailedIsNoLongerVerified() {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.lastRequestUsedE2EE = true
+        session.imageProvenance = .allVerified(verified: [], thirdParty: [])
+        session.provenanceSettled = true
+        #expect(session.attestationState == .ok, "precondition")
+        session.attestationFetchFailed = true
+        #expect(session.attestationState == .ok, "a fresh record with a failed refetch is still good")
+        let fetched = AttestationRecord.preview.fetchedAt
+        session.now = { fetched.addingTimeInterval(ConfidentialSession.attestationMaxAge + 1) }
+        #expect(session.attestationState == .degraded)
+        #expect(!session.degradeIsHardFailure && session.sendPolicy == .confirm, "soft: the send asks")
+        #expect(session.e2eeDegradedReason == "couldn't reach the attestation server.")
+        session.attestationFetchFailed = false
+        #expect(session.attestationState == .ok, "old but not failed: the next send refreshes it")
+    }
+
+    /// T5: a same-context refresh left the last fetch's "no confidential endpoint" standing.
+    @Test @MainActor func everyRefreshAsksAgainWhetherThereIsAConfidentialEndpoint() {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.refreshAttestation()
+        session.attestationTask?.cancel()
+        session.noConfidentialEndpoint = true
+        session.refreshAttestation()
+        session.attestationTask?.cancel()
+        #expect(!session.noConfidentialEndpoint)
+    }
+
+    /// near-trust-scope (the maintainer 2026-11-06): (a) or (b) mismatching, or a running compose file that doesn't
+    /// match its hash, blocks the send like a replayed quote, each with its own approved banner line.
+    @Test @MainActor func aTrustScopeBreakBlocksTheSendAndNamesItsCause() {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.lastRequestUsedE2EE = true
+        session.imageProvenance = .allVerified(verified: [], thirdParty: [])
+        session.provenanceSettled = true
+        session.trustScope = TrustScope(binding: .bound, boot: .matches)
+        #expect(session.attestationState == .ok, "precondition: a clean scope changes nothing")
+        let src = ActionLogReading.Source(commit: "c", file: "f", fileSHA256: "s")
+        let svc = ActionLogReading.RunningService(service: "proxy", source: src, tag: nil, since: nil)
+        let cases: [(TrustScope, String)] = [
+            (TrustScope(binding: .mismatch(.actionsHash), boot: .matches), "the action log doesn't match the compose manager's hardware quote."),
+            (TrustScope(binding: .bound, boot: .mismatch(.rtmr3)), "the boot event log doesn't match the model's hardware quote."),
+            (TrustScope(binding: .bound, boot: .matches, running: [.init(service: svc, outcome: .mismatch)]),
+             "the running recipe doesn't match the signed action log, so the launched configuration is unverified."),
+            (TrustScope(binding: .notBound, boot: .matches, running: [.init(service: svc, outcome: .mismatch)]),
+             "the running recipe doesn't match the action log, so the launched configuration is unverified."),
+        ]
+        for (scope, reason) in cases {
+            session.trustScope = scope
+            #expect(session.attestationState == .degraded && session.degradeIsHardFailure && session.sendPolicy == .block)
+            #expect(session.e2eeDegradedReason == reason)
+        }
+        session.trustScope = TrustScope(binding: .notBound, boot: .absent,
+                                        running: [.init(service: svc, outcome: .unpublished)])
+        #expect(session.attestationState == .ok && session.sendPolicy == .allow, "not bound, absent and unpublished never block")
+    }
+
+    @Test @MainActor func aRunningTrustScopeCheckIsPending() {
+        let session = ConfidentialSession(providers: Self.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        session.trustScopeTask = neverAnswers()
+        defer { session.trustScopeTask?.cancel() }
+        #expect(session.verdictsPending)
+        session.trustScope = TrustScope(binding: .bound, boot: .matches)
+        #expect(!session.verdictsPending)
+    }
+
+    @Test @MainActor func prepareTurnForAPlaceNoLongerSelectedOpensNothing() async {
+        let store = Self.storeMatchingPreviewRecord()
+        let session = ConfidentialSession(providers: store)
+        session.attestationTask?.cancel()
+        session.attestation = .preview
+        let place = ConfidentialSession.TurnPlace(try! #require(store.activeProvider))
+        let nvidia = Provider.nvidia
+        store.addProvider(nvidia)
+        store.currentProviderID = nvidia.id.uuidString
+        let ctx = await session.prepareTurn(for: place)
+        #expect(ctx == nil, "no context for a turn whose model is no longer selected")
+        #expect(session.lastRequestUsedE2EE == nil, "nothing opened")
+    }
 }
 
 @Suite("AppSettings")
@@ -793,6 +1069,9 @@ struct MoonPhaseTests {
 /// depends on the tier, and getting it wrong sends in the clear.
 @Suite("a missing direct host")
 struct MissingDirectHostTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     @Test func anOwnFleetModelWithNoHostDegrades() {
         #expect(NearAIModelCatalog.confidentiality(forID: "z-ai/glm-5.3-flash") == .teeOwn)
@@ -818,13 +1097,16 @@ struct MissingDirectHostTests {
 @Suite("a missing direct host — reason and retry")
 @MainActor
 struct MissingDirectHostReasonTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
     @Test func theReasonNamesTheDirectoryNotTheServer() {
         let session = ConfidentialSession(providers: ConfidentialSessionTests.storeMatchingPreviewRecord())
         session.attestationFetchFailed = true
         session.directHostMissing = true
         #expect(session.e2eeDegradedReason?.contains("no confidential host") == true)
         session.directHostMissing = false
-        #expect(session.e2eeDegradedReason == "Could not reach the attestation server.")
+        #expect(session.e2eeDegradedReason == "couldn't reach the attestation server.")
     }
 
     @Test func aFailedFetchIsRetriedAfterTheInterval() {
@@ -840,4 +1122,21 @@ struct MissingDirectHostReasonTests {
         #expect(session.attestationAttemptedAt == stamp)
     }
 }
+}
+
+/// Trust ladder: "retry" after the 8 s wait re-ran the fetch, but the state stayed
+/// `.verifying`, so the timer keyed on it never restarted and the screen spun forever.
+@MainActor
+@Suite("Trust ladder — re-verify restarts the wait")
+struct FirstRecordWaitTests {
+    @Test func aRerunWithTheSameStateRestartsTheWait() {
+        let session = ConfidentialSession(providers: ConfidentialSessionTests.storeMatchingPreviewRecord())
+        session.attestationTask?.cancel()
+        #expect(session.attestationState == .verifying)
+        let before = session.firstRecordWaitID
+        session.refreshAttestation()
+        session.attestationTask?.cancel()
+        #expect(session.attestationState == .verifying)
+        #expect(session.firstRecordWaitID != before)
+    }
 }

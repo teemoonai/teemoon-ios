@@ -24,9 +24,7 @@ enum ThreadDeletion {
 
     /// Deletes a thread AND its messages.
     static func delete(_ thread: Thread, in context: ModelContext) {
-        for message in thread.messages {
-            context.delete(message)
-        }
+        MessageDeletion.delete(thread.messages, in: context)
         context.delete(thread)
         // Save now, not at autosave: an app killed in between brings the chat back.
         try? context.save()
@@ -38,6 +36,20 @@ enum ThreadDeletion {
     static func deleteAll(in context: ModelContext) throws {
         try context.delete(model: Thread.self)
         try context.delete(model: Message.self)
+        try context.delete(model: ImageAttachment.self)
         try context.save()
+    }
+}
+
+/// The one way a message is deleted: its attachments go with it (an ImageAttachment names its message
+/// by id, with no delete rule). The caller saves.
+enum MessageDeletion {
+    static func delete(_ messages: [Message], in context: ModelContext) {
+        guard !messages.isEmpty else { return }
+        let ids = messages.map(\.id)
+        if let attachments = try? context.fetch(FetchDescriptor<ImageAttachment>(predicate: #Predicate { ids.contains($0.messageID) })) {
+            attachments.forEach { context.delete($0) }
+        }
+        messages.forEach { context.delete($0) }
     }
 }

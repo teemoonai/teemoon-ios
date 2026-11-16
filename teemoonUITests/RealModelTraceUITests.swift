@@ -28,7 +28,7 @@ final class RealModelTraceUITests: XCTestCase {
         app.launchArguments = ["-scrollTrace"]
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         composer.tap()
         composer.typeText(
@@ -62,7 +62,7 @@ final class RealModelTraceUITests: XCTestCase {
         app.launchArguments = ["-scrollTrace"]
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         composer.tap()
         composer.typeText(
@@ -89,7 +89,7 @@ final class RealModelTraceUITests: XCTestCase {
         app.launchArguments = ["-scrollTrace"]
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
 
         try switchWhere(app, toRowContaining: ["near.ai", "eepseek"],
@@ -135,7 +135,7 @@ final class RealModelTraceUITests: XCTestCase {
         app.launchArguments = ["-scrollTrace"]
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         composer.tap()
         composer.typeText(

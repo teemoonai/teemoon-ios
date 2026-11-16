@@ -21,6 +21,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>teemoon saves the images you choose to Photos.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>teemoon uses the camera only when you take a photo to send in a chat. the photo stays on this phone unless you send it.</string>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
 </dict>

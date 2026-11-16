@@ -4,6 +4,9 @@ import Testing
 
 @Suite("Provider")
 struct ProviderTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     /// THE SAME SERVER, SPELLED DIFFERENTLY, IS THE SAME SERVER.
     ///
@@ -203,7 +206,7 @@ struct ProviderTests {
     // MARK: - capabilities
 
     @Test func capabilities_trueForNearAI() {
-        let provider = Provider(name: "near.ai", endpoint: "https://cloud-api.near.ai/v1", model: "test")
+        let provider = Provider(name: "near.ai", endpoint: "https://cloud-api.near.ai/v1", model: "z-ai/glm-5.3-flash")
         #expect(provider.capabilities.contains(.attestation))
     }
 

@@ -33,13 +33,7 @@ struct WebSearchOffer: View {
     /// iOS shows a paste banner for programmatic reads, and an app whose pitch
     /// is what it does not see has no business looking. `PasteButton` is
     /// user-initiated, needs no permission, and reveals nothing until tapped.
-    @SwiftUI.State private var key = ""
-    @SwiftUI.State private var check: BraveWebSearchTool.KeyCheck?
-    @SwiftUI.State private var checking = false
-    /// Brave said yes. Held on screen for a beat before the card goes, so the
-    /// key landing is something you SEE rather than infer from the card
-    /// vanishing under your finger.
-    @SwiftUI.State private var accepted = false
+    @SwiftUI.State private var model: WebSearchOfferModel
     /// What the model actually searched for, straight off the tool call. Naming
     /// it is what separates this from a generic upsell — the user can see the
     /// app is describing their question, not advertising a feature.
@@ -61,9 +55,8 @@ struct WebSearchOffer: View {
         self.query = query
         self.onDismiss = onDismiss
         self.onKeyAccepted = onKeyAccepted
-        _key = SwiftUI.State(initialValue: previewKey)
-        _check = SwiftUI.State(initialValue: previewCheck)
-        _accepted = SwiftUI.State(initialValue: previewAccepted)
+        _model = SwiftUI.State(initialValue: WebSearchOfferModel(
+            key: previewKey, check: previewCheck, accepted: previewAccepted))
     }
     /// Called once brave has ACCEPTED a key. The host saves it and re-runs the
     /// question — frame 6, without the sheet.
@@ -88,9 +81,9 @@ struct WebSearchOffer: View {
             } label: {
                 HStack(spacing: 7) {
                     Text("get a key")
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold)
                     Image(systemName: "arrow.up.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .scaledFont(size: 12, weight: .semibold)
                 }
                 // WHITE, per design C's `.b1 { color:#fff }` — a deliberate choice.
                 // R1 still holds — the fill states its own label colour rather
@@ -115,12 +108,12 @@ struct WebSearchOffer: View {
                 // here is monospaced too, so the row reads as a field before
                 // anything is in it.
                 Text("\u{2318}")
-                    .font(.system(size: 13, design: .monospaced))
+                    .scaledFont(size: 13, design: .monospaced)
                     .foregroundStyle(.tertiary)
-                Text(key.isEmpty ? "paste key" : maskedKey)
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(key.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
-                    .lineLimit(1)
+                Text(model.key.isEmpty ? "paste key" : maskedKey)
+                    .scaledFont(size: 13, design: .monospaced)
+                    .foregroundStyle(model.key.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .lineLimitGrowing(1)
                 Spacer(minLength: 8)
                 // A PLAIN BUTTON, not a PasteButton.
                 //
@@ -144,11 +137,10 @@ struct WebSearchOffer: View {
                     #else
                     guard let pasted = NSPasteboard.general.string(forType: .string) else { return }
                     #endif
-                    key = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
-                    runCheck()
+                    Task { await model.paste(pasted, onAccepted: onKeyAccepted) }
                 } label: {
                     Text("paste")
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold)
                         .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
@@ -167,7 +159,7 @@ struct WebSearchOffer: View {
             // baseline-aligned HStack rather than a Label so the glyph does not
             // drift when the text wraps to two lines.
             Group {
-                if accepted {
+                if model.accepted {
                     statusRow(icon: "checkmark.circle.fill",
                               tint: AnyShapeStyle(Color.green),
                               // Names what happens NEXT, not just what
@@ -175,14 +167,14 @@ struct WebSearchOffer: View {
                               // answer appear; saying so is what turns that
                               // from a jump into a consequence.
                               text: "brave accepted this key — asking again now")
-                } else if checking {
+                } else if model.checking {
                     HStack(spacing: 7) {
                         ProgressView().controlSize(.small)
                         Text("checking with brave…")
-                            .font(.system(size: 12))
+                            .scaledFont(size: 12)
                             .foregroundStyle(.secondary)
                     }
-                } else if let check, check != .valid {
+                } else if let check = model.check, check != .valid {
                     statusRow(icon: KeyCheckCopy.icon(for: check),
                               tint: check == .rejected ? AnyShapeStyle(Color.red)
                                                        : AnyShapeStyle(.secondary),
@@ -190,6 +182,8 @@ struct WebSearchOffer: View {
                 }
             }
             .padding(.top, 9)
+            // The accepted line is held for a beat before the card goes.
+            .animation(.easeOut(duration: 0.2), value: model.accepted)
         }
         .padding(.top, 2)
     }
@@ -201,10 +195,10 @@ struct WebSearchOffer: View {
     private func statusRow(icon: String, tint: AnyShapeStyle, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
+                .scaledFont(size: 12, weight: .semibold)
                 .foregroundStyle(tint)
             Text(text)
-                .font(.system(size: 12))
+                .scaledFont(size: 12)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -212,26 +206,8 @@ struct WebSearchOffer: View {
 
     /// Enough to recognise, not enough to read over a shoulder.
     private var maskedKey: String {
-        key.count > 8 ? "\(key.prefix(4))…\(key.suffix(4))" : "••••"
-    }
-
-    private func runCheck() {
-        Task {
-            checking = true
-            check = await BraveWebSearchTool.checkKey(key)
-            checking = false
-            // ONLY on acceptance. A rejected key must not be saved and must not
-            // light the chip — that is the silent failure this whole path
-            // exists to prevent.
-            guard check == .valid else { return }
-            // THE BEAT. Handing the key over used to end with the card
-            // disappearing mid-tap and an answer arriving from nowhere — the
-            // one moment the user has been working toward, and nothing marked
-            // it. Show the acceptance, hold it long enough to read, then go.
-            withAnimation(.easeOut(duration: 0.2)) { accepted = true }
-            try? await Task.sleep(for: .milliseconds(1700))
-            onKeyAccepted(key)
-        }
+        let key = model.key
+        return key.count > 8 ? "\(key.prefix(4))…\(key.suffix(4))" : "••••"
     }
 
     var body: some View {
@@ -252,7 +228,7 @@ struct WebSearchOffer: View {
             // wrong and the opposite of reassuring.
             HStack(alignment: .top) {
                 Text("to answer this")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(size: 11, weight: .semibold)
                     .foregroundStyle(.tertiary)
                     .textCase(.uppercase)
                     .tracking(0.5)
@@ -262,7 +238,7 @@ struct WebSearchOffer: View {
                 // it is leaving, and leaving lives in the corner. It also frees
                 // the button row for the one thing that changes as the card
                 // progresses: "set it up" becoming "get a key".
-                Button(action: onDismiss) {
+                Button { model.dismiss(onDismiss) } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.tertiary)
@@ -280,7 +256,7 @@ struct WebSearchOffer: View {
             .padding(.trailing, -2)
 
             Text("turn on web search")
-                .font(.system(size: 16, weight: .semibold))
+                .scaledFont(size: 16, weight: .semibold)
                 .foregroundStyle(.primary)
                 .padding(.top, 7)
 
@@ -292,7 +268,7 @@ struct WebSearchOffer: View {
             // paragraph shorter, and it now reads as an illustration of the
             // behaviour rather than a separate accusation.
             Text("the model searches when it needs to (e.g. \u{201C}\(query)\u{201D}). needs a brave account with a card on file. you get $5 of free credit per month (about 1,000 searches); extra queries bill your card. setup takes a few minutes on their site.")
-                .font(.system(size: 13))
+                .scaledFont(size: 13)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 5)
@@ -305,7 +281,7 @@ struct WebSearchOffer: View {
             // anything to a third party, so this line is the positioning, not
             // decoration — dropping it was the worst part of the first pass.
             Text("privacy: brave sees only the search terms, never your conversation.")
-                .font(.system(size: 12))
+                .scaledFont(size: 12)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 10)

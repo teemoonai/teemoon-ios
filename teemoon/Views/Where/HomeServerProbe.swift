@@ -31,7 +31,15 @@ final class HomeServerProbe {
     /// server the user opened a minute ago.
     static let shared = HomeServerProbe()
 
-    struct Info: Equatable {
+    typealias Prober = @Sendable (_ base: URL, _ authHeaderName: String?, _ apiKey: String) async -> Info
+
+    @ObservationIgnored private let prober: Prober
+
+    init(probe: @escaping Prober = { await HomeServerProbe.probe(base: $0, authHeaderName: $1, apiKey: $2) }) {
+        self.prober = probe
+    }
+
+    struct Info: Equatable, Sendable {
         var kind: LocalServerKind = .unknown
         /// Every model id the server reports. nil = not probed / unreachable,
         /// which is different from "none" and must read differently.
@@ -50,6 +58,8 @@ final class HomeServerProbe {
     private(set) var infoByProvider: [UUID: Info] = [:]
 
     private var inFlight: Set<UUID> = []
+    /// Bumped by `forget`: a probe that started before the delete writes nothing.
+    private var generation: [UUID: Int] = [:]
 
     /// True when the results were seeded for a preview.
     ///
@@ -62,17 +72,10 @@ final class HomeServerProbe {
 
     func info(for provider: Provider) -> Info? { infoByProvider[provider.id] }
 
-    /// Drops a model from the CACHED answer for a machine, after teemoon deleted
-    /// it there.
-    ///
-    /// Needed because this cache is what `syncHomeEquipped` reconciles against,
-    /// and it outlives the delete. Re-probing instead is not enough and was the
-    /// bug: `refresh` skips any provider already `inFlight`, so a probe overlapping
-    /// the delete made the refresh a no-op, `syncHomeEquipped` then read the
-    /// pre-delete list, and the row the user had just deleted was written straight
-    /// back into `equippedModels`. Deleting the model is something we KNOW
-    /// happened; the cache should say so without a round trip to find out.
+    /// Drops a model from the cached answer after teemoon deleted it on the machine. `syncHomeEquipped`
+    /// mirrors this cache, so a probe already in flight must not write the pre-delete list back.
     func forget(modelID: String, on provider: Provider) {
+        generation[provider.id, default: 0] += 1
         guard var info = infoByProvider[provider.id] else { return }
         info.models = info.models?.filter { $0 != modelID }
         info.warm.remove(modelID)
@@ -117,16 +120,18 @@ final class HomeServerProbe {
                 let key = credential(provider)
                 let header = provider.authHeaderName
                 let id = provider.id
+                let prober = self.prober
+                let started = generation[id, default: 0]
                 group.addTask { @MainActor in
-                    let info = await Self.probe(base: base, authHeaderName: header, apiKey: key)
-                    self.infoByProvider[id] = info
+                    let info = await prober(base, header, key)
+                    if self.generation[id, default: 0] == started { self.infoByProvider[id] = info }
                     self.inFlight.remove(id)
                 }
             }
         }
     }
 
-    private static func probe(base: URL, authHeaderName: String?, apiKey: String) async -> Info {
+    nonisolated static func probe(base: URL, authHeaderName: String?, apiKey: String) async -> Info {
         let kind = await LocalServerKind.detect(baseURL: base)
 
         // The generic `/models` probe works for every kind, including the ones
@@ -168,7 +173,7 @@ final class HomeServerProbe {
 
     /// Bases to try for the OpenAI-compatible model list, in order: the endpoint
     /// as given, then the same with `/v1` appended when it isn't already there.
-    static func modelListCandidates(_ base: URL) -> [URL] {
+    nonisolated static func modelListCandidates(_ base: URL) -> [URL] {
         let path = base.path
         if path.hasSuffix("/v1") || path.hasSuffix("/v1/") { return [base] }
         return [base, base.appendingPathComponent("v1")]

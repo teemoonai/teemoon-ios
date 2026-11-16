@@ -28,13 +28,14 @@ struct SchemaMigrationFixtureTests {
         // 1. The world before the plan: bare Schema, on disk.
         do {
             let container = try ModelContainer(
-                for: Schema([Thread.self, Message.self]),
+                for: Schema([TeemoonSchemaV1.Thread.self, TeemoonSchemaV1.Message.self]),
                 configurations: ModelConfiguration(url: url))
             let context = container.mainContext
-            let thread = ChatThread()
+            let thread = TeemoonSchemaV1.Thread(id: UUID(), timestamp: Date())
             context.insert(thread)
-            context.insert(Message(role: .user, content: "pre-plan message",
-                                   thread: thread))
+            let message = TeemoonSchemaV1.Message(id: UUID(), role: .user, content: "pre-plan message", timestamp: Date())
+            message.thread = thread
+            context.insert(message)
             try context.save()
         }
 
@@ -42,7 +43,7 @@ struct SchemaMigrationFixtureTests {
         //    exactly what every existing install does on first launch after
         //    adoption.
         let container = try ModelContainer(
-            for: Schema(versionedSchema: TeemoonSchemaV1.self),
+            for: Schema(versionedSchema: TeemoonSchemaV3.self),
             migrationPlan: TeemoonMigrationPlan.self,
             configurations: ModelConfiguration(url: url))
         let context = container.mainContext
@@ -61,7 +62,7 @@ struct SchemaMigrationFixtureTests {
 
         do {
             let container = try ModelContainer(
-                for: Schema(versionedSchema: TeemoonSchemaV1.self),
+                for: Schema(versionedSchema: TeemoonSchemaV3.self),
                 migrationPlan: TeemoonMigrationPlan.self,
                 configurations: ModelConfiguration(url: url))
             let context = container.mainContext
@@ -73,10 +74,38 @@ struct SchemaMigrationFixtureTests {
         }
 
         let container = try ModelContainer(
-            for: Schema(versionedSchema: TeemoonSchemaV1.self),
+            for: Schema(versionedSchema: TeemoonSchemaV3.self),
             migrationPlan: TeemoonMigrationPlan.self,
             configurations: ModelConfiguration(url: url))
         #expect(try container.mainContext.fetch(FetchDescriptor<Message>())
             .first?.content == "steady state")
+    }
+
+    /// A V1 store made from the frozen V1 models opens under the live plan intact (the file-based twin is
+    /// SchemaV3MigrationTests, which opens stores written by the 1.0.6 and V2 code themselves).
+    @Test @MainActor func aV1StoreOpensUnderTheLivePlanIntact() throws {
+        let url = tempStoreURL(); defer { cleanUp(url) }
+        let messageID = UUID()
+        do {
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: TeemoonSchemaV1.self),
+                configurations: ModelConfiguration(url: url))
+            let context = container.mainContext
+            let thread = TeemoonSchemaV1.Thread(id: UUID(), timestamp: Date())
+            thread.title = "kept title"
+            context.insert(thread)
+            let message = TeemoonSchemaV1.Message(id: messageID, role: .user, content: "written by 1.0.6", timestamp: Date())
+            message.thread = thread
+            message.isE2EE = true
+            context.insert(message)
+            try context.save()
+        }
+        let container = try ModelContainer(
+            for: Schema(versionedSchema: TeemoonSchemaV3.self),
+            migrationPlan: TeemoonMigrationPlan.self,
+            configurations: ModelConfiguration(url: url))
+        let message = try #require(try container.mainContext.fetch(FetchDescriptor<Message>()).first)
+        #expect(message.id == messageID && message.content == "written by 1.0.6" && message.isE2EE)
+        #expect(message.thread?.title == "kept title" && message.statusRaw == nil)
     }
 }

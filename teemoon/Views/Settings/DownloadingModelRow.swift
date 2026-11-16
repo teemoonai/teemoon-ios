@@ -27,7 +27,7 @@ struct DownloadingModelRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(name).textCase(.lowercase).lineLimit(1)
+                Text(name).textCase(.lowercase).lineLimitGrowing(1)
                 if let f = download.fraction, download.phase == .active {
                     ProgressView(value: f).tint(Color.accentColor)   // app tint = working
                 } else {
@@ -90,7 +90,7 @@ private func previewInstalledRow(_ name: String, _ sub: String, warm: Bool = fal
         }
         Spacer()
         if selected {
-            Image(systemName: "checkmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(.tint)
+            Image(systemName: "checkmark").scaledFont(size: 13, weight: .semibold).foregroundStyle(.tint)
         }
     }
 }

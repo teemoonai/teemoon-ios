@@ -16,6 +16,9 @@ struct EnclaveGrouping {
     var modelLayerManifest: String?
     var modelLayerVerification: ModelLayerVerification?
     var audit: AuditIndex = .shared
+    /// `ConfidentialSession.verdictsPending`: the seal waits on DCAP and the other hardware verdicts.
+    var hardwarePending: Bool = false
+    var dcapVerification: RecordDCAPVerification? = nil
 
     var exposure: PlaintextExposure {
         PlaintextExposure.analyze(
@@ -36,6 +39,7 @@ struct EnclaveGrouping {
             host: "model", role: "model enclave", primary: true,
             mrConfig: attestation?.gpuNodeComposeHash,
             quoteVerified: attestation?.modelQuoteVerification?.isVerified,
+            dcap: dcapVerification?.model,
             verified: verified, thirdParty: thirdParty, failures: failures,
             includeLocalEngine: true,
             exposure: exposure) {
@@ -45,6 +49,7 @@ struct EnclaveGrouping {
             host: "gateway", role: "gateway enclave", primary: false,
             mrConfig: attestation?.composeHash,
             quoteVerified: attestation?.quoteVerification?.isVerified,
+            dcap: dcapVerification?.gateway,
             verified: verified, thirdParty: thirdParty, failures: failures,
             includeLocalEngine: false, exposure: nil) {
             groups.append(gateway)
@@ -72,7 +77,7 @@ struct EnclaveGrouping {
 
     func group(
         host: String, role: String, primary: Bool,
-        mrConfig: String?, quoteVerified: Bool?,
+        mrConfig: String?, quoteVerified: Bool?, dcap: DCAPVerification?,
         verified: [ProvenanceService.ImageRef], thirdParty: [ProvenanceService.ImageRef],
         failures: [ProvenanceService.Failure],
         includeLocalEngine: Bool,
@@ -106,10 +111,6 @@ struct EnclaveGrouping {
             entries[i].auditURL = audit.scopedImageAuditURL(
                 inScope: exposure != nil,
                 image: entries[i].name, digestFull: entries[i].digestFull)
-            if exposure != nil, entries[i].auditURL == nil,
-               entries[i].kind == .tagPinned, let tag = entries[i].tag {
-                entries[i].auditURL = audit.tagAuditURL(image: entries[i].name, tag: tag)
-            }
             if exposure != nil, let df = entries[i].digestFull,
                let src = audit.imageSourceLink(image: entries[i].name, digest: df) {
                 entries[i].links.append(RunLink(title: src.title, url: src.url.absoluteString))
@@ -164,7 +165,8 @@ struct EnclaveGrouping {
             ? attestation?.gpuNodeComposeManifest
                 .flatMap { MeasuredConfig.allowedEnvsCaption(outerManifest: $0) }
             : nil
-        let configAuditURL = mrConfig.flatMap { audit.measuredAuditURL(composeHash: $0) }
+        // An audit covers a measured config only over a quote that verified (trust-audit-links-gated b).
+        let configAuditURL = quoteVerified == true ? mrConfig.flatMap { audit.measuredAuditURL(composeHash: $0) } : nil
         let recipeCard: EnclaveGroup.RecipeCard?
         if exposure != nil {
             let inner = modelLayerManifest
@@ -182,7 +184,8 @@ struct EnclaveGrouping {
                 fileSHA: attestation?.modelFileHash,
                 yamlLink: modelComposeYAMLLink(),
                 verification: modelLayerVerification,
-                auditURL: attestation?.modelComposePath.flatMap { p in
+                // Only a recipe whose hash verified wears its audit (trust-audit-links-gated a).
+                auditURL: modelLayerVerification != .verified ? nil : attestation?.modelComposePath.flatMap { p in
                     attestation?.modelFileHash.flatMap {
                         audit.manifestAuditURL(path: p, fileSHA256: $0)
                     }
@@ -219,12 +222,18 @@ struct EnclaveGrouping {
             id: role, role: role, primary: primary,
             binding: "the hardware seals a fingerprint (mr_config) of this enclave's compose file into its quote — proof it booted exactly the images below, and the operator can't swap in anything else without changing that fingerprint.",
             deployment: primary ? attestation?.deploymentCaption : nil,
-            mrConfig: mrConfig, quoteVerified: quoteVerified, images: entries,
+            mrConfig: mrConfig, quoteVerified: seal(quote: quoteVerified, dcap: dcap), images: entries,
             plaintextCaption: exposure?.groupCaption,
             measurementCaption: measurementCaption,
             configAuditURL: configAuditURL,
             recipe: recipeCard,
             egressFindings: egress)
+    }
+
+    /// The enclave's seal: red on a failed signature or DCAP rejection, pending (nil) until the hardware verdicts settle.
+    func seal(quote: Bool?, dcap: DCAPVerification?) -> Bool? {
+        if quote == false || dcap?.isHardFailure == true { return false }
+        return hardwarePending ? nil : quote
     }
 
     /// Unverified first, then plaintext touchers, then capability tiers. Stable within a band.

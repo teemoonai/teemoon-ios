@@ -343,10 +343,10 @@ enum ConformanceAttestationVectors {
         return NrasVectors(nvidiaPayload: fixture.nvidiaPayload, requestNonce: fixture.requestNonce, nrasResponse: response, overallVerdict: verdict, jwks: jwks, verifiedAt: fixture.verifiedAt, cases: [
             await run("real evidence, real NVIDIA response, matching nonce", nonce: fixture.requestNonce, response: response, contains: nil),
             await run("nonce mismatch — must fail before contacting NRAS (the stub is unreachable)", nonce: String(repeating: "00", count: 32), response: nil, contains: "nonce"),
-            await run("no recorded request nonce — freshness cannot be proven", nonce: nil, response: response, contains: "nonce"),
+            await run("no recorded request nonce — teemoon lost it: soft, with the approved fault line", nonce: nil, response: response, contains: "inside teemoon"),
             await run("NRAS unreachable — fail closed but soft", nonce: fixture.requestNonce, response: nil, contains: "unreachable"),
             await run("overall verdict claim flipped to false — the ES384 signature no longer verifies", nonce: fixture.requestNonce, response: tampered, contains: "signature"),
-            await run("malformed NRAS response", nonce: fixture.requestNonce, response: "{}", contains: nil),
+            await run("malformed NRAS response — an unrecognised NVIDIA answer is evidence (near-gate-nvidia-tls-split)", nonce: fixture.requestNonce, response: "{}", contains: nil),
         ])
     }
 
@@ -392,6 +392,7 @@ enum ConformanceAttestationVectors {
         case .unverified(.signatureInvalid): return "signatureInvalid"
         case .unverified(.certificateChainInvalid): return "certificateChainInvalid"
         case .unverified(.identityNotTrusted): return "identityNotTrusted"
+        case .unverified(.identityNotThisBuild): return "identityNotThisBuild"
         case .unverified(.digestMismatch): return "digestMismatch"
         case .unverified(.fetchFailed): return "fetchFailed"
         case .unverified(.fetchTransient): return "fetchTransient"
@@ -470,8 +471,8 @@ struct ConformanceAttestationRoundTripTests {
             if let needle = c.reasonContains { #expect(result.reason?.contains(needle) == true, "\(c.note)") }
         }
         #expect(v.cases[0].outcome == "verified")
-        #expect(v.cases.filter { $0.outcome == "failed" }.count == 2)
-        #expect(v.cases.filter { $0.outcome == "inconclusive" }.count == 3)
+        #expect(v.cases.filter { $0.outcome == "failed" }.count == 3)
+        #expect(v.cases.filter { $0.outcome == "inconclusive" }.count == 2)
     }
 
     private struct StubNRASCheck: NRASHTTPClient {

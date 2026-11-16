@@ -23,6 +23,8 @@ import XCTest
 
 final class LocalCatalogCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     override func setUp() { continueAfterFailure = false }
 
     func testCapturesTheOnDeviceCatalog() throws {

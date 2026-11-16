@@ -87,6 +87,22 @@ struct ProviderSmokeTests {
 
     @MainActor
     private func smoke(_ provider: Provider, apiKey: String, prompt: String = prompt) async throws {
+        for (attempt, wait) in (SmokeOverload.backoffSeconds + [0]).enumerated() {
+            guard let status = try await smokeOnce(provider, apiKey: apiKey, prompt: prompt) else { return }
+            if attempt == SmokeOverload.backoffSeconds.count {
+                // Never a pass: a known issue in the run, and a line the gate lists by name.
+                let reason = "provider overloaded: \(provider.name) \(provider.model) \(status)"
+                print("SMOKE-SKIP \(reason)")
+                withKnownIssue(Comment(rawValue: reason)) { Issue.record(Comment(rawValue: reason)) }
+                return
+            }
+            try await Task.sleep(for: .seconds(wait))
+        }
+    }
+
+    /// One call; the status when the provider answered "overloaded" (retry), nil when the call is settled.
+    @MainActor
+    private func smokeOnce(_ provider: Provider, apiKey: String, prompt: String) async throws -> Int? {
         let callbacks = StreamCallbacks(
             onSourcesFound: { _ in }, onQueriesFound: { _ in },
             onToolExecutionEnded: {}, onSuccess: { _ in }
@@ -103,6 +119,7 @@ struct ProviderSmokeTests {
             }
         } catch {
             let msg = error.localizedDescription
+            if let status = SmokeOverload.status(in: msg) { return status }
             if msg.localizedCaseInsensitiveContains("401")
                 || msg.localizedCaseInsensitiveContains("unauthorized") {
                 Issue.record("\(provider.name) rejected the key (\(msg))")
@@ -120,14 +137,38 @@ struct ProviderSmokeTests {
                 // box that is simply not on the network.
                 || msg.localizedCaseInsensitiveContains("hostname could not be found")
                 || msg.localizedCaseInsensitiveContains("hostname could not be resolved") {
-                return // unreachable box / network — skip
+                return nil // unreachable box / network — skip
             } else {
                 Issue.record("\(provider.name) smoke failed: \(msg)")
             }
-            return
+            return nil
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(!trimmed.isEmpty, "\(provider.name) returned an empty reply")
         print("[smoke] \(provider.name)/\(provider.model) \(trimmed.count) chars")
+        return nil
+    }
+}
+
+/// Live-provider overload, for the smoke suite (pm 2026-11-13). A test-target helper, not app code.
+/// Retried with this backoff, then recorded as a named skip, never a pass; the gate lists every such skip. The error
+/// text carries no Retry-After, so the backoff is fixed. Any other failure still fails.
+enum SmokeOverload {
+    static let backoffSeconds: [UInt64] = [2, 4, 8]
+
+    /// For a trust check: an outage counts only before any reply was verified. After a verified turn, or for a
+    /// verification failure (not an outage status), nil: it fails (pm 2026-11-13).
+    static func outageBeforeVerification(verifiedTurns: Int, message: String) -> Int? {
+        verifiedTurns == 0 ? status(in: message) : nil
+    }
+
+    /// 429 saying overloaded or retry, or 502/503/504 saying unavailable, overloaded, try again or retry (a provider
+    /// outage, pm 2026-11-13); nil for anything else, which still fails.
+    static func status(in message: String) -> Int? {
+        guard let range = message.range(of: #"http (429|502|503|504)"#, options: .regularExpression),
+              let status = Int(message[range].dropFirst(5)) else { return nil }
+        let lower = message.lowercased()
+        let words = status == 429 ? ["overloaded", "retry"] : ["unavailable", "overloaded", "try again", "retry"]
+        return words.contains { lower.contains($0) } ? status : nil
     }
 }

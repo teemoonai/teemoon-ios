@@ -24,7 +24,9 @@ extension TrustLadderView {
             attestation: session.attestation,
             imageProvenance: session.imageProvenance,
             modelLayerManifest: session.modelLayerManifest,
-            modelLayerVerification: session.modelLayerVerification
+            modelLayerVerification: session.modelLayerVerification,
+            hardwarePending: session.verdictsPending,
+            dcapVerification: session.dcapVerification
         )
     }
 
@@ -46,7 +48,7 @@ extension TrustLadderView {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 ForEach(enclaveGroups) { group in
-                    EnclaveGroupView(group: group, rung: rung)
+                    EnclaveGroupView(group: group, rung: rung, scope: group.primary ? session.trustScope : nil)
                 }
                 if enclaveGroups.isEmpty {
                     Text(session.attestationState == .verifying
@@ -98,7 +100,7 @@ extension TrustLadderView {
                 }
                 if summary.showGPURow {
                     EvidenceRow(label: (session.attestation?.gpuModelName ?? "nvidia gpu").lowercased(),
-                                state: summary.nrasState ?? .pending, detail: summary.gpuTdxDetail)
+                                state: summary.nrasState ?? .pending, detail: summary.gpuRowDetail)
                 }
                 // The guest OS moved OUT of this card: it's reviewable measured
                 // software, not silicon, so it now rides as the first row of the
@@ -109,33 +111,13 @@ extension TrustLadderView {
         }
     }
 
-    /// Sealed transport — TLS terminates inside the enclave, its cert
-    /// fingerprint bound into the quote. Complementary to E2EE (transport +
-    /// metadata half). Hidden when there's no direct host (`.notPerformed`).
+    /// The model node's TLS probe; hidden when there's no direct host (`.notPerformed`).
     @ViewBuilder var transportSection: some View {
-        if rung == .expert, let tls = session.tlsAttestation {
-            switch tls {
-            case .verified:
-                EvidenceCard(
-                    title: "sealed transport",
-                    subtitle: "the transport-layer half — complementary to E2EE, independently verifiable.") {
-                    EvidenceRow(label: "tls into the enclave", state: .done,
-                                detail: "the connection terminates inside the enclave — the tls cert fingerprint is bound into the attestation `report_data`.")
-                }
-            case .failed(let why):
-                EvidenceCard(
-                    title: "sealed transport",
-                    subtitle: "the transport-layer half — complementary to E2EE, independently verifiable.") {
-                    EvidenceRow(label: "tls into the enclave", state: .stuck, detail: why)
-                }
-            case .inconclusive(let why):
-                EvidenceCard(
-                    title: "sealed transport",
-                    subtitle: "the transport-layer half — complementary to E2EE, independently verifiable.") {
-                    EvidenceRow(label: "tls into the enclave", state: .stuck, detail: "\(why) — could not complete")
-                }
-            case .notPerformed:
-                EmptyView()   // no direct host — not applicable
+        if rung == .expert, let row = summary.tlsRow {
+            EvidenceCard(
+                title: AttestationSummary.transportTitle,
+                subtitle: AttestationSummary.transportSubtitle) {
+                EvidenceRow(label: AttestationSummary.transportLabel, state: row.state, detail: row.detail)
             }
         }
     }
@@ -201,7 +183,7 @@ extension TrustLadderView {
 
     func trustRow(_ icon: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).font(.footnote).foregroundStyle(.tertiary).frame(width: 18)
+            Image(systemName: icon).font(.footnote).foregroundStyle(.tertiary).glyphColumn(18, relativeTo: .footnote)
             Text(.init(text)).font(.footnote).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

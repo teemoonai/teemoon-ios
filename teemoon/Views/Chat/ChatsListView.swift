@@ -29,26 +29,32 @@ private enum DateBucket: String, CaseIterable {
 
 private struct BucketedSection: Identifiable {
     let title: String
-    let threads: [Thread]
+    let rows: [ChatListTitleSearch.Row<Thread>]
     var id: String { title }
 }
 
 // MARK: - ChatRowView
 
 private struct ChatRowView: View {
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.dynamicTypeSize) private var typeSize
     let thread: Thread
     let bucket: DateBucket
     /// `snippet()` output for the passage that matched, when this row is a
     /// search result. nil in the ordinary list, which shows the assistant
     /// preview instead.
     var matchSnippet: String? = nil
+    /// The title with its matched run delimited, when the search matched it.
+    var markedTitle: String? = nil
+    /// Every row of a search's results, whatever part of it matched.
+    var isSearchResult = false
 
     private var title: String {
-        thread.sortedMessages.first?.content ?? "untitled"
+        ThreadListTitle.text(title: thread.title, firstMessage: thread.sortedMessages.first?.content)
     }
 
     private var preview: String? {
-        thread.sortedMessages.last(where: { $0.role == .assistant })?.content
+        thread.sortedMessages.last(where: { $0.role == .assistant && !$0.content.isEmpty })?.content
     }
 
     private var compactTime: String {
@@ -69,14 +75,22 @@ private struct ChatRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(title)
-                    .font(.system(size: ControlMetrics.sidebarTitleSize, weight: .semibold))
+            // At the accessibility sizes the date goes under the title, or a long first word breaks mid-word.
+            let titleLine = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+            titleLine {
+                Text(markedTitle.map {
+                    ChatSearchHighlight.attributed($0)
+                } ?? AttributedString(title))
+                    .scaledFont(size: ControlMetrics.sidebarTitleSize,
+                                weight: ChatSearchHighlight.titleWeight(isSearchResult: isSearchResult))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .lineLimitGrowing(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(compactTime)
-                    .font(.system(size: ControlMetrics.sidebarDateSize).monospacedDigit())
+                    .monospacedDigit()
+                    .scaledFont(size: ControlMetrics.sidebarDateSize)
                     .foregroundStyle(.secondary.opacity(0.7))
             }
             // A search result shows WHY it matched. The ordinary list shows the
@@ -87,14 +101,14 @@ private struct ChatRowView: View {
                 // and this label is measured in lines, so a late match gets
                 // truncated away. See ChatSearchHighlight.centred.
                 Text(ChatSearchHighlight.attributed(ChatSearchHighlight.centred(matchSnippet)))
-                    .font(.system(size: ControlMetrics.sidebarPreviewSize))
+                    .scaledFont(size: ControlMetrics.sidebarPreviewSize)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimitGrowing(2)
             } else if let preview, !preview.isEmpty {
                 Text(preview)
-                    .font(.system(size: ControlMetrics.sidebarPreviewSize))
+                    .scaledFont(size: ControlMetrics.sidebarPreviewSize)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimitGrowing(1)
             }
         }
     }
@@ -136,18 +150,22 @@ struct ChatsListView: View {
     @Environment(\.requestReview) private var requestReview
 
     var body: some View {
+        let sections = bucketedSections
         NavigationStack {
             ZStack {
                 List(selection: $selection) {
                     #if os(macOS)
                     Section {} // adds some space below the search bar on mac
                     #endif
-                    ForEach(bucketedSections) { section in
+                    ForEach(sections) { section in
                         Section {
-                            ForEach(section.threads, id: \.id) { thread in
+                            ForEach(section.rows, id: \.chat.id) { row in
+                                let thread = row.chat
                                 ChatRowView(thread: thread,
                                             bucket: DateBucket.bucket(for: thread.timestamp),
-                                            matchSnippet: snippet(for: thread))
+                                            matchSnippet: row.snippet,
+                                            markedTitle: row.markedTitle,
+                                            isSearchResult: !search.isEmpty)
                                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                         // The swipe ROUTES THROUGH the same
                                         // confirmation as every other door:
@@ -175,7 +193,7 @@ struct ChatsListView: View {
                             }
                         } header: {
                             Text(section.title)
-                                .font(.system(size: 11, weight: .semibold))
+                                .scaledFont(size: 11, weight: .semibold)
                                 .foregroundStyle(.secondary.opacity(0.7))
                                 .textCase(.uppercase)
                                 .kerning(0.6)
@@ -229,7 +247,7 @@ struct ChatsListView: View {
                 #elseif os(macOS) || os(visionOS)
                 .listStyle(.sidebar)
                 #endif
-                if filteredThreads.count == 0 {
+                if sections.isEmpty {
                     ContentUnavailableView {
                         Label(threads.count == 0 ? "no chats yet" : "no results", systemImage: "message")
                     }
@@ -325,49 +343,37 @@ struct ChatsListView: View {
         #if !os(visionOS)
         .tint(settings.appTintColor.getColor())
         #endif
-        .environment(\.dynamicTypeSize, settings.appFontSize.getFontSize())
+        .appTextSize(settings.appFontSize)
     }
 
-    private var filteredThreads: [Thread] {
-        guard !search.isEmpty else { return threads }
-        // STALE RANKED HITS BEAT A LIVE FULL SCAN. During the debounce gap
-        // (every keystroke, and every sheet open with a restored query)
-        // `hitsQuery` trails `search` — the old code fell back to scanning
-        // every message of every thread SYNCHRONOUSLY IN BODY, which is the
-        // measured 0.8s freeze on the real store (hangstacks 2026-08-30).
-        // Render the previous ranked hits instead; the fresh ones land within
-        // ~150ms. The full scan runs only when the index cannot answer.
+    /// nil while the index has not answered the first query: show the list
+    /// unfiltered. Never scan messages here — that was the measured 0.8s
+    /// freeze in body (hangstacks 2026-08-30). Stale ranked hits order the
+    /// rows until fresh ones land; their snippets wait for the fresh query.
+    private var searchRows: [ChatListTitleSearch.Row<Thread>]? {
+        let hits: [(threadID: UUID, snippet: String?)]
         if let searchHits {
-            let byID = Dictionary(threads.map { ($0.id, $0) },
-                                  uniquingKeysWith: { first, _ in first })
-            return searchHits.compactMap { byID[$0.threadID] }
+            let fresh = hitsQuery == search
+            hits = searchHits.map { ($0.threadID, fresh ? $0.snippet : nil) }
+        } else if indexUnavailable {
+            hits = fallbackHits
+        } else {
+            return nil
         }
-        if indexUnavailable { return fallbackFilteredThreads }
-        return threads // awaiting the index's first answer — never scan here
+        return ChatListTitleSearch.rows(threads, id: \.id, title: \.title, query: search, hits: hits)
     }
 
-    /// What search was before there was an index: correct, and slow enough that
-    /// it faults every message of every thread on each keystroke. Kept as the
-    /// degraded path, never as the primary one.
-    private var fallbackFilteredThreads: [Thread] {
-        threads.filter { thread in
-            thread.messages.contains { message in
-                message.content.localizedCaseInsensitiveContains(search)
-            }
+    /// The degraded path when the index cannot answer: faults every message of
+    /// every thread, so it never runs while the index can. Each row carries an
+    /// excerpt so it still shows why it matched.
+    private var fallbackHits: [(threadID: UUID, snippet: String?)] {
+        threads.compactMap { thread in
+            guard thread.messages.contains(where: {
+                $0.content.localizedCaseInsensitiveContains(search)
+            }) else { return nil }
+            return (thread.id, ChatSearchHighlight.excerpt(matching: search,
+                                                           in: thread.sortedMessages.map(\.content)))
         }
-    }
-
-    /// The best-matching passage for a thread, when the hit came from the index.
-    private func snippet(for thread: Thread) -> String? {
-        if indexUnavailable {
-            // Fallback rows still have to show WHY they matched. Without this a
-            // degraded result renders the assistant preview, which reads as a
-            // result whose keyword is nowhere in it.
-            return ChatSearchHighlight.excerpt(matching: search,
-                                               in: thread.sortedMessages.map(\.content))
-        }
-        guard hitsQuery == search else { return nil } // fresh hits are ~150ms out
-        return searchHits?.first { $0.threadID == thread.id }?.snippet
     }
 
     /// Debounced so a fast typist runs one query, not one per keystroke. The
@@ -393,17 +399,17 @@ struct ChatsListView: View {
         // recent ones. Buckets are for browsing; they return the moment the
         // query clears.
         if !search.isEmpty {
-            let hits = filteredThreads
-            return hits.isEmpty ? [] : [BucketedSection(title: "results", threads: hits)]
+            let rows = searchRows ?? threads.map { .init(chat: $0, markedTitle: nil, snippet: nil) }
+            return rows.isEmpty ? [] : [BucketedSection(title: "results", rows: rows)]
         }
-        var grouped: [DateBucket: [Thread]] = [:]
-        for thread in filteredThreads {
+        var grouped: [DateBucket: [ChatListTitleSearch.Row<Thread>]] = [:]
+        for thread in threads {
             let bucket = DateBucket.bucket(for: thread.timestamp)
-            grouped[bucket, default: []].append(thread)
+            grouped[bucket, default: []].append(.init(chat: thread, markedTitle: nil, snippet: nil))
         }
         return DateBucket.allCases.compactMap { bucket in
-            guard let threads = grouped[bucket], !threads.isEmpty else { return nil }
-            return BucketedSection(title: bucket.rawValue, threads: threads)
+            guard let rows = grouped[bucket], !rows.isEmpty else { return nil }
+            return BucketedSection(title: bucket.rawValue, rows: rows)
         }
     }
 
@@ -461,7 +467,7 @@ struct ChatsListView: View {
     @FocusState var isPromptFocused: Bool
     ChatsListView(currentThread: .constant(nil), isPromptFocused: $isPromptFocused)
         .environment(AppSettings())
-        .modelContainer(for: [Thread.self, Message.self], inMemory: true)
+        .modelContainer(for: [Thread.self, Message.self, ImageAttachment.self], inMemory: true)
 }
 
 /// The row in search-result mode. It needs a live FTS index to reach in the
@@ -490,5 +496,5 @@ struct ChatsListView: View {
         }
     }
     .environment(AppSettings())
-    .modelContainer(for: [Thread.self, Message.self], inMemory: true)
+    .modelContainer(for: [Thread.self, Message.self, ImageAttachment.self], inMemory: true)
 }

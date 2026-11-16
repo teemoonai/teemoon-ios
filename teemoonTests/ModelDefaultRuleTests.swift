@@ -13,6 +13,9 @@ import Testing
 
 @Suite("ModelDefaultRule")
 struct ModelDefaultRuleTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     // A small near.ai-shaped catalogue. Prices are "input/output"; the two GLMs share
     // a price so the tie-break must decide between them.

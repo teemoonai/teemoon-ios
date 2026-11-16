@@ -4,7 +4,7 @@
 //
 //  Effort maps to each provider's own parameter, and only where it was seen
 //  to work (live probes 2026-10-19). Chat sends low by default (the maintainer,
-//  2026-10-19, via an internal eval v2: 5 models × 3 levels × 24 objective tasks).
+//  2026-10-19, via pm's eval v2: 5 models × 3 levels × 24 objective tasks).
 //
 
 import CryptoKit

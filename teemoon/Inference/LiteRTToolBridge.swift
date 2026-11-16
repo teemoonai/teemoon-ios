@@ -59,10 +59,25 @@ actor LiteRTToolRegistry {
     }
 
     private var registrations: [String: Registration] = [:]
+    /// Closed when the turn that registered these stops or is abandoned; the next turn's bridging opens them.
+    private(set) var isClosed = false
+    /// The conversation whose decode is the current turn's. A call from any other conversation (an abandoned
+    /// decode) runs nothing: it would search under a turn that never asked (reply-machine.json G7).
+    private(set) var liveCaller: UUID?
+
+    func setLive(_ caller: UUID) { liveCaller = caller }
+
+    /// Whether a call from `caller` may run. nil = a direct call with no conversation behind it.
+    func admits(_ caller: UUID?) -> Bool {
+        !isClosed && (caller == nil || caller == liveCaller)
+    }
 
     func register(_ registration: Registration, for name: String) {
         registrations[name] = registration
     }
+
+    func close() { isClosed = true }
+    func open() { isClosed = false; liveCaller = nil }
 
     func registration(for name: String) -> Registration? { registrations[name] }
 
@@ -145,7 +160,7 @@ struct LiteRTWebSearchTool: LiteRTLM.Tool {
 
     func run() async throws -> Any {
         await LiteRTToolBridge.execute(
-            name: Self.name, arguments: rawArguments.mapValues(\.anyValue)
+            name: Self.name, arguments: rawArguments.mapValues(\.anyValue), caller: ToolInvocation.managerID
         )
     }
 }
@@ -238,6 +253,7 @@ enum LiteRTToolBridge {
         // turn, immediately before the conversation is created, so the reset
         // cannot drift out of step with the thing it bounds.
         roundLock.withLock { _roundsUsed = 0 }
+        await LiteRTToolRegistry.shared.open()
         var shims: [LiteRTLM.Tool] = []
         for tool in tools {
             // Only tools with a shim type can cross over. Silently dropping the
@@ -262,9 +278,12 @@ enum LiteRTToolBridge {
     /// Never throws: a thrown error inside LiteRT's loop aborts the whole
     /// generation, whereas an error *string* lets the model recover — which is
     /// how teemoon's own engine already treats tool failures.
-    static func execute(name: String, arguments: [String: Any]) async -> String {
+    static func execute(name: String, arguments: [String: Any], caller: UUID? = nil) async -> String {
         guard let registration = await LiteRTToolRegistry.shared.registration(for: name) else {
             return "[Tool '\(name)' not found]"
+        }
+        guard await LiteRTToolRegistry.shared.admits(caller) else {
+            return "[This turn was stopped. Do not search.]"
         }
 
         // Bound the loop teemoon does not own. Refusing the CALL rather than

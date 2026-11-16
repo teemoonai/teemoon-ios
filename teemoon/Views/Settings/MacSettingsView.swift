@@ -84,7 +84,7 @@ struct MacSettingsView: View {
         .onChange(of: openToProviders) { _, _ in applyDeepLink() }
         .onChange(of: openToSearch) { _, _ in applyDeepLink() }
         .tint(settings.appTintColor.getColor())
-        .environment(\.dynamicTypeSize, settings.appFontSize.getFontSize())
+        .appTextSize(settings.appFontSize)
     }
 
     /// Deep links select a tab and then clear themselves, so reopening settings

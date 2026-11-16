@@ -106,7 +106,7 @@ struct MacDesignSnapshotTests {
 
         init() throws {
             container = try ModelContainer(
-                for: teemoon.Thread.self, Message.self,
+                for: teemoon.Thread.self, Message.self, ImageAttachment.self,
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true))
             session = ConfidentialSession(providers: providers)
         }

@@ -50,6 +50,7 @@ final class WebOfferCaptureUITests: XCTestCase {
     }
 
     override func setUpWithError() throws {
+        try CaptureRig.skipUnlessAsked()
         continueAfterFailure = false
     }
 

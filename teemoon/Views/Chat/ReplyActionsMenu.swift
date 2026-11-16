@@ -23,10 +23,13 @@ import UIKit
 /// the screen, which on a long reply is a big animation just to reach two items.
 struct ReplyActionsMenu: ViewModifier {
     let actions: [ReplyAction]
+    /// For a tappable view (a chat image): its tap, heard here so a long press never also taps. A SwiftUI Button
+    /// under this menu fires on release even after the menu opened; do not put one there.
+    var onTap: (() -> Void)? = nil
 
     func body(content: Content) -> some View {
         content
-            .background(ReplyMenuAnchor(actions: actions))
+            .background(ReplyMenuAnchor(actions: actions, onTap: onTap))
             .accessibilityActions {
                 ForEach(actions.filter { $0.isAvailable() }) { action in
                     Button(action.title, action: action.perform)
@@ -37,10 +40,14 @@ struct ReplyActionsMenu: ViewModifier {
 
 private struct ReplyMenuAnchor: UIViewRepresentable {
     let actions: [ReplyAction]
+    let onTap: (() -> Void)?
 
-    func makeUIView(context: Context) -> AnchorView { AnchorView() }
+    func makeUIView(context: Context) -> AnchorView { AnchorView(ownsPress: onTap != nil) }
 
-    func updateUIView(_ view: AnchorView, context: Context) { view.actions = actions }
+    func updateUIView(_ view: AnchorView, context: Context) {
+        view.actions = actions
+        view.onTap = onTap
+    }
 
     static func dismantleUIView(_ view: AnchorView, coordinator: ()) { view.detach() }
 
@@ -48,6 +55,8 @@ private struct ReplyMenuAnchor: UIViewRepresentable {
     /// SwiftUI content is drawn into the hosting view and never reaches a background UIView.
     final class AnchorView: UIView, UIEditMenuInteractionDelegate, UIGestureRecognizerDelegate {
         var actions: [ReplyAction] = []
+        var onTap: (() -> Void)?
+        private let ownsPress: Bool
         private lazy var menu = UIEditMenuInteraction(delegate: self)
         private lazy var press: UILongPressGestureRecognizer = {
             let r = UILongPressGestureRecognizer(target: self, action: #selector(pressed(_:)))
@@ -55,10 +64,17 @@ private struct ReplyMenuAnchor: UIViewRepresentable {
             r.delegate = self
             return r
         }()
+        private lazy var tap: UITapGestureRecognizer = {
+            let r = UITapGestureRecognizer(target: self, action: #selector(tapped))
+            r.delegate = self
+            r.require(toFail: press)
+            return r
+        }()
         private weak var host: UIView?
 
-        override init(frame: CGRect) {
-            super.init(frame: frame)
+        init(ownsPress: Bool) {
+            self.ownsPress = ownsPress
+            super.init(frame: .zero)
             isUserInteractionEnabled = false
             addInteraction(menu)
         }
@@ -72,13 +88,17 @@ private struct ReplyMenuAnchor: UIViewRepresentable {
             while let v = cell, !(v is UICollectionViewCell) { cell = v.superview }
             let parent = cell ?? window
             parent.addGestureRecognizer(press)
+            if ownsPress { parent.addGestureRecognizer(tap) }
             host = parent
         }
 
         func detach() {
             host?.removeGestureRecognizer(press)
+            host?.removeGestureRecognizer(tap)
             host = nil
         }
+
+        @objc private func tapped() { onTap?() }
 
         @objc private func pressed(_ r: UILongPressGestureRecognizer) {
             guard r.state == .began, !actions.isEmpty else { return }
@@ -90,6 +110,10 @@ private struct ReplyMenuAnchor: UIViewRepresentable {
 
         func gestureRecognizer(_ g: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            !ownsPress || bounds.contains(touch.location(in: self))
+        }
 
         /// The reply text's own long-press (the selection loupe) waits on the menu's, so a
         /// long-press is always the menu. Double-tap and the handles stay native selection.

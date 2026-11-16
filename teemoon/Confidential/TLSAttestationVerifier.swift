@@ -2,9 +2,9 @@
 //  TLSAttestationVerifier.swift
 //  teemoon
 //
-//  TLS attestation — proves the HTTPS connection terminates INSIDE the model
-//  TEE, so nothing between the device and the enclave (network, load
-//  balancers, near.ai's own infrastructure) can read the traffic.
+//  TLS attestation of the model node: a separate probe connection to its direct
+//  host whose certificate key must be bound into the node's quote. The chat goes
+//  through near.ai's gateway on another, unpinned connection: never claim this covers it.
 //
 //  near.ai's documented flow (docs.near.ai/cloud/verification/tls), validated
 //  live against a real endpoint:
@@ -33,21 +33,17 @@ import os
 private let logger = Logger(subsystem: "ai.teemoon", category: "tls-attest")
 
 enum TLSAttestation: Equatable, Sendable {
-    /// Connection provably terminates inside the attested TEE.
+    /// The probe connection's certificate key is bound into the model node's quote.
     case verified
-    /// A genuine NEGATIVE binding — the live certificate does NOT match the
-    /// attested fingerprint (possible MITM). Adversarial: a HARD failure.
+    /// The live certificate doesn't match the attested binding, or near.ai's evidence is malformed. HARD: blocks.
     case failed(String)
-    /// The check couldn't be completed — request failed, no certificate,
-    /// missing/unparseable fields. Fail-closed (still degrades) but NOT
-    /// adversarial: a network blip must never be branded interception.
+    /// An outage, or teemoon's own fault. Malformed evidence is `.failed` (near-gate-nvidia-tls-split).
     case inconclusive(String)
     /// Not attempted (no direct host to verify against).
     case notPerformed
 
     var isVerified: Bool { self == .verified }
-    /// True only for a genuine fingerprint mismatch — drives the RED hard tier.
-    /// `.inconclusive` is soft (confirm-to-proceed), never hard.
+    /// Drives the red, blocking tier. `.inconclusive` is soft (confirm-to-proceed), never hard.
     var isHardFailure: Bool { if case .failed = self { return true }; return false }
     /// Attempted and did not verify (either hard or inconclusive) — both degrade.
     var isUnverified: Bool {
@@ -77,14 +73,14 @@ struct TLSAttestationVerifier {
         let nonce = Self.randomNonce()
         guard var components = URLComponents(url: directBaseURL.appendingPathComponent("attestation/report"),
                                              resolvingAgainstBaseURL: false) else {
-            return .inconclusive("could not build TLS attestation URL")
+            return .inconclusive(NRASVerification.teemoonFault)
         }
         components.queryItems = [
             URLQueryItem(name: "include_tls_fingerprint", value: "true"),
             URLQueryItem(name: "signing_algo", value: "ecdsa"),
             URLQueryItem(name: "nonce", value: nonce),
         ]
-        guard let url = components.url else { return .inconclusive("could not build TLS attestation URL") }
+        guard let url = components.url else { return .inconclusive(NRASVerification.teemoonFault) }
 
         // A dedicated session so accepting the enclave's self-signed cert is
         // scoped to THIS request and never affects the app's other traffic.
@@ -98,19 +94,9 @@ struct TLSAttestationVerifier {
               (response as? HTTPURLResponse)?.statusCode == 200 else {
             return .inconclusive("TLS attestation request failed")
         }
-        guard let certDER = capture.certificateDER else {
-            return .inconclusive("no server certificate captured")
-        }
-        guard let report = try? JSONDecoder().decode(TLSReport.self, from: data),
-              let quote = report.intelQuote, let address = report.signingAddress,
-              let fingerprint = report.tlsCertFingerprint else {
-            return .inconclusive("attestation response missing TLS fields")
-        }
-        let result = Self.verifyBindings(
-            quoteHex: quote, signingAddress: address, signingAlgo: report.signingAlgo ?? "ecdsa",
-            tlsCertFingerprintHex: fingerprint, liveCertDER: certDER, nonceHex: nonce)
+        let (result, quote) = Self.verifyResponse(data, liveCertDER: capture.certificateDER, nonceHex: nonce)
         if case .failed(let why) = result { logger.warning("[tls] \(why, privacy: .public)") }
-        guard result == .verified else { return result }
+        guard result == .verified, let quote else { return result }
         let verdict = Self.withQuoteCheck(result, dcap: await quoteCheck(quote))
         if case .failed(let why) = verdict { logger.warning("[tls] \(why, privacy: .public)") }
         return verdict
@@ -121,8 +107,11 @@ struct TLSAttestationVerifier {
     /// check, as it does for the record's quotes.
     static func withQuoteCheck(_ bindings: TLSAttestation, dcap: DCAPVerification) -> TLSAttestation {
         guard bindings == .verified else { return bindings }
+        // Not hard is not verified: a quote Intel couldn't check proves nothing about the connection.
+        if case .unchecked(let reason) = dcap { return .inconclusive("TLS attestation quote couldn't be checked (\(reason))") }
         guard dcap.isHardFailure else { return .verified }
         switch dcap {
+        case .unchecked(let reason): return .inconclusive(reason)
         case .failed(let reason): return .failed("TLS attestation quote failed DCAP verification (\(reason))")
         case .verified(let tcb, _, _): return .failed("TLS attestation quote TCB status \(tcb.rawValue) is not accepted")
         }
@@ -155,15 +144,29 @@ struct TLSAttestationVerifier {
 
     // MARK: - Pure verification (testable offline against a captured fixture)
 
+    /// The probe's 200 body against the live certificate; the quote comes back for the DCAP step.
+    static func verifyResponse(_ data: Data, liveCertDER: Data?, nonceHex: String) -> (TLSAttestation, quote: String?) {
+        // Not captured is our capture or the connection: soft. A captured certificate that won't parse is evidence.
+        guard let liveCertDER else { return (.inconclusive("no server certificate captured"), nil) }
+        guard let report = try? JSONDecoder().decode(TLSReport.self, from: data),
+              let quote = report.intelQuote, let address = report.signingAddress,
+              let fingerprint = report.tlsCertFingerprint else {
+            return (.failed("attestation response missing TLS fields"), nil)
+        }
+        return (verifyBindings(quoteHex: quote, signingAddress: address, signingAlgo: report.signingAlgo ?? "ecdsa",
+                               tlsCertFingerprintHex: fingerprint, liveCertDER: liveCertDER, nonceHex: nonceHex), quote)
+    }
+
     /// Verifies the three TLS-attestation bindings. Pure — no network.
     static func verifyBindings(
         quoteHex: String, signingAddress: String, signingAlgo: String,
         tlsCertFingerprintHex: String, liveCertDER: Data, nonceHex: String
     ) -> TLSAttestation {
         // 1. The live certificate's SPKI hash must equal the attested value —
-        //    this is what proves the connection terminates in the TEE.
+        //    this ties the probe connection's key to the TEE.
+        //    The hash covers the whole SPKI whatever its key type, so nil here is malformed DER, never "unsupported".
         guard let liveSPKI = spkiSHA256(certDER: liveCertDER) else {
-            return .inconclusive("could not read the TLS certificate’s public key")
+            return .failed("could not read the TLS certificate’s public key")
         }
         guard liveSPKI.caseInsensitiveCompare(tlsCertFingerprintHex) == .orderedSame else {
             return .failed("live TLS certificate does not match the attested fingerprint")
@@ -171,7 +174,7 @@ struct TLSAttestationVerifier {
         // 2. report_data[0:32] == SHA256(signing_address ‖ tls_cert_fingerprint)
         guard let raw = try? Data(hexString: quoteHex),
               let quote = try? DcapQvl.parseQuote(rawQuote: raw) else {
-            return .inconclusive("could not parse the attestation quote")
+            return .failed("could not parse the attestation quote")
         }
         let reportData: Data
         switch quote.report {
@@ -179,13 +182,13 @@ struct TLSAttestationVerifier {
         case .td15(let r): reportData = r.base.reportData
         case .sgx(let r):  reportData = r.reportData
         }
-        guard reportData.count >= 64 else { return .inconclusive("unexpected report_data length") }
+        guard reportData.count >= 64 else { return .failed("unexpected report_data length") }
 
         let addrHex = signingAlgo.lowercased() == "ecdsa" && signingAddress.hasPrefix("0x")
             ? String(signingAddress.dropFirst(2)) : signingAddress
         guard let addrBytes = try? Data(hexString: addrHex),
               let fpBytes = try? Data(hexString: tlsCertFingerprintHex) else {
-            return .inconclusive("bad signing address or fingerprint encoding")
+            return .failed("bad signing address or fingerprint encoding")
         }
         let expected = Data(SHA256.hash(data: addrBytes + fpBytes))
         guard reportData.prefix(32) == expected else {

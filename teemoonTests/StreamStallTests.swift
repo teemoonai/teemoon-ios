@@ -3,7 +3,7 @@
 //  teemoonTests
 //
 //  NVIDIA's free endpoint held glm-5.3-flash 253–282 s before headers
-//  (2026-10-19, internal curl runs), so a 240 s request timeout failed requests
+//  (2026-10-19, pm's curl runs), so a 240 s request timeout failed requests
 //  that were only queued. The wait for headers is long; a stream that stops
 //  after headers still ends.
 //

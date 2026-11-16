@@ -74,7 +74,7 @@ final class MacAttestationUITests: XCTestCase {
     /// ⌘I opens the inspector — the Mac convention, and the thing that makes
     /// this reachable without hunting for a 22pt chip.
     func testCommandIOpensTheInspector() throws {
-        XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textViews["chat.composer"].waitForExistence(timeout: 10))
         let before = app.windows.count
 
         app.typeKey("i", modifierFlags: .command)
@@ -90,7 +90,7 @@ final class MacAttestationUITests: XCTestCase {
     /// by thread, so a second ⌘I must raise the existing window rather than
     /// stack another.
     func testTheInspectorIsASingleWindow() throws {
-        XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textViews["chat.composer"].waitForExistence(timeout: 10))
         app.typeKey("i", modifierFlags: .command)
 
         let opened = NSPredicate(format: "count > 1")
@@ -112,7 +112,7 @@ final class MacAttestationUITests: XCTestCase {
     /// UI. Same defect, different screen, and the feature-scoped test could not
     /// see it. This one sweeps the surfaces a user actually opens.
     func testNoMacSurfaceMentionsAPhone() throws {
-        XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textViews["chat.composer"].waitForExistence(timeout: 10))
 
         var offenders: [String] = []
 
@@ -149,7 +149,7 @@ final class MacAttestationUITests: XCTestCase {
     /// Six shipped strings named the wrong machine — "readable only here, on
     /// your phone". Not a tone problem on a Mac; false.
     func testNoCopyMentionsAPhone() throws {
-        XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textViews["chat.composer"].waitForExistence(timeout: 10))
         app.typeKey("i", modifierFlags: .command)
 
         let inspector = app.windows["who can read this?"]

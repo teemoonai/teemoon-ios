@@ -13,7 +13,7 @@ struct ChatSearchServiceTests {
     @MainActor
     private func makeContainer() throws -> ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return try ModelContainer(for: ChatThread.self, Message.self, configurations: config)
+        return try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self, configurations: config)
     }
 
     private func makeIndexURL() -> URL {
@@ -34,6 +34,32 @@ struct ChatSearchServiceTests {
     }
 
     // MARK: - Hooks
+
+    /// A retry and a Think Harder reach the index through didDelete(messageIDs:):
+    /// deleted text, like a deleted chat's. A plain remove left the reply's words
+    /// in the index's -wal until some later checkpoint (Android 2137c945).
+    @Test @MainActor func didDelete_leavesTheTextInNoFile() async throws {
+        let url = makeIndexURL(); defer { cleanUp(url) }
+        let (service, index) = makeService(url)
+        let container = try makeContainer()
+        let thread = ChatThread()
+        container.mainContext.insert(thread)
+        let kept = Message(role: .user, content: "the kept question", thread: thread)
+        let dropped = Message(role: .assistant, content: "zanzibarquokka was the replaced reply", thread: thread)
+        container.mainContext.insert(kept)
+        container.mainContext.insert(dropped)
+        service.didWrite(kept)
+        service.didWrite(dropped)
+        await service.drainPendingWork()
+
+        service.didDelete(messageIDs: [dropped.id])
+        await service.drainPendingWork()
+
+        #expect(try await index.search("zanzibarquokka", granularity: .messages, limit: 10).isEmpty)
+        #expect(StoreResidueTests.hits("zanzibarquokka", at: url) == 0,
+                "the index's db, -wal or -shm still holds the deleted reply")
+        #expect(try await index.search("kept", granularity: .messages, limit: 10).count == 1)
+    }
 
     @Test @MainActor func didWrite_makesAMessageFindable() async throws {
         let url = makeIndexURL(); defer { cleanUp(url) }

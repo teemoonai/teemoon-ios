@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import os
 import Testing
 @testable import teemoon
 
@@ -104,5 +105,37 @@ struct EndpointDirectoryFailureTests {
         }
         #expect(FailingDirectoryStub.requests == 1)
     }
+
+    /// A refresh cancelled mid-fetch (a model switch) is not a failure: the next
+    /// refresh must still ask, or an own-fleet model reads degraded for a minute.
+    @Test func aCancelledFetchIsNotRememberedAsAFailure() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HangingThenFailingDirectoryStub.self]
+        HangingThenFailingDirectoryStub.requests.withLock { $0 = 0 }
+        let directory = EndpointDirectory(session: URLSession(configuration: config))
+        let first = Task { await directory.directBase(forModel: "own/one") }
+        for _ in 0..<200 where HangingThenFailingDirectoryStub.requests.withLock({ $0 }) == 0 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        first.cancel()
+        _ = await first.value
+        _ = await directory.directBase(forModel: "own/one")
+        #expect(HangingThenFailingDirectoryStub.requests.withLock { $0 } == 2)
+    }
 }
+}
+
+/// The first request never answers (until cancelled); later ones answer 503.
+private final class HangingThenFailingDirectoryStub: URLProtocol {
+    static let requests = OSAllocatedUnfairLock(initialState: 0)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        let n = Self.requests.withLock { $0 += 1; return $0 }
+        guard n > 1 else { return }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
 }

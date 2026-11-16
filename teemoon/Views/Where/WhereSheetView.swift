@@ -19,6 +19,8 @@ struct WhereSheetView: View {
     var openToGet: Bool = false
 
     @State var filter: WhereLocality?
+    /// The "show only" row's filters (docs/IMAGES.md §4e). Off on every open but the can't-see ones.
+    @State var showOnly: ModelBrowserQuery.Filter
     /// What the add sheet is being opened FOR.
     ///
     /// One value, not a bool plus a flag. It was `showAddProvider` alongside
@@ -30,9 +32,6 @@ struct WhereSheetView: View {
     /// An item-based sheet can't come apart that way, because the thing that
     /// triggers presentation IS the thing that describes it.
     @State var addTarget: AddTarget?
-    /// Presented to pull a model onto a home server — the affordance lives in
-    /// the provider's own edit sheet.
-    @State var editingProvider: Provider?
     /// Machine to pull a model onto — presents the pull sheet directly, with no
     /// detour through the provider's settings form.
     @State var pullingOnProvider: Provider?
@@ -50,20 +49,30 @@ struct WhereSheetView: View {
         case deleteFromServer(Equipped)
         /// The machine refused a delete, so the row reappearing has a reason.
         case deleteFailed(String)
-        /// A phone download tapped on mobile data; the user picks its network.
-        case cellularDownload(CellularDownloadRequest)
+        /// A phone model this phone can never run images with: the permanent line, and a smaller model if one fits.
+        case phoneCantDoImages(Equipped)
 
         var id: String {
             switch self {
+            case .phoneCantDoImages(let r): return "images#\(r.id)"
             case .deleteWeights(let m):    return "weights#\(m.id)"
             case .deleteFromServer(let r): return "server#\(r.id)"
             case .deleteFailed(let m):     return "failed#\(m)"
-            case .cellularDownload(let r): return "cellular#\(r.id)"
             }
         }
     }
     @State var pendingAlert: PendingAlert?
-    @State var browseProvider: Provider?
+    /// A phone download tapped on mobile data; the user picks its network in an action sheet.
+    @State var cellularRequest: CellularDownloadRequest?
+    @State var browseTarget: BrowseTarget?
+    struct BrowseTarget: Identifiable, Hashable {
+        let provider: Provider
+        let filters: ModelBrowserQuery.Filter
+        var id: UUID { provider.id }
+
+        static func == (a: Self, b: Self) -> Bool { a.id == b.id && a.filters == b.filters }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
     /// The row whose detail page is open — PROVIDER AND MODEL, never the model
     /// alone.
     ///
@@ -74,6 +83,10 @@ struct WhereSheetView: View {
     /// actively encourages (`deepseek-v4-flash` on near.ai, `-0731` on
     /// fireworks) and which decides both the live fetch and the price.
     @State var detailTarget: ModelDetailTarget?
+    /// Developer mode's reasoning bar and the levels it pushes to (docs/COMPOSER_PANEL.md §Developer mode).
+    @AppStorage(UserDefaultsKey.developerModeEnabled) private var developerMode = false
+    @State private var showsReasoningLevels = false
+    @Environment(\.dynamicTypeSize) private var sheetTypeSize
     /// Preset whose key the user is about to enter — the add sheet opens on it.
     @State var addingPreset: Provider?
     /// Provider ids as they were before an add sheet opened, so the one that came
@@ -132,6 +145,7 @@ struct WhereSheetView: View {
     init(
         openToGet: Bool = false,
         startingAt filter: WhereLocality? = nil,
+        showingOnly: ModelBrowserQuery.Filter = [],
         pathObserver: NetworkPathObserver = .shared,
         downloader: LocalModelDownloader = .shared,
         // Defaulted to a shared instance rather than a fresh one: the init is
@@ -149,9 +163,47 @@ struct WhereSheetView: View {
         self.isInstalled = isInstalled
         self.keyOverride = hasKey
         _filter = State(initialValue: filter)
+        _showOnly = State(initialValue: showingOnly)
     }
 
     var body: some View {
+        sheet
+    }
+
+    #if !os(macOS)
+    /// The phone's screen height, from the window scene the app runs in.
+    private static var screenHeight: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 852
+    }
+    #endif
+
+    #if os(iOS)
+    /// The selected model as the reasoning bar needs it; nil hides the bar (developer mode off, nothing sent, first run).
+    private var reasoningSetup: (setup: ReasoningLevel.Setup, row: ReasoningLevel.Row)? {
+        guard !showsFirstRun, let provider = providerStore.activeProvider else { return nil }
+        let setup = ReasoningLevel.Setup(provider, model: provider.model, store: providerStore)
+        return setup.row(developerMode: developerMode).map { (setup, $0) }
+    }
+
+    @ViewBuilder
+    private var reasoningBar: some View {
+        if let reasoningSetup {
+            WhereReasoningBar(row: reasoningSetup.row, setup: reasoningSetup.setup.provider) {
+                showsReasoningLevels = true
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var reasoningLevels: some View {
+        if let reasoningSetup {
+            ReasoningLevelsPage(row: reasoningSetup.row, setup: reasoningSetup.setup.provider,
+                                modelName: WhereProviderPresentation.chipLabel(for: reasoningSetup.setup.provider))
+        }
+    }
+    #endif
+
+    private var sheet: some View {
         NavigationStack {
             ScrollViewReader { scroller in
             List {
@@ -163,6 +215,11 @@ struct WhereSheetView: View {
                     firstRunSections
                 } else {
                     localityPicker
+                    #if os(iOS)
+                        // The show-only row belongs to the tabs (mock: 6 pt under them).
+                        .listSectionSpacing(.custom(4))
+                    #endif
+                    showOnlySection
                     readySection
                     if pathObserver.isSatisfied {
                         recentsSection
@@ -178,7 +235,7 @@ struct WhereSheetView: View {
                             addingPreset: $addingPreset,
                             pullingOnProvider: $pullingOnProvider,
                             detailTarget: $detailTarget,
-                            openBrowse: openBrowse,
+                            openBrowse: { openBrowse($0, filters: $1) },
                             startAndSelect: startAndSelect
                         )
                     } else {
@@ -187,6 +244,10 @@ struct WhereSheetView: View {
                 }
             }
             .groupedListStyle()
+            #if os(iOS)
+            .safeAreaInset(edge: .bottom, spacing: 0) { reasoningBar }
+            .navigationDestination(isPresented: $showsReasoningLevels) { reasoningLevels }
+            #endif
             // PUSHED, like settings → places & keys, and the same screens:
             // the computer form, or pick the provider then its key form. A
             // sheet rising over this sheet read as a different task, and two
@@ -275,14 +336,16 @@ struct WhereSheetView: View {
                 AddEditProviderView(
                     mode: .add,
                     startsCustom: true,
-                    customStart: target == .selfHosted ? .computer : .cloudKey
+                    customStart: target == .selfHosted ? .computer : .cloudKey,
+                    browseFilters: showOnly
                 )
             }
-            .sheet(item: $browseProvider) { provider in
-                browseSheet(for: provider)
+            // Looking at models PUSHES inside this sheet (§4e, the maintainer 2026-11-11); only forms that add or change a
+            // setup are sheets.
+            .navigationDestination(item: $browseTarget) { target in
+                browseSheet(for: target.provider, filters: target.filters)
             }
-            .sheet(item: $detailTarget) { target in
-                NavigationStack {
+            .navigationDestination(item: $detailTarget) { target in
                     ModelDetailView(
                         model: target.model,
                         // The entry says what it knows; this view does not
@@ -295,14 +358,11 @@ struct WhereSheetView: View {
                         // is always behind.
                         liveLoader: liveModelLoader(for: target.provider,
                                                     id: target.model.id),
-                        offersLoader: offersLoader(for: target.provider, id: target.model.id)
+                        offersLoader: offersLoader(for: target.provider, id: target.model.id),
+                        reasoning: ReasoningLevel.Setup(target.provider, model: target.model.id, store: providerStore)
                     )
-                }
             }
-            .sheet(item: $editingProvider) { provider in
-                AddEditProviderView(mode: .edit(provider))
-            }
-            .sheet(item: $pullingOnProvider) { provider in
+            .navigationDestination(item: $pullingOnProvider) { provider in
                 if let base = provider.openAIBaseURL {
                     OllamaModelDownloadView(
                         baseURL: base,
@@ -329,12 +389,14 @@ struct WhereSheetView: View {
                         },
                         // What this machine already serves, so the sheet stops
                         // offering a model it has had for weeks.
-                        installed: homeProbe.info(for: provider)?.models ?? []
+                        installed: homeProbe.info(for: provider)?.models ?? [],
+                        browseFilters: showOnly,
+                        embedsNavigationStack: false
                     )
                 }
             }
             .sheet(item: $addingPreset, onDismiss: adoptNewlyAdded) { preset in
-                AddEditProviderView(mode: .add, initialPreset: preset)
+                AddEditProviderView(mode: .add, initialPreset: preset, browseFilters: showOnly)
             }
             // ONE alert for the whole sheet, dispatched on an enum.
             //
@@ -359,29 +421,26 @@ struct WhereSheetView: View {
                 case .deleteFailed(let message):
                     return Alert(title: Text("couldn't delete"), message: Text(message),
                                  dismissButton: .default(Text("ok")))
+                case .phoneCantDoImages(let row):
+                    let line = PhoneImageMemory.permanentLine(
+                        model: WhereProviderPresentation.modelLabel(for: row.asActive).lowercased())
+                    guard let smaller = row.provider.localModelID.flatMap(PhoneImageMemory.smallerModel(than:))
+                            .flatMap(LocalModelCatalog.model(id:)) else {
+                        return Alert(title: Text(line), dismissButton: .default(Text("ok")))
+                    }
+                    return Alert(title: Text(line),
+                                 primaryButton: .default(Text("use \(smaller.displayName.lowercased())")) { useSmaller(smaller) },
+                                 secondaryButton: .cancel(Text("ok")))
                 case .deleteWeights(let model):
                     return Alert(
                         title: Text("delete \(model.displayName)?"),
-                        message: Text("frees \(model.sizeLabel). it moves back to get, and you can download it again."),
+                        message: Text("frees \(LocalModelStorage.sizeOnDiskLabel(for: model)). it moves back to get, and you can download it again."),
                         primaryButton: .destructive(Text("delete")) { deleteWeights(model) },
                         secondaryButton: .cancel(Text("keep"))
                     )
-                case .cellularDownload(let request):
-                    // Two buttons is all `Alert` has, so dismissing means the
-                    // safe choice: queued for wi-fi, visible in the row with its
-                    // own cancel, and not a byte on the plan.
-                    return Alert(
-                        title: Text(CellularDownloadGate.title(for: request.reason)),
-                        message: Text(CellularDownloadGate.message(for: request.reason, model: request.model)),
-                        primaryButton: .default(Text("download now")) {
-                            startAndSelect(request.model, network: .any)
-                        },
-                        secondaryButton: .cancel(Text("wait for wi-fi")) {
-                            startAndSelect(request.model, network: .wifiOnly)
-                        }
-                    )
                 }
             }
+            .cellularDownloadPrompt($cellularRequest) { model, network in startAndSelect(model, network: network) }
             .task {
                 // Persisted facts FIRST, so a machine that answered before is named
                 // and listed on the first frame instead of after the network agrees
@@ -398,6 +457,9 @@ struct WhereSheetView: View {
                     credential: { providerStore.browseCredential(for: $0) })
                 _ = await (home, catalogues)
                 syncHomeEquipped()
+                await HomeCapabilityRefresh.shared.refresh(providerStore.providers,
+                                                           kind: { homeProbe.info(for: $0)?.kind ?? providerStore.storedKind(of: $0) },
+                                                           adopt: { providerStore.adoptCapabilities(from: $0, forServer: $1) })
             }
             .onAppear {
                 // NO cloud override.
@@ -487,7 +549,11 @@ struct WhereSheetView: View {
         // second window.
         .frame(width: 380, height: 545)
         #else
-        .presentationDetents(showsFirstRun ? [.fraction(0.76), .large] : [.medium, .large])
+        // At accessibility sizes and on short phones the half detent left about one model row (the maintainer 2026-11-13).
+        .presentationDetents(ReasoningLevel.whereOpensLarge(accessibilitySize: sheetTypeSize.isAccessibilitySize,
+                                                            screenHeight: Self.screenHeight) ? [.large]
+                             : showsFirstRun ? [.fraction(0.76), .large]
+                             : [.height(ReasoningLevel.whereMiddleHeight(screenHeight: Self.screenHeight)), .large])
         .presentationDragIndicator(.visible)
         #endif
         // OPAQUE, not the default material.
@@ -521,7 +587,7 @@ struct WhereSheetView: View {
     /// the two halves of one answer, not chapters.
     func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: ControlMetrics.sheetSectionHeaderSize, weight: .semibold))
+            .scaledFont(size: ControlMetrics.sheetSectionHeaderSize, weight: .semibold)
             // `.secondary` inside a List header gets dimmed AGAIN by the list's
             // own header treatment, landing well under the design's 0.6 and
             // reading as disabled. An explicit opacity survives it.
@@ -550,6 +616,10 @@ struct WhereSheetView: View {
             catalogCount: { provider in
                 LiveCatalogStore.shared.count(for: provider,
                                               apiKey: self.providerStore.browseCredential(for: provider))
+            },
+            show: WhereFilterPolicy(filters: showOnly),
+            catalogModels: { provider in
+                LiveCatalogStore.shared.models(for: provider, apiKey: self.providerStore.browseCredential(for: provider))
             }
         )
     }

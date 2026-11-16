@@ -40,6 +40,8 @@ struct RequestResult: Sendable {
     let isE2EEActive: Bool
     /// The effort each request of the turn sent, in order; nil where it sent none.
     var effortLevels: [String?] = []
+    /// How the final request's stream ended.
+    var finish: TurnEnd? = nil
 }
 
 /// All callbacks the generation engine uses to communicate with ChatGeneration.

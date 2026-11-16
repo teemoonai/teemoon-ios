@@ -40,6 +40,8 @@ import XCTest
 
 final class WireProofCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     /// near.ai's top E2EE flagship — the tier the wire proof is about. A
     /// proxied model would still encrypt in transit but is not the claim the
     /// site's callouts make about `X-Model-Pub-Key`.

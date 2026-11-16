@@ -15,10 +15,34 @@ import ModelBackend
 @Suite("Product live endpoints")
 struct ProductLiveEndpointTests {
 
+    /// A near.ai outage (502/503/504 "unavailable", 429 "overloaded") BEFORE any reply was verified is the smoke suite's:
+    /// retried at 2, 4, 8 s, then a named known issue (SMOKE-SKIP), never a pass. After a verified turn, or any
+    /// verification failure, it fails: this is a trust check and an outage must never mask one (pm 2026-11-13).
     @Test @MainActor func twoTurnReplySignaturesCheckOut() async throws {
         guard let apiKey = hostHomeFile(".NEAR_AI_API_KEY") else {
             return // file not visible in this process — skip, don't fail CI
         }
+        for (attempt, wait) in (SmokeOverload.backoffSeconds + [0]).enumerated() {
+            let verified = LockedBox(0)
+            do {
+                return try await twoTurns(apiKey: apiKey, verified: verified)
+            } catch {
+                let message = (error as? LLMError)?.userMessage ?? error.localizedDescription
+                guard let status = SmokeOverload.outageBeforeVerification(verifiedTurns: verified.value,
+                                                                          message: message) else { throw error }
+                if attempt == SmokeOverload.backoffSeconds.count {
+                    let reason = "provider overloaded: near.ai \(Provider.nearAI.model) \(status) (live E2E)"
+                    print("SMOKE-SKIP \(reason)")
+                    withKnownIssue(Comment(rawValue: reason)) { Issue.record(Comment(rawValue: reason)) }
+                    return
+                }
+                try await Task.sleep(for: .seconds(wait))
+            }
+        }
+    }
+
+    @MainActor
+    private func twoTurns(apiKey: String, verified: LockedBox<Int>) async throws {
 
         var provider = Provider.nearAI
         provider.extraParams = ["max_tokens": "64"]
@@ -36,6 +60,7 @@ struct ProductLiveEndpointTests {
             prior: [], provider: provider, apiKey: apiKey, context: context
         )
         try assertCheckedOut(first, turn: 1)
+        verified.value += 1
 
         let second = try await turn(
             prompt: "Reply with exactly one word: ok",

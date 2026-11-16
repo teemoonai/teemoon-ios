@@ -52,8 +52,8 @@ enum UITestStoreSeeding {
         let base = Date(timeIntervalSince1970: 1_770_000_000)
 
         func thread(_ title: String, daysAgo: Int, turns: [(Role, String)]) {
+            // `title` labels the fixture only: chats teemoon creates have none (imports do), and the list shows it.
             let thread = Thread()
-            thread.title = title
             thread.timestamp = base.addingTimeInterval(TimeInterval(-daysAgo * 86_400))
             context.insert(thread)
             for (offset, turn) in turns.enumerated() {
@@ -133,7 +133,6 @@ enum UITestStoreSeeding {
 
         for (t, threadShape) in shapes.enumerated() {
             let thread = Thread()
-            thread.title = "shaped thread \(t)"
             thread.timestamp = base.addingTimeInterval(TimeInterval(-t * 3600))
             context.insert(thread)
             for (i, s) in threadShape.messages.enumerated() {
@@ -174,7 +173,6 @@ enum UITestStoreSeeding {
         // a cold re-open needs somewhere else to go first. Seeded older than the
         // long thread so it never takes the first row.
         let scratch = Thread()
-        scratch.title = "scratch"
         scratch.timestamp = base.addingTimeInterval(-86_400)
         context.insert(scratch)
         for (offset, turn) in [(Role.user, "scratch"), (.assistant, "scratch reply")].enumerated() {
@@ -184,7 +182,6 @@ enum UITestStoreSeeding {
         }
 
         let thread = Thread()
-        thread.title = "long thread (\(turns) turns)"
         thread.timestamp = base
         context.insert(thread)
 

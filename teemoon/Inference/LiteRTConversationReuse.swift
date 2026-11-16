@@ -31,6 +31,9 @@ struct KeptConversationState: Equatable, Sendable {
 
 enum LiteRTConversationReuse {
 
+    /// A request with any image, current or earlier, prefills everything and keeps nothing (IMAGES.md §4b).
+    static func reusable(requestImages: Int) -> Bool { requestImages == 0 }
+
     /// A thinking turn never reuses: kept conversations are thinking-off ones (`afterTurn`).
     static func canReuse(_ kept: KeptConversationState?, systemMessage: String?, toolNames: [String],
                          history: [KeptConversationState.Turn], thinking: Bool = false) -> Bool {
@@ -41,9 +44,9 @@ enum LiteRTConversationReuse {
     /// What the conversation holds after a completed turn, or nil when it must not be kept.
     static func afterTurn(systemMessage: String?, toolNames: [String], history: [KeptConversationState.Turn],
                           userText: String, rawAnswer: String, toolsRan: Int, completed: Bool,
-                          thinking: Bool = false) -> KeptConversationState? {
-        // A thinking turn's KV holds the thought, which no seed carries.
-        guard completed, toolsRan == 0, !thinking, !rawAnswer.isEmpty else { return nil }
+                          thinking: Bool = false, images: Int = 0) -> KeptConversationState? {
+        // A thinking turn's KV holds the thought, and an image turn's the image; no seed carries either.
+        guard completed, toolsRan == 0, !thinking, images == 0, !rawAnswer.isEmpty else { return nil }
         return KeptConversationState(
             systemMessage: systemMessage, toolNames: toolNames,
             transcript: history + [.init(role: "user", text: userText),

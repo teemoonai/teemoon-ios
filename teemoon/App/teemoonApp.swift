@@ -31,6 +31,10 @@ struct TeemoonApp: App {
         guard ProcessInfo.processInfo.environment["TEEMOON_NATIVE_LOG"] == "1" else { return }
         let url = URL.documentsDirectory.appending(component: "native.log")
         _ = freopen(url.path, "a", stderr)
+        var log = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? log.setResourceValues(values)
         setvbuf(stderr, nil, _IONBF, 0)
         fputs("=== launch \(Date()) ===\n", stderr)
     }
@@ -39,6 +43,12 @@ struct TeemoonApp: App {
         // First: the shared URL cache stores nothing, ever. See SharedURLCache.
         SharedURLCache.disable()
         Self.captureNativeLogIfAsked()
+        // No import flow is open yet: a staged export left here was left by a crash.
+        ImportStaging.app.sweep()
+        // Shares older than ShareInbox.expiry go, whether or not one is ever opened again.
+        ShareInbox.inApp()?.purgeExpired()
+        // An image turn still marked from the last run was killed by the OS (§4b).
+        PhoneImageMemory.KillStore.shared.settleAfterLaunch()
         #if DEBUG
         // Armed by -scrollTrace, like the traces. When the main thread stops
         // answering, this writes its actual stacks to Documents/hangstacks.log
@@ -116,11 +126,13 @@ struct TeemoonApp: App {
         }
         #if DEBUG
         // A UI test that needs a blank slate — no weights, no landed file, no
-        // resume data from an earlier run against a different server. Gated on
+        // resume data from an earlier run against a different server, and no
+        // saved model lists (a fresh install's unseen near.ai tiers). Gated on
         // --uitesting so no real launch can wipe a user's models.
         if ProcessInfo.processInfo.arguments.contains("--uitesting"),
            ProcessInfo.processInfo.environment["UITEST_RESET_LOCAL_MODELS"] == "1" {
             for model in LocalModelCatalog.all { try? LocalModelStorage.delete(model) }
+            if let lists = LiveCatalogStore.defaultDirectory { try? FileManager.default.removeItem(at: lists) }
         }
         // G5: a stand-in where a catalog model's weights go, so the delete path
         // can be walked without 2.4 GB on disk. Simulator only, and never over a
@@ -145,6 +157,18 @@ struct TeemoonApp: App {
         NetworkPathObserver.shared.addChangeHandler { mobileData, constrained in
             LocalModelDownloader.shared.pathChanged(isMobileData: mobileData, isConstrained: constrained)
         }
+        // A copied debug card masks every key the app holds and every custom auth header name.
+        DebugHeaderRedaction.storedSecrets = { [weak store, weak settings] in
+            guard Foundation.Thread.isMainThread else { return [] }
+            return MainActor.assumeIsolated {
+                (store?.providers.map { store?.credential(for: $0) ?? "" } ?? []) + [settings?.groundingAPIKey].compactMap { $0 }
+            }
+        }
+        DebugHeaderRedaction.credentialHeaderNames = { [weak store] in
+            guard Foundation.Thread.isMainThread else { return [] }
+            return MainActor.assumeIsolated { Set(store?.providers.compactMap { $0.authHeaderName?.lowercased() } ?? []) }
+        }
+        store.followCapabilities(of: .shared)
         _appSettings = State(initialValue: settings)
         _providerStore = State(initialValue: store)
         _confidentialSession = State(initialValue: session)
@@ -156,7 +180,7 @@ struct TeemoonApp: App {
         // archive/saved-places; restore = revert that commit). Dropping the
         // empty standalone table is the schema shape the wiki experiment
         // device-verified as a safe lightweight migration (2026-08-21).
-        let schema = Schema([Thread.self, Message.self])
+        let schema = Schema([Thread.self, Message.self, ImageAttachment.self])
 
         // A UI TEST MUST NOT SEE, OR TOUCH, REAL CONVERSATIONS: in-memory
         // under --uitesting, DEBUG-only and flag-gated, so no real launch can
@@ -200,8 +224,17 @@ struct TeemoonApp: App {
         }
         #endif
 
-        // Keep the default store location so existing conversations aren't orphaned.
-        let configuration = ModelConfiguration(schema: schema)
+        // An explicit URL: without one SwiftData follows the App Group and leaves the 1.0.6 store behind. StoreLocation.
+        guard let storeURL = StoreLocation.app().resolve() else {
+            // A move left no store that opens whole: every file stays on disk, the banner says so.
+            TeemoonApp.storeOpenFailure = "a store move did not finish; every file is kept"
+            do {
+                return try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, isStoredInMemoryOnly: true))
+            } catch {
+                fatalError("Could not create even the in-memory fallback: \(error)")
+            }
+        }
+        let configuration = ModelConfiguration(schema: schema, url: storeURL)
         // Before the container: it must be the only connection to the file.
         StoreCompaction.runIfPending(storeURL: configuration.url)
         let container: ModelContainer
@@ -211,7 +244,7 @@ struct TeemoonApp: App {
             // faith. SchemaMigrationFixtureTests pins that pre-plan stores
             // open here unchanged.
             container = try ModelContainer(
-                for: Schema(versionedSchema: TeemoonSchemaV1.self),
+                for: Schema(versionedSchema: TeemoonSchemaV3.self),
                 migrationPlan: TeemoonMigrationPlan.self,
                 configurations: configuration)
         } catch {
@@ -237,6 +270,7 @@ struct TeemoonApp: App {
         // chat history can't be recovered from a device backup or a lost/locked
         // device.
         TeemoonApp.hardenConversationStore(at: configuration.url)
+        TeemoonApp.imageSaveObserver = TeemoonApp.hardenAfterImageSaves(storeAt: configuration.url)
         // The URL is recorded, NOT used to build the search index here.
         //
         // This is a lazy `static let`: its initialiser runs on whichever thread
@@ -332,18 +366,48 @@ struct TeemoonApp: App {
 
     static func hardenConversationStore(at storeURL: URL) {
         let sidecars = ["-wal", "-shm"].map { URL(fileURLWithPath: storeURL.path + $0) }
-        for url in [storeURL] + sidecars {
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            var mutableURL = url
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try? mutableURL.setResourceValues(values)
-            try? FileManager.default.setAttributes(
-                [.protectionKey: FileProtectionType.completeUnlessOpen],
-                ofItemAtPath: url.path
-            )
+        for url in [storeURL] + sidecars + externalStorageTree(besideStoreAt: storeURL) {
+            hardenFile(at: url)
         }
     }
+
+    /// Out of backups and `.completeUnlessOpen` at rest; a missing file is skipped.
+    static func hardenFile(at url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        var mutableURL = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? mutableURL.setResourceValues(values)
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUnlessOpen],
+            ofItemAtPath: url.path
+        )
+    }
+
+    /// SwiftData's ".<store>_SUPPORT" folder, where an image's `.externalStorage` bytes land: the folder,
+    /// its subfolders and every file. Never skip it — those files are chat images.
+    static func externalStorageTree(besideStoreAt storeURL: URL) -> [URL] {
+        let support = storeURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(storeURL.deletingPathExtension().lastPathComponent)_SUPPORT", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: support.path) else { return [] }
+        var tree = [support]
+        if let walk = FileManager.default.enumerator(at: support, includingPropertiesForKeys: nil) {
+            for case let url as URL in walk { tree.append(url) }
+        }
+        return tree
+    }
+
+    /// Re-hardens after every save that inserted an image: its external file is new since launch.
+    static func hardenAfterImageSaves(storeAt storeURL: URL) -> NSObjectProtocol {
+        NotificationCenter.default.addObserver(forName: ModelContext.didSave, object: nil, queue: nil) { note in
+            let inserted = note.userInfo?[ModelContext.NotificationKey.insertedIdentifiers.rawValue]
+                as? [PersistentIdentifier] ?? []
+            guard inserted.contains(where: { $0.entityName == String(describing: ImageAttachment.self) }) else { return }
+            hardenConversationStore(at: storeURL)
+        }
+    }
+
+    nonisolated(unsafe) private static var imageSaveObserver: NSObjectProtocol?
 
     var body: some Scene {
         WindowGroup {
@@ -396,6 +460,8 @@ struct TeemoonApp: App {
         // started over once a scene is on screen — see `scenePhaseChanged`.
         .onChange(of: scenePhase, initial: true) { _, phase in
             LocalModelDownloader.shared.scenePhaseChanged(isActive: phase == .active)
+            // The phone turn is abandoned in the background; a swipe-away then is not an OS kill.
+            if phase == .background { PhoneImageMemory.KillStore.shared.ended() }
             // Launch (`initial: true`) and every return: backgrounding evicts
             // the engine (`LocalMemoryPressure`), so coming back with the same
             // on-device provider is a cold engine again. Warm it now, not on
@@ -587,6 +653,7 @@ struct TeemoonApp: App {
         LocalMemoryPressure.startObserving()
         LocalModelStorage.reclaimRetiredMLXWeights()
         LocalModelStorage.reclaimUncatalogedBundles()
+        LocalModelStorage.reclaimStaleEngineCaches()
     }
     #endif
 }
@@ -596,6 +663,9 @@ extension Notification.Name {
     /// notification rather than a binding because the command / button does
     /// not own ChatView's draft.
     static let teemoonNewChat = Notification.Name("ai.teemoon.newChat")
+
+    /// Posted when teemoon is opened by its share link; ChatView owns the composer the share goes into.
+    static let teemoonShareArrived = Notification.Name("ai.teemoon.shareArrived")
 
     #if os(macOS)
     /// Posted by Edit ▸ find (⌘F). Same reason as above: the command lives in

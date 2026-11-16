@@ -54,9 +54,10 @@ struct LocalLanguageModel: LanguageModel {
     let model: LocalModelRef
     let priorMessages: [WireMessage]
     let events: StreamCallbacks
-    let temperature: Float
     let maxTokens: Int
     let enableThinking: Bool
+    /// The message being sent's images (one on-device, ChatGeneration enforces it).
+    let promptImages: [WireImage]
 
     /// Deliberately far below what a hosted model gets.
     ///
@@ -79,16 +80,16 @@ struct LocalLanguageModel: LanguageModel {
         model: LocalModelRef,
         priorMessages: [WireMessage],
         events: StreamCallbacks,
-        temperature: Float = 0.7,
         maxTokens: Int = LocalLanguageModel.defaultMaxTokens,
-        enableThinking: Bool = LocalLanguageModel.defaultEnableThinking
+        enableThinking: Bool = LocalLanguageModel.defaultEnableThinking,
+        promptImages: [WireImage] = []
     ) {
         self.model = model
         self.priorMessages = priorMessages
         self.events = events
-        self.temperature = temperature
         self.maxTokens = maxTokens
         self.enableThinking = enableThinking
+        self.promptImages = promptImages
     }
 
     /// The on-device runtime. One line, because there is one runtime — but it
@@ -113,6 +114,7 @@ struct LocalLanguageModel: LanguageModel {
             tools: session.tools,
             initialMessages: priorMessages,
             prompt: prompt.description,
+            promptImages: promptImages,
             transport: transport(for: session.tools),
             // No local model grounds its own answers — that is a hosted-provider
             // feature (Brave Answers). Grounding here goes through the web-search

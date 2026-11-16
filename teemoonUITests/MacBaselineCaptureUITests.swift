@@ -37,6 +37,7 @@ final class MacBaselineCaptureUITests: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
+        try CaptureRig.skipUnlessAsked()
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
@@ -53,7 +54,7 @@ final class MacBaselineCaptureUITests: XCTestCase {
         app?.terminate()
     }
 
-    private var composer: XCUIElement { app.textFields["chat.composer"] }
+    private var composer: XCUIElement { app.textViews["chat.composer"] }
 
     /// Screenshot + element transcript under one name.
     private func capture(_ name: String, element: XCUIElement? = nil) {

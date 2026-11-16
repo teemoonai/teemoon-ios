@@ -15,7 +15,7 @@ rebuild/audit record. Bumped v0.14.0 → v0.17.1 on 2026-09-18.
 
 ## patch register
 
-Eight deltas from upstream, one of them now upstream itself. Re-apply all of
+Nine deltas from upstream, one of them now upstream itself. Re-apply all of
 them on any version bump — the build will not catch a lost patch. The
 mechanical route: diff the vendored `Sources/LiteRTLM` against the OLD
 upstream tag to get the patch set, apply it to the new tag's `swift/` with
@@ -100,6 +100,28 @@ applied clean; 2 were obsolete, see 7; 1 was patch 5, re-placed by hand).
    commented "teemoon change"). Nothing in the app calls it yet — voice
    input is parked — so it may be deleted if upstream ships an audio path
    or if it stops compiling against a new header set.
+
+9. **A per-decode token on every tool call** — `ToolManager.swift:19`
+   (`public enum ToolInvocation` with `@TaskLocal static var managerID`),
+   `ToolManager.swift:26` (`public let id = UUID()`), `ToolManager.swift:122`
+   (`execute` runs the tool inside `ToolInvocation.$managerID.withValue(id)`),
+   and `Conversation.swift:71` (`public var toolManagerID`). Each hunk is
+   commented "teemoon patch". Why: reply-machine.json G7. `ToolManager` keeps
+   tool *types* and decodes a fresh tool per call, from a `Task` started on the
+   native callback, so nothing else can say which conversation a call came
+   from. Without the token, a decode the app abandoned can fire a web search
+   under the NEXT turn's tool registration — a search the user never asked for
+   in that turn. teemoon's shim passes the id to `LiteRTToolBridge.execute`,
+   which runs only calls from the conversation the current turn is on.
+   Re-apply on a bump: add the enum and the `id`, wrap the `run()` call in
+   `execute`, expose the id on `Conversation`; if upstream renames
+   `ToolManager.execute` or stops owning one manager per conversation, find
+   the per-conversation object and stamp its calls the same way. Symptom if
+   lost: it no longer compiles (`ToolInvocation`/`toolManagerID` are used by
+   `teemoon/Inference/LiteRTToolBridge.swift` and `LiteRTTransport.swift`); if
+   re-stubbed to compile, the late tool call runs again and
+   `LiteRTToolBridgeTests.anAbandonedDecodesLateToolCallDoesNotSearchUnderTheNextTurn`
+   goes red. Both files keep Google's Apache-2.0 headers unchanged.
 
 ## the macOS slice: repackaged, not just re-checksummed
 

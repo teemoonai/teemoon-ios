@@ -35,6 +35,30 @@ enum DebugHeaderRedaction {
     /// because header casing is not guaranteed.
     private static let secretHeaders = ["authorization", "x-subscription-token", "x-api-key", "api-key"]
 
+    /// The keys the app holds, and the header names providers are configured to send
+    /// them under (`authHeaderName`); the app sets both at launch. Read only when
+    /// something is copied. Names alone missed a provider's own header, and a 401 that
+    /// echoes the key put it on the clipboard (gardener 2026-10-25, Android c0ed24c).
+    nonisolated(unsafe) static var storedSecrets: () -> [String] = { [] }
+    nonisolated(unsafe) static var credentialHeaderNames: () -> Set<String> = { [] }
+
+    private static func secrets() -> [String] {
+        storedSecrets().map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.count >= 8 }
+    }
+
+    private static func carriesStoredSecret(_ value: String) -> Bool {
+        secrets().contains { value.contains($0) }
+    }
+
+    /// Free text as copied (a body, a message, a tool result, an error): every stored
+    /// key in it is masked like a header value. Longest first, so a key that contains
+    /// another is masked whole.
+    static func scrubStoredSecrets(_ text: String) -> String {
+        secrets().sorted { $0.count > $1.count }.reduce(text) { acc, secret in
+            acc.contains(secret) ? acc.replacingOccurrences(of: secret, with: mask(secret)) : acc
+        }
+    }
+
     static func value(_ value: String, for name: String) -> String {
         guard active, secretHeaders.contains(name.lowercased()) else { return value }
         // Keep the SHAPE — a reader should still see that a bearer token was
@@ -59,7 +83,7 @@ enum DebugHeaderRedaction {
     ///   is the question the panel exists to answer.
     /// - COPYING it puts a live credential on the system pasteboard, which
     ///   syncs to every signed-in Mac and iPad, is readable by whatever app is
-    ///   foregrounded next, and — since "Copy Debug Info" is what someone taps
+    ///   foregrounded next, and — since "copy debug info" is what someone taps
     ///   to paste a failure into an issue, a chat, or a support thread — is
     ///   very often on its way to a stranger. The error card that hosts this
     ///   menu appears on ANY provider error, not only in developer mode.
@@ -67,7 +91,9 @@ enum DebugHeaderRedaction {
     /// Keeps scheme + last 4 so a pasted report still answers "which key was
     /// this?" against the panel on the reporter's own screen.
     static func copyValue(_ value: String, for name: String) -> String {
-        guard secretHeaders.contains(name.lowercased()) else { return value }
+        let lower = name.lowercased()
+        guard secretHeaders.contains(lower) || credentialHeaderNames().contains(lower) || carriesStoredSecret(value)
+        else { return value }
         return mask(value)
     }
 
@@ -124,9 +150,9 @@ enum DebugHeaderRedaction {
             let halves = pair.split(separator: "=", maxSplits: 1)
             guard halves.count == 2, !halves[1].isEmpty else { return String(pair) }
             let name = String(halves[0]).removingPercentEncoding ?? String(halves[0])
-            guard secretQueryParams.contains(name.lowercased()) else { return String(pair) }
-            touched = true
             let value = String(halves[1]).removingPercentEncoding ?? String(halves[1])
+            guard secretQueryParams.contains(name.lowercased()) || carriesStoredSecret(value) else { return String(pair) }
+            touched = true
             return "\(halves[0])=\(mask(value))"
         }
         guard touched else { return urlString }

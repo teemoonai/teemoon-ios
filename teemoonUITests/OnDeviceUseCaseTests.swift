@@ -2,7 +2,7 @@
 //  OnDeviceUseCaseTests.swift
 //  teemoonUITests
 //
-//  The phone-only use cases of the Android port's use-case list, on a real iPhone with
+//  The phone-only use cases of teemoon-android's docs/USE_CASES.md, on a real iPhone with
 //  the gemma weights already in the app's container: G8 stop mid-thought, C10 the phone's
 //  model reads warm after it has answered, A6 first run offers the model on disk. They skip
 //  in the simulator (no weights, no on-device engine worth timing).

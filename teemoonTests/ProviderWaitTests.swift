@@ -25,7 +25,7 @@ struct ProviderWaitTests {
 
     @Test func theLabelClaimsNoQueue() {
         let label = ProviderWait.label(providerName: "nvidia", seconds: 42)
-        #expect(label == "waiting for nvidia... 42s")
+        #expect(label == "waiting for nvidia… 42s")
         #expect(!label.contains("queue") && !label.contains("busy"))
     }
 

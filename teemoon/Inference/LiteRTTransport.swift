@@ -97,6 +97,14 @@ struct LiteRTTransport: GenerationTransport {
 
     /// The turn wait loop's next step. An answer that already finished is kept
     /// even if the app just left the foreground: check it BEFORE background.
+    /// An abandoned decode's outcome. Only leaving the foreground is an interruption (asked again on return); a
+    /// drain that timed out after the cap or a stop hands back what was shown, even nothing (reply-machine.json G7).
+    static func abandonOutcome(backgrounded: Bool, shown: String) -> Result<String, any Error> {
+        backgrounded ? .failure(CancellationError()) : .success(shown)
+    }
+
+    static func turnEnd(hitCap: Bool) -> TurnEnd { hitCap ? .length : .stop }
+
     static func waitStep(finishedCleanly: Bool?, backgrounded: Bool, dead: Bool) -> WaitStep {
         if finishedCleanly == true { return .collect }
         if backgrounded || dead { return .abandon }
@@ -126,6 +134,12 @@ struct LiteRTTransport: GenerationTransport {
         self.backgroundedForTest = backgroundedForTest
     }
 
+    /// Whether a resident engine can run this turn: a vision engine serves text too, so only an image turn
+    /// on a text-only engine rebuilds. The engine decides vision at creation.
+    static func residentServes(residentVision: Bool, wantsVision: Bool) -> Bool {
+        residentVision || !wantsVision
+    }
+
     /// Off only to measure the difference (`LiteRTConversationReuse`).
     nonisolated(unsafe) static var reuseConversations = true
 
@@ -143,7 +157,7 @@ struct LiteRTTransport: GenerationTransport {
         /// and ignored in fact.
         struct Key: Hashable { let path: URL; let contextTokens: Int }
         /// An engine and how it was built — the backend, the drafter, the cost.
-        struct Resident { let engine: LiteRTLM.Engine; let run: OnDeviceRun }
+        struct Resident { let engine: LiteRTLM.Engine; let run: OnDeviceRun; let vision: Bool }
         private var engines: [Key: Resident] = [:]
         /// Builds in flight. A warm-up and a turn asking for the same engine
         /// share one build; the actor suspends at `initialize()`, so without
@@ -173,7 +187,10 @@ struct LiteRTTransport: GenerationTransport {
 
         func dropKept() { kept.removeAll() }
 
+        private var epochs = EngineCacheEpochs()
+
         func evictAll() async {
+            _ = epochs.evict()
             kept.removeAll()
             guard !engines.isEmpty else { return }
             logger.info("[litert] releasing \(self.engines.count, privacy: .public) engine(s)")
@@ -188,6 +205,7 @@ struct LiteRTTransport: GenerationTransport {
         /// out). The next turn builds a fresh one; the caller releases the dead
         /// one off any thread a user is waiting on.
         func discard(_ path: URL, contextTokens: Int) async {
+            _ = epochs.evict()
             kept[path] = nil
             engines[Key(path: path, contextTokens: contextTokens)] = nil
             await publish()
@@ -209,21 +227,30 @@ struct LiteRTTransport: GenerationTransport {
 
         /// The engine, and how it was built (the card prints the backend and
         /// whether the drafter was on).
-        func engine(for path: URL, contextTokens: Int, sizeMB: Int) async throws -> (LiteRTLM.Engine, OnDeviceRun) {
+        func engine(for path: URL, contextTokens: Int, sizeMB: Int,
+                    vision: Bool = false) async throws -> (LiteRTLM.Engine, OnDeviceRun) {
             let key = Key(path: path, contextTokens: contextTokens)
-            if let existing = engines[key] { return (existing.engine, existing.run) }
+            if let existing = engines[key], LiteRTTransport.residentServes(residentVision: existing.vision, wantsVision: vision) {
+                return (existing.engine, existing.run)
+            }
             if let inFlight = building[key] {
                 let built = try await inFlight.value
-                return (built.engine, built.run)
+                if LiteRTTransport.residentServes(residentVision: built.vision, wantsVision: vision) { return (built.engine, built.run) }
             }
-            let task = Task { try await self.build(key: key, path: path, sizeMB: sizeMB) }
+            let task = Task { try await self.build(key: key, path: path, sizeMB: sizeMB, vision: vision) }
             building[key] = task
             defer { building[key] = nil }
             let built = try await task.value
             return (built.engine, built.run)
         }
 
-        private func build(key: Key, path: URL, sizeMB: Int) async throws -> Resident {
+        private static func cacheDirectory(beside bundle: URL) throws -> String {
+            let dir = LocalModelStorage.engineCacheDirectory(forBundle: bundle)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir.path
+        }
+
+        private func build(key: Key, path: URL, sizeMB: Int, vision: Bool) async throws -> Resident {
             guard FileManager.default.fileExists(atPath: path.path) else {
                 throw LocalInferenceError.modelNotDownloaded(path.lastPathComponent)
             }
@@ -234,7 +261,11 @@ struct LiteRTTransport: GenerationTransport {
             // unbounded cache left a 2.9 GB model 55 MB short of loading.
             // `LocalGenerationGate` serializes generation, so a second engine is
             // by definition idle.
-            for (other, _) in engines where other != key {
+            // Includes this key's own text-only engine when an image turn asks for vision.
+            if !engines.isEmpty { _ = epochs.evict() }
+            _ = epochs.build()
+            let epoch = epochs.epoch
+            for (other, _) in engines {
                 logger.info("[litert] evicting \(other.path.lastPathComponent, privacy: .public) to make room")
                 engines[other] = nil
             }
@@ -242,7 +273,8 @@ struct LiteRTTransport: GenerationTransport {
             // engine is gone and the new one doesn't exist, so nothing is warm
             // and a failed load must not leave the picker saying otherwise.
             await publish()
-            try LocalMemory.check(needMB: sizeMB + LocalMemory.headroomMB)
+            let peak = LocalModelCatalog.all.first { $0.fileName == path.lastPathComponent }?.peakFootprintMB
+            try LocalMemory.check(needMB: LocalMemory.loadNeedMB(sizeMB: sizeMB, peakFootprintMB: peak))
 
             // Metal. The whole reason to evaluate this runtime is its GPU
             // path; measuring the CPU one would answer a different question.
@@ -250,8 +282,9 @@ struct LiteRTTransport: GenerationTransport {
             let config = try LiteRTLM.EngineConfig(
                 modelPath: path.path,
                 backend: backend,
+                visionBackend: vision ? .gpu : nil,
                 maxNumTokens: key.contextTokens,
-                cacheDir: FileManager.default.temporaryDirectory.path
+                cacheDir: try Self.cacheDirectory(beside: path)
             )
             LiteRTTransport.enableExperimentalFeatures()
             // Read at engine creation, like every experimental flag. Gated on
@@ -265,13 +298,36 @@ struct LiteRTTransport: GenerationTransport {
 
             let engine = LiteRTLM.Engine(engineConfig: config)
             let start = ContinuousClock.now
-            try await engine.initialize()
+            // The chip's load line reads what the load does on disk, never a timer (EngineLoadLine).
+            let cachePresent = LocalModelStorage.engineCachePresent(forBundle: path, vision: vision)
+            let before = LocalModelStorage.engineCacheSnapshot(forBundle: path)
+            await EngineLoadObserver.shared.began(at: Date(), imageCapable: vision, cachePresent: cachePresent)
+            let watch = Task.detached(priority: .utility) {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    if LocalModelStorage.engineCacheSnapshot(forBundle: path) != before {
+                        await EngineLoadObserver.shared.rebuildSeen(at: Date())
+                        return
+                    }
+                }
+            }
+            defer { watch.cancel() }
+            do { try await engine.initialize() } catch {
+                await EngineLoadObserver.shared.ended(at: Date())
+                throw error
+            }
+            await EngineLoadObserver.shared.ended(at: Date())
             let took = start.duration(to: .now)
             logger.info("[litert] engine ready in \(took.description, privacy: .public)")
             DiagLog.note("[litert] engine ready in \(took.description)")
             let resident = Resident(engine: engine, run: OnDeviceRun(
                 backend: { switch backend { case .gpu: "gpu"; case .cpu: "cpu" } }(),
-                speculative: speculative == true))
+                speculative: speculative == true), vision: vision)
+            // Evicted while it initialized (background, memory warning): never re-inserted (reply-machine.json G8).
+            guard epochs.initialized(epoch: epoch) == .insert else {
+                logger.info("[litert] engine finished after an eviction — handed to its turn, not kept")
+                return resident
+            }
             engines[key] = resident
             await publish()
             return resident
@@ -311,6 +367,11 @@ struct LiteRTTransport: GenerationTransport {
         await EngineCache.shared.dropKept()
     }
 
+    /// No ttft here: LiteRT keeps the conversation's first one, stale on a reused turn. The report's is wall-clock.
+    static func benchNote(_ t: EngineTimings, decodeTokens: Int) -> String {
+        "[litert] bench prefill=\(t.prefillTokens)tok (\(Int(t.prefillRate))tok/s) decode=\(decodeTokens)tok (\(Int(t.decodeRate))tok/s)"
+    }
+
     /// Turns on the LiteRT behaviour teemoon depends on. Idempotent; every flag
     /// here is inert until `optIntoExperimentalAPIs()` has been called, and each
     /// is read only when a *new* `Conversation` is created.
@@ -335,6 +396,7 @@ struct LiteRTTransport: GenerationTransport {
         // estimated from character counts.
         LiteRTLM.ExperimentalFlags.enableBenchmark = true
         LiteRTLM.ExperimentalFlags.enableConversationToolCallStreaming = true
+        LiteRTLM.ExperimentalFlags.visualTokenBudget = OnDeviceImage.visionTokenBudget
         // Constrained decoding is NOT set here: it is per conversation, see
         // `setConstrainedDecoding(toolsAttached:)`.
     }
@@ -389,6 +451,28 @@ struct LiteRTTransport: GenerationTransport {
     /// follow-up depends on ("what about the rest of the week" is meaningless
     /// without the message before it). Without this a conversation grows until
     /// it exceeds the KV cache and every further message fails.
+    /// One seeded history turn, with its images (§4b: earlier images go back to the phone model like a cloud one).
+    struct HistoryTurn: Equatable { let role: String; let text: String; let images: [Data] }
+
+    /// `trimmedHistory`, keeping each turn's images and counting their vision tokens against the budget.
+    static func historyTurns(_ messages: [[String: Any]], budgetTokens: Int) -> [HistoryTurn] {
+        guard budgetTokens > 0 else { return [] }
+        var kept: [HistoryTurn] = []
+        var used = 0
+        for message in messages.reversed() {
+            let parts = OnDeviceImage.parts(of: message["content"])
+            let cost = estimatedTokens(parts.text) + parts.images.count * Int(OnDeviceImage.visionTokenBudget)
+            guard used + cost <= budgetTokens else { break }
+            used += cost
+            guard !parts.text.isEmpty || !parts.images.isEmpty else { continue }
+            kept.insert(.init(role: (message["role"] as? String) ?? "user", text: parts.text, images: parts.images), at: 0)
+        }
+        if kept.count < messages.count {
+            logger.info("[litert] trimmed history to \(kept.count, privacy: .public)/\(messages.count, privacy: .public) turns to fit the context")
+        }
+        return kept
+    }
+
     static func trimmedHistory(
         _ messages: [[String: Any]], budgetTokens: Int
     ) -> [[String: Any]] {
@@ -411,7 +495,7 @@ struct LiteRTTransport: GenerationTransport {
     /// shows in place of an HTTP request body.
     static func prettyMessages(_ messages: [[String: Any]]) -> String? {
         guard let data = try? JSONSerialization.data(
-            withJSONObject: messages, options: [.prettyPrinted, .sortedKeys]) else { return nil }
+            withJSONObject: WireImageSummary.summarized(messages), options: [.prettyPrinted, .sortedKeys]) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
@@ -420,7 +504,7 @@ struct LiteRTTransport: GenerationTransport {
     static func prettyRequest(_ messages: [[String: Any]], tools: [any AnyLanguageModel.Tool]) -> String? {
         guard !tools.isEmpty else { return prettyMessages(messages) }
         guard let data = try? JSONSerialization.data(
-            withJSONObject: ["messages": messages, "tools": HTTPTransport.wireTools(tools)] as [String: Any],
+            withJSONObject: ["messages": WireImageSummary.summarized(messages), "tools": HTTPTransport.wireTools(tools)] as [String: Any],
             options: [.prettyPrinted, .sortedKeys]) else { return nil }
         return String(data: data, encoding: .utf8)
     }
@@ -504,9 +588,28 @@ struct LiteRTTransport: GenerationTransport {
         }
         defer { bgPoll.cancel() }
 
-        DiagLog.note("[litert] turn: acquiring engine")
+        let prompt = OnDeviceImage.parts(of: messages.last?["content"])
+        let promptImages = prompt.images.compactMap(OnDeviceImage.prepared)
+        guard promptImages.count == prompt.images.count else { throw LocalInferenceError.unreadableImage }
+        let systemMessage = messages
+            .first { ($0["role"] as? String) == "system" }
+            .flatMap { $0["content"] as? String }
+            .flatMap { $0.isEmpty ? nil : LiteRTLM.Message($0, role: .system) }
+        let seeded = Self.historyTurns(
+            messages
+                .dropLast()                                   // the live turn is sent below
+                .filter { ($0["role"] as? String) != "system" }, // carried separately
+            budgetTokens: contextTokens
+                - Self.estimatedTokens(systemMessage?.toString ?? "")
+                - Self.estimatedTokens(prompt.text) - promptImages.count * Int(OnDeviceImage.visionTokenBudget)
+                - Self.answerReserveTokens
+        )
+        let seededImages = seeded.map { $0.images.compactMap(OnDeviceImage.prepared) }
+        // Any image in the request, earlier ones too, needs the vision engine and bypasses reuse (§4b).
+        let requestImages = promptImages.count + seededImages.reduce(0) { $0 + $1.count }
+        DiagLog.note("[litert] turn: acquiring engine (images=\(requestImages))")
         let (engine, run) = try await EngineCache.shared.engine(
-            for: modelPath, contextTokens: contextTokens, sizeMB: estimatedSizeMB
+            for: modelPath, contextTokens: contextTokens, sizeMB: estimatedSizeMB, vision: requestImages > 0
         )
         DiagLog.note("[litert] turn: engine ready, building conversation")
         // Tool wiring. LiteRT owns the tool loop for this transport — see
@@ -527,30 +630,18 @@ struct LiteRTTransport: GenerationTransport {
         //
         // `systemMessage` and `initialMessages` populate the history WITHOUT
         // generating, which is what was wanted all along.
-        let systemMessage = messages
-            .first { ($0["role"] as? String) == "system" }
-            .flatMap { $0["content"] as? String }
-            .flatMap { $0.isEmpty ? nil : LiteRTLM.Message($0, role: .system) }
-
-        let priorMessages = messages
-            .dropLast()                                   // the live turn is sent below
-            .filter { ($0["role"] as? String) != "system" } // carried separately
-        let historyTurns: [KeptConversationState.Turn] = Self.trimmedHistory(
-            priorMessages,
-            budgetTokens: contextTokens
-                - Self.estimatedTokens(systemMessage?.toString ?? "")
-                - Self.estimatedTokens((messages.last?["content"] as? String) ?? "")
-                - Self.answerReserveTokens
-        ).compactMap { message in
-            guard let text = message["content"] as? String, !text.isEmpty else { return nil }
-            return .init(role: (message["role"] as? String) ?? "user", text: text)
+        let historyTurns = seeded.map { KeptConversationState.Turn(role: $0.role, text: $0.text) }
+        let history = zip(seeded, seededImages).map { turn, images in
+            images.isEmpty ? LiteRTLM.Message(turn.text, role: Self.role(for: turn.role))
+                : LiteRTLM.Message(contents: images.map { .imageData($0) } + (turn.text.isEmpty ? [] : [.text(turn.text)]),
+                                   role: Self.role(for: turn.role))
         }
-        let history = historyTurns.map { LiteRTLM.Message($0.text, role: Self.role(for: $0.role)) }
         let systemText = messages.first { ($0["role"] as? String) == "system" }
             .flatMap { $0["content"] as? String }.flatMap { $0.isEmpty ? nil : $0 }
         let toolNames = includeTools ? tools.map(\.name) : []
         let kept = Self.reuseConversations ? await EngineCache.shared.takeKept(modelPath, engine: engine) : nil
-        let reusedConversation = LiteRTConversationReuse.canReuse(
+        let reusedConversation = LiteRTConversationReuse.reusable(requestImages: requestImages)
+            && LiteRTConversationReuse.canReuse(
             kept?.state, systemMessage: systemText, toolNames: toolNames, history: historyTurns,
             thinking: self.thinking) ? kept?.conversation : nil
         let thinkingConfig = LiteRTLM.ThinkingConfig(enableThinking: thinking)
@@ -600,7 +691,13 @@ struct LiteRTTransport: GenerationTransport {
             ) }
         }
 
-        let lastText = (messages.last?["content"] as? String) ?? ""
+        let lastText = prompt.text
+        // Image first, then the question: the order Gemma's chat template was trained on.
+        // Only this conversation's decode may run tools from here on (G7).
+        await LiteRTToolRegistry.shared.setLive(conversation.toolManagerID)
+        let liveMessage = promptImages.isEmpty ? LiteRTLM.Message(lastText, role: .user)
+            : LiteRTLM.Message(contents: promptImages.map { .imageData($0) } + (lastText.isEmpty ? [] : [.text(lastText)]),
+                               role: .user)
         // A task cancelled during the engine build must not START a native
         // generation it will abandon at once; that orphan wedges the next turn
         // exactly as a cancelled decode does.
@@ -654,6 +751,8 @@ struct LiteRTTransport: GenerationTransport {
         @Sendable func requestStop(_ reason: String) {
             guard !stoppedByUs.value else { return }
             stoppedByUs.value = true
+            // A tool round this decode still asks for runs nothing (G7).
+            Task { await LiteRTToolRegistry.shared.close() }
             logger.error("[litert] \(reason, privacy: .public) — asking the native decode to stop")
             DiagLog.note("[litert] \(reason) — asking the native decode to stop")
             try? live.value?.cancel()
@@ -675,7 +774,7 @@ struct LiteRTTransport: GenerationTransport {
             var capped = false
             var inlineThought = InlineThoughtFilter()
             do {
-            for try await chunk in conversation.sendMessageStream(LiteRTLM.Message(lastText, role: .user)) {
+            for try await chunk in conversation.sendMessageStream(liveMessage) {
                 let text = chunk.contents.compactMap { content -> String? in
                     if case .text(let t) = content { return t }
                     return nil
@@ -759,7 +858,7 @@ struct LiteRTTransport: GenerationTransport {
                     // Keep a partial answer if there is one; otherwise this is an
                     // interruption, surfaced as a cancellation so the UI shows a
                     // stopped turn, NOT an "empty response" error.
-                    return shown.value.isEmpty ? .failure(CancellationError()) : .success(shown.value)
+                    return Self.abandonOutcome(backgrounded: backgrounded.value, shown: shown.value)
                 }
                 if step == .collect, let ended {
                     switch ended {
@@ -777,6 +876,8 @@ struct LiteRTTransport: GenerationTransport {
         }
         watchdog.value?.cancel()
         live.value = nil
+        // The turn is over: its tools take no more calls until the next turn's bridging (as on Android).
+        await LiteRTToolRegistry.shared.close()
         if dead.value {
             // Forget the poisoned engine BEFORE returning — the gate releases on
             // return, and the next turn must not find it in the cache. Release it
@@ -813,7 +914,7 @@ struct LiteRTTransport: GenerationTransport {
            let state = LiteRTConversationReuse.afterTurn(
                systemMessage: systemText, toolNames: toolNames, history: historyTurns,
                userText: lastText, rawAnswer: answer, toolsRan: executed.value.count, completed: true,
-               thinking: self.thinking) {
+               thinking: self.thinking, images: requestImages) {
             await EngineCache.shared.keep(.init(conversation: conversation, state: state, engine: ObjectIdentifier(engine)),
                                           for: modelPath)
         }
@@ -823,19 +924,15 @@ struct LiteRTTransport: GenerationTransport {
         var timings: EngineTimings?
         if let info = try? conversation.getBenchmarkInfo() {
             decodeTokens = info.lastDecodeTokenCount
-            timings = EngineTimings(
+            let turn = EngineTimings(
                 prefillTokens: info.lastPrefillTokenCount,
                 prefillRate: Double(info.lastPrefillTokensPerSecond),
                 decodeRate: Double(info.lastDecodeTokensPerSecond))
-            logger.info("""
-                [litert] ttft=\(info.timeToFirstTokenInSecond, privacy: .public)s \
-                prefill=\(info.lastPrefillTokenCount, privacy: .public)tok \
-                (\(Int(info.lastPrefillTokensPerSecond), privacy: .public)tok/s) · \
-                decode=\(info.lastDecodeTokenCount, privacy: .public)tok \
-                (\(Int(info.lastDecodeTokensPerSecond), privacy: .public)tok/s)
-                """)
+            timings = turn
+            let note = Self.benchNote(turn, decodeTokens: info.lastDecodeTokenCount)
+            logger.info("\(note, privacy: .public)")
             // Into native.log too: the unified log is not readable off a device.
-            DiagLog.note("[litert] bench ttft=\(info.timeToFirstTokenInSecond)s prefill=\(info.lastPrefillTokenCount)tok (\(Int(info.lastPrefillTokensPerSecond))tok/s) decode=\(info.lastDecodeTokenCount)tok (\(Int(info.lastDecodeTokensPerSecond))tok/s)")
+            DiagLog.note(note)
         }
 
         // Surface what the tools did. The calls have already run inside
@@ -862,6 +959,7 @@ struct LiteRTTransport: GenerationTransport {
             isTextBasedToolCall: false,
             completionTokens: decodeTokens,
             wasTruncated: hitCap.value,
+            finish: Self.turnEnd(hitCap: hitCap.value),
             // The developer panel's equivalent of a request, for a turn that
             // never made one. `url` stays nil — there is no endpoint — but the
             // messages actually sent and the runtime settings ARE the request

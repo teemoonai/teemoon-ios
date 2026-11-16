@@ -48,10 +48,14 @@ import SwiftUI
 
 /// One row's identity for the detail sheet: the place AND the model, because
 /// the same model id can be equipped on more than one place.
-struct ModelDetailTarget: Identifiable {
+struct ModelDetailTarget: Identifiable, Hashable {
     let provider: Provider
     let model: KnownModel
     var id: String { provider.id.uuidString + "|" + model.id }
+
+    /// By id: pushed inside the where sheet's stack (§4e), which needs Hashable.
+    static func == (a: Self, b: Self) -> Bool { a.id == b.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct WhereRow: View {
@@ -101,15 +105,15 @@ struct WhereRow: View {
     /// sits in a column with, and the title line goes back to carrying one thing:
     /// which model answers your next message.
     var warmth: String?
-
-    /// One title line at `.body`. The reason this row's height is stable.
-    private let titleLineHeight: CGFloat = ControlMetrics.sheetRowTitleLineHeight
+    /// "· images" at the end of the caption: this model reads images.
+    var readsImages = false
 
     /// Caption and warmth are one metadata run. Handles the caption-less case —
     /// filtered to a single home machine the server name is suppressed, and
     /// warmth still has to appear somewhere.
     private var resolvedCaption: String? {
-        WhereProviderPresentation.metadataRun(caption, warmth)
+        WhereProviderPresentation.metadataRun(WhereProviderPresentation.metadataRun(caption, warmth),
+                                              readsImages ? ImageModelChoice.captionTag : nil)
     }
 
     var body: some View {
@@ -144,27 +148,20 @@ struct WhereRow: View {
                         // before the mark is pushed off the row.
                         HStack(spacing: 6) {
                             Text(title)
-                                .font(.system(size: ControlMetrics.sheetRowTitleSize, weight: titleWeight))
+                                .scaledFont(size: ControlMetrics.sheetRowTitleSize, weight: titleWeight)
                                 .foregroundStyle(titleTint)
                                 .textCase(.lowercase)
-                                .lineLimit(1)
+                                .lineLimitGrowing(1)
                                 .layoutPriority(1)
                             confidentialityTag(.teeOwn)
                         }
                         .fixedSize(horizontal: false, vertical: true)
                     } else {
                     Text(title)
-                        // 16pt, the design's figure, not `.body`.
-                        //
-                        // `.body` is 17pt at default and Dynamic Type scales it
-                        // — at a larger text setting the rows grew until three
-                        // filled a screen the design sizes for seven. A picker
-                        // is a density instrument: it exists to show what you
-                        // have, and it stops working when it shows three.
-                        .font(.system(size: ControlMetrics.sheetRowTitleSize, weight: titleWeight))
+                        .scaledFont(size: ControlMetrics.sheetRowTitleSize, weight: titleWeight)
                         .foregroundStyle(titleTint)
                         .textCase(.lowercase)
-                        .lineLimit(1)
+                        .lineLimitGrowing(1)
                     }
                     Spacer(minLength: 4)
                     // ONLY while downloading. The percentage has to stay on the
@@ -175,12 +172,12 @@ struct WhereRow: View {
                     // the row instead; see the accessory slot below.
                     if progress != nil, let trailingText {
                         Text(trailingText)
-                            .font(.system(size: 13, design: trailingMonospaced ? .monospaced : .default))
                             .monospacedDigit()
+                            .scaledFont(size: 13, design: trailingMonospaced ? .monospaced : .default)
                             .foregroundStyle(.secondary)
                     }
                 }
-                .frame(minHeight: titleLineHeight)
+                .scaledMinHeight(ControlMetrics.sheetRowTitleLineHeight, relativeTo: .callout)
 
                 if let progress {
                     // The bar spans the WHOLE text block, so it ends exactly
@@ -197,25 +194,25 @@ struct WhereRow: View {
                         .frame(height: 18)
                 } else if let caption = resolvedCaption {
                     Text(caption)
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(captionTint)
                         .textCase(.lowercase)
-                        .lineLimit(captionLineLimit)
+                        .lineLimitGrowing(captionLineLimit)
                         .minimumScaleFactor(0.85)
                         .fixedSize(horizontal: false, vertical: true)
                         // Fixed height only for the single-line case, which is
                         // what keeps a row from resizing mid-download. A row
                         // allowed two lines has opted out of that guarantee.
-                        .frame(minHeight: captionLineLimit == 1 ? ControlMetrics.sheetRowCaptionLineHeight : nil,
-                               alignment: .leading)
+                        .scaledMinHeight(captionLineLimit == 1 ? ControlMetrics.sheetRowCaptionLineHeight : 0,
+                                         relativeTo: .footnote, alignment: .leading)
                 }
 
                 if let note {
                     Label(note, systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(.orange)
                         .textCase(.lowercase)
-                        .lineLimit(2)
+                        .lineLimitGrowing(2)
                 }
             }
 
@@ -235,13 +232,13 @@ struct WhereRow: View {
             // here.
             if progress == nil, let trailingText {
                 Text(trailingText)
-                    .font(.system(size: 13, design: trailingMonospaced ? .monospaced : .default))
                     .monospacedDigit()
+                    .scaledFont(size: 13, design: trailingMonospaced ? .monospaced : .default)
                     .foregroundStyle(.secondary)
             }
             if let trailingGlyph {
                 Image(systemName: trailingGlyph)
-                    .font(.system(size: 15))
+                    .scaledFont(size: 15)
                     .foregroundStyle(Color.accentColor)
             }
             // Cancel takes the TICK'S slot, which is free by construction: a
@@ -252,7 +249,7 @@ struct WhereRow: View {
             if progress != nil, let onCancel {
                 Button(action: onCancel) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
+                        .scaledFont(size: 16)
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
@@ -267,10 +264,15 @@ struct WhereRow: View {
                 // actionable thing in the sheet uses, so "this is the live one"
                 // reads as a state and not as a heavier tick.
                 Image(systemName: "checkmark")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
                     .foregroundStyle(Color.accentColor)
             }
         }
         .contentShape(Rectangle())
     }
+}
+
+/// Hashed by id (equal providers share it): the where sheet pushes its pull page by provider (§4e).
+extension Provider: Hashable {
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }

@@ -41,7 +41,7 @@ struct AttestationRecordTests {
     }
 
     /// TDXVerificationResult with a chosen report_data (all else zeroed).
-    private func verification(reportData: Data) -> TDXVerificationResult {
+    private func verification(reportData: Data, signatureValid: Bool = true, certChainValid: Bool = true) -> TDXVerificationResult {
         let zero48 = Data(count: 48)
         let body = TDXQuote.TDReportBody(
             teeTcbSvn: Data(count: 16), mrSeam: zero48, mrSignerSeam: zero48,
@@ -58,7 +58,25 @@ struct AttestationRecordTests {
                 certificateChainPEM: [], rawCertificationData: Data())
         )
         return TDXVerificationResult(quote: quote, measurements: TDXMeasurements(from: body),
-                                     signatureValid: true, certChainValid: true, certChainError: nil)
+                                     signatureValid: signatureValid, certChainValid: certChainValid,
+                                     certChainError: certChainValid ? nil : "chain invalid")
+    }
+
+    // MARK: - T6 (android, 2026-11-06; approved on the review page as trust-quote-failed): key binding over a failed quote
+
+    /// The E2EE key sits in the model quote's report_data, but the quote's signature or cert chain failed.
+    /// "key bound in the model's TDX quote" and "sealed so only <model> can open it" must not read as proven
+    /// over a quote that didn't verify (attestationState is degraded there). Failed on the old code.
+    @Test func aKeyInAQuoteThatFailedVerificationIsNotBound() {
+        let key = Data(repeating: 0x5A, count: 32)
+        var report = Data(count: 64); report.replaceSubrange(0..<32, with: key)
+        for (sig, chain) in [(false, true), (true, false)] {
+            let record = makeRecord(modelEd25519PubKey: key,
+                                    modelQuoteVerification: verification(reportData: report, signatureValid: sig, certChainValid: chain))
+            #expect(record.modelQuoteVerification?.isVerified == false, "precondition: the quote failed")
+            #expect(record.e2eeKeyBoundToModelTEE == false, "sig \(sig) chain \(chain): bound read true over a failed quote")
+            #expect(record.e2eeKeyInModelReportData == true, "the key IS in report_data: the expert node says so")
+        }
     }
 
     /// 64-byte report_data with `nonceHex` in bytes [32..64].

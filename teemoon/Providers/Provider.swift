@@ -270,6 +270,13 @@ struct Provider: Codable, Identifiable, Equatable {
         modelCapabilities?.contains(.tools) ?? true
     }
 
+    /// Whether the selected model takes images. **Unknown → false**, unlike tools: an image sent to a
+    /// model that can't read it is refused or silently ignored, so only a catalogue's yes counts.
+    var modelSeesImages: Bool {
+        if isLocal { return LocalModelCatalog.imagesOnDevice && PhoneImageMemory.reads(modelID: model) }
+        return modelCapabilities?.contains(.vision) == true
+    }
+
     /// What this provider can do. The single source of truth for behavior gating —
     /// never test the endpoint string or a preset UUID to decide behavior.
     ///
@@ -287,12 +294,22 @@ struct Provider: Codable, Identifiable, Equatable {
         // own stack runs TDX with per-instance keys — the limitation is the
         // routing, not the hardware.) Claiming either capability here would
         // still be an overclaim.
-        if isNearAI, NearAIModelCatalog.confidentiality(forID: model) == .teeOwn {
+        // .unknown too (an own-fleet guess before the tier list is seen): not knowing the tier must not
+        // send plain TLS without asking. The attested path proves it or degrades and the gate asks.
+        // What the screens CLAIM is `claimsEndToEndEncryption`, not this.
+        if isNearAI, [.teeOwn, .unknown].contains(NearAIModelCatalog.confidentiality(forID: model)) {
             caps.insert([.attestation, .endToEndEncryption])
         }
         if hasBuiltInGrounding { caps.insert(.builtInGrounding) }
         if supportsModelBrowsing { caps.insert(.modelBrowsing) }
         return caps
+    }
+
+    /// Whether a screen may say "end-to-end encrypted" / show the e2ee tag. Stricter than `capabilities`:
+    /// a near.ai id is claimed only once its tier says own fleet.
+    var claimsEndToEndEncryption: Bool {
+        guard capabilities.contains(.endToEndEncryption) else { return false }
+        return !isNearAI || NearAIModelCatalog.confidentiality(forID: model) == .teeOwn
     }
 
     struct Capabilities: OptionSet {
@@ -620,7 +637,7 @@ extension KnownModel {
             downloadSize: model.sizeLabel,
             pinnedRevision: model.revision,
             // The one confidentiality claim that needs nothing to verify it.
-            confidentialityNote: "runs on this device — nothing leaves it")
+            confidentialityNote: "runs on this device — nothing leaves it unless you turn on web search")
     }
 }
 

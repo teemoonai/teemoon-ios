@@ -18,7 +18,7 @@ extension WhereSheetView {
     }
 
     var recommendedPhoneModel: LocalModel? {
-        WhereGetPolicy.recommendedPhoneModel(availableMB: LocalMemory.availableMB())
+        WhereGetPolicy.recommendedPhoneModel()
     }
 
     @ViewBuilder
@@ -96,7 +96,7 @@ extension WhereSheetView {
                         // One line, always: the cloud list of six names is a
                         // few points too wide at phone width, so it shrinks a
                         // little instead of wrapping "brave" onto its own line.
-                        .lineLimit(1)
+                        .lineLimitGrowing(1)
                         .minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 8)
@@ -117,7 +117,7 @@ extension WhereSheetView {
         // the kind of wrong that costs the user three minutes to discover.
         let alreadyHere = isInstalled(model)
         return VStack(alignment: .leading, spacing: 0) {
-            Text("free · nothing leaves \(DeviceNoun.boundary)")
+            Text("free · runs offline on \(DeviceNoun.boundary)")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.green)
                 .textCase(.lowercase)
@@ -154,7 +154,8 @@ extension WhereSheetView {
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Color.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 46)
+                    .padding(.vertical, 6)
+                    .frame(minHeight: 46)
                     .textCase(.lowercase)
                     .background(Capsule(style: .continuous).fill(ML.accent))
             }
@@ -207,7 +208,7 @@ extension WhereSheetView {
     @ViewBuilder
     var readySection: some View {
         let rows = equippedRows
-        if rows.isEmpty {
+        if tabRows.isEmpty {
             Section {
                 // A DECODE FAILURE MUST NOT PRESENT AS "NO SETUPS".
                 //
@@ -259,11 +260,13 @@ extension WhereSheetView {
                     }
                 }
             }
-        } else {
+        } else if !rows.isEmpty || !refusedRows.isEmpty {
             Section {
-                ForEach(rows) { row in
-                    readyRow(row)
-                        .listRowInsets(Self.rowInsets)
+                ForEach(listedRows, id: \.row.id) { listed in
+                    Group {
+                        if listed.refused { refusedRow(listed.row) } else { readyRow(listed.row) }
+                    }
+                    .listRowInsets(Self.rowInsets)
                 }
             } header: {
                 sectionHeader(readyHeader)
@@ -273,6 +276,23 @@ extension WhereSheetView {
             // at the list — and every one of those three facts is discoverable
             // by doing it once.
         }
+    }
+
+    func refusedRow(_ row: Equipped) -> some View {
+        let provider = row.asActive
+        let name = WhereProviderPresentation.modelLabel(for: provider)
+        return Button { pendingAlert = .phoneCantDoImages(row) } label: {
+            WhereRow(
+                glyph: WhereProviderPresentation.systemImage(for: provider),
+                glyphTint: .secondary,
+                title: name,
+                titleTint: .secondary,
+                caption: PhoneImageMemory.permanentLine(model: name.lowercased()),
+                captionLineLimit: 3
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("where.refused.\(row.modelID)")
     }
 
     func readyRow(_ row: Equipped) -> some View {
@@ -344,7 +364,7 @@ extension WhereSheetView {
                        ?? "not downloaded — \(PointerVerb.act) to resume")
                     : pullFailed ? "download failed — \(PointerVerb.act) to retry"
                     : readyCaption(for: provider),
-                captionTint: (missing != nil || pullFailed) ? .orange : captionColor(for: provider),
+                captionTint: captionColor(for: provider, missing: missing != nil, pullFailed: pullFailed),
                 progress: arriving,
                 // Phone: cancelling REMOVES the setup, since a local provider
                 // whose weights never landed can't answer. Home: cancel the
@@ -365,12 +385,13 @@ extension WhereSheetView {
                 // as two problems where there is one.
                 // Nor for weights that aren't here: "failed its integrity check ·
                 // cold" grades the temperature of a file that doesn't exist.
-                warmth: (arriving == nil && !pullFailed && missing == nil) ? warmthLabel(row) : nil
+                warmth: (arriving == nil && !pullFailed && missing == nil) ? warmthLabel(row) : nil,
+                readsImages: arriving == nil && !pullFailed && missing == nil && readsImages(row)
             )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(rowAccessibility(
-            provider, selected: selected,
+            provider, selected: selected, readsImages: arriving == nil && !pullFailed && missing == nil && readsImages(row),
             state: arriving.map { waiting ?? "downloading \(Int($0 * 100))%" }
         ))
         // Stable handle for capture rigs. Tapping by matched TEXT proved
@@ -462,6 +483,11 @@ extension WhereSheetView {
         getPolicy.readyCaption(for: provider)
     }
 
+    func readsImages(_ row: Equipped) -> Bool {
+        ImageModelChoice.reads(row.provider, modelID: row.modelID,
+                               capabilities: providerStore.capabilities(ofModel: row.modelID, on: row.provider.id))
+    }
+
     func warmthLabel(_ row: Equipped) -> String? {
         isWarm(row).map { $0 ? "warm" : "cold" }
     }
@@ -507,18 +533,22 @@ extension WhereSheetView {
         return true
     }
 
-    func captionColor(for provider: Provider) -> Color {
-        getPolicy.warnsUnencryptedNear(provider) ? .orange : .secondary
+    func captionColor(for provider: Provider, missing: Bool, pullFailed: Bool) -> Color {
+        switch getPolicy.captionTone(for: provider, missingWeights: missing, pullFailed: pullFailed) {
+        case .muted: .secondary
+        case .attention: .orange
+        }
     }
 
     /// `state` is the trailing text while weights arrive — "downloading 24%",
     /// "waiting for wi-fi" — so VoiceOver (and the capture rigs) hear what the
     /// bar shows.
-    func rowAccessibility(_ provider: Provider, selected: Bool, state: String? = nil) -> String {
+    func rowAccessibility(_ provider: Provider, selected: Bool, readsImages: Bool = false, state: String? = nil) -> String {
         var parts = [
             WhereProviderPresentation.modelLabel(for: provider),
             WhereProviderPresentation.placeCaption(for: provider),
         ]
+        if readsImages { parts.append(ImageModelChoice.marker) }
         if let state { parts.append(state) }
         if selected { parts.append("selected") }
         return parts.joined(separator: ", ")

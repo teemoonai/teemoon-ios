@@ -26,7 +26,7 @@ struct ProviderPresetSection: View {
                         glyph: glyph(for: preset),
                         glyphTint: Color.accentColor,
                         title: preset.name.lowercased(),
-                        showsE2EETag: preset.capabilities.contains(.endToEndEncryption),
+                        showsE2EETag: preset.claimsEndToEndEncryption,
                         caption: WhereProviderPresentation.presetCaption(for: preset),
                         captionLineLimit: 2,
                         isSelected: form.selectedPresetName == preset.name

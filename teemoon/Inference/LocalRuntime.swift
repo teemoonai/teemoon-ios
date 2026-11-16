@@ -29,15 +29,18 @@ enum LocalInferenceError: LocalizedError {
     case modelNotDownloaded(String)
     case insufficientMemory(needMB: Int, availableMB: Int)
     case loadFailed(String)
+    case unreadableImage
 
     var errorDescription: String? {
         switch self {
         case .modelNotDownloaded(let id):
-            return "\(id) isn't downloaded yet. Download it before starting a chat."
+            return "\(id) isn't downloaded yet. download it before starting a chat."
         case .insufficientMemory(let need, let available):
-            return "Not enough free memory to load this model (needs about \(need) MB, \(available) MB available). Close some apps, or pick a smaller model."
+            return "not enough free memory to load this model (needs about \(need) mb, \(available) mb free). close some apps, or pick a smaller model."
         case .loadFailed(let detail):
-            return "The model couldn't be loaded: \(detail)"
+            return "the model couldn't be loaded: \(detail)"
+        case .unreadableImage:
+            return "this image couldn't be read"
         }
     }
 }
@@ -79,10 +82,21 @@ enum LocalMemory {
         }
     }
 
-    /// Download size vs process budget. `availableMB == 0` means the API is
-    /// silent — do not warn. See WhereGetPolicyTests.
-    static func exceedsAvailable(sizeMB: Int, availableMB: Int = availableMB()) -> Bool {
-        availableMB > 0 && sizeMB > availableMB
+    /// The phone's RAM in marketed GB: physical memory rounded up to the next whole GiB. A "6 GB" iPhone
+    /// reports about 5.6 GiB and an "8 GB" one about 7.5.
+    static func marketedRAMGB(physicalBytes: UInt64 = ProcessInfo.processInfo.physicalMemory) -> Int {
+        Int((Double(physicalBytes) / 1_073_741_824).rounded(.up))
+    }
+
+    /// The download-time "may not fit": the phone is below the model's RAM floor. Never free memory, which made an
+    /// 8 GB Pixel 8a that runs E2B say it may not fit (Android Test Lab, 2026-10-30). See LocalMemoryRuleTests.
+    static func belowFloor(_ model: LocalModel, physicalBytes: UInt64 = ProcessInfo.processInfo.physicalMemory) -> Bool {
+        marketedRAMGB(physicalBytes: physicalBytes) < model.minRAMGB
+    }
+
+    /// What the load gate asks for: the measured peak, or the file size until it is measured, plus headroom.
+    static func loadNeedMB(sizeMB: Int, peakFootprintMB: Int?) -> Int {
+        (peakFootprintMB ?? sizeMB) + headroomMB
     }
 }
 

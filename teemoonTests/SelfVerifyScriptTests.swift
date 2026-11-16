@@ -84,8 +84,12 @@ struct SelfVerifyScriptTests {
         // time. The literal must never appear next to anything but that variable.
         #expect(script.contains(#"os.environ.get("NEARAI_CLOUD_API_KEY") or os.environ.get("API_KEY")"#))
         #expect(script.contains(#"headers["authorization"] = f"Bearer {api_key}""#))
-        // exactly one Bearer, and it is that interpolation
-        #expect(script.components(separatedBy: "Bearer").count - 1 == 1)
+        // exactly two Bearers: that interpolation, and Docker Hub's anonymous pull token for the launcher index
+        #expect(script.components(separatedBy: "Bearer").count - 1 == 2)
+        #expect(script.contains(#"headers = {"authorization": f"Bearer {token}", "accept": LAUNCHER_INDEX_MEDIA_TYPE}"#))
+        let registryPath = try #require(script.range(of: "def launcher_index(child):"))
+        let registryEnd = try #require(script.range(of: "for image, d in refs:", range: registryPath.upperBound..<script.endIndex))
+        #expect(!script[registryPath.lowerBound..<registryEnd.lowerBound].contains("API_KEY"), "the user's key never goes to Docker Hub")
         #expect(script.contains("NEARAI_CLOUD_API_KEY"))
     }
 
@@ -214,6 +218,24 @@ struct SelfVerifyScriptTests {
         // model name self-reported from inside the enclave is compared to the
         // session's model (docs: TLS page, "Verify Model Name")
         #expect(script.contains(#"find_all(r, "model_name")"#))
+    }
+
+    /// Review item selfverify-launcher-index: the script restates LauncherIndex's lookup, so its constants are the app's,
+    /// and its three verdict lines are the approved ones verbatim. tools/test_self_verify_script.py runs the branches.
+    @Test func launcherIndexLookupRestatesTheApp() throws {
+        let script = try #require(summary().selfVerifyScript)
+        #expect(script.contains("LAUNCHER_REPOSITORY = \"\(LauncherIndex.repository)\""))
+        let tags = LauncherIndex.firstTags.map { "\"\($0)\"" }.joined(separator: ", ")
+        #expect(script.contains("LAUNCHER_FIRST_TAGS = [\(tags)]"))
+        #expect(script.contains("LAUNCHER_SCAN_CAP = \(LauncherIndex.scanCap)"))
+        #expect(script.contains("LAUNCHER_INDEX_MEDIA_TYPE = \"\(LauncherIndex.indexMediaType)\""))
+        #expect(script.contains("LAUNCHER_BUILDER = \"\(LauncherIndex.builder)\""))
+        // The ok line names the builder in words; they must stay true of the constant.
+        #expect(LauncherIndex.builder == LauncherIndex.builderRepository + "/.github/workflows/build.yml@refs/heads/master")
+        #expect(LauncherIndex.builderRepository == "https://github.com/nearai/compose-manager")
+        #expect(script.contains(#"ok(f"compose-manager-launcher@{child[:12]}… is the linux/amd64 image in index {index[:12]}…, which has a build attestation on nearai/compose-manager (build.yml on master)")"#))
+        #expect(script.contains(#"bad(f"compose-manager-launcher@{child[:12]}… has NO build attestation, and no index near.ai published lists it")"#))
+        #expect(script.contains(#"skip(f"compose-manager-launcher@{child[:12]}…: Docker Hub unavailable — no evidence either way", remedy="re-run later")"#))
     }
 
     /// After a paste-and-run, the shell history holds the entire paste, so

@@ -85,6 +85,23 @@ struct LastRequestDebugInfo {
     var teeVerification: ResponseVerification?
     /// Each request's level, in order (`RequestResult.effortLevels`).
     var effortLevels: [String?] = []
+    /// Earlier images of the chat this request did not carry (IMAGES.md §4).
+    var imagesLeftOutForModel = 0
+    var imagesLeftOutForSize = 0
+
+    /// The card's lines for those images, the maintainer's approved wording.
+    var imageLines: [String] {
+        var lines: [String] = []
+        if imagesLeftOutForModel > 0 {
+            lines.append("\(Self.images(imagesLeftOutForModel)) sent: this model can't see images")
+        }
+        if imagesLeftOutForSize > 0 {
+            lines.append("\(Self.images(imagesLeftOutForSize)) sent, to keep the request small")
+        }
+        return lines
+    }
+
+    private static func images(_ n: Int) -> String { n == 1 ? "1 earlier image wasn't" : "\(n) earlier images weren't" }
 
     /// The turn's reasoning level: "effort high", "thinking on".
     var effortLevel: String? {

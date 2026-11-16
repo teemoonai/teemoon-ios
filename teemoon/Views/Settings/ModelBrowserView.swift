@@ -15,11 +15,17 @@ struct ModelBrowserView: View {
     /// Everything this browser knows about the catalogue it is opened onto.
     let door: ModelBrowserDoor
     var onSelect: ((KnownModel) -> Void)? = nil
+    /// Filters on when it opens, e.g. "reads images" from the paperclip's "find a model that reads images".
+    var initialFilters: ModelBrowserQuery.Filter = []
+    /// False when pushed inside another stack (the where sheet, §4e): no stack of its own, the back arrow, no cancel.
+    var embedsNavigationStack = true
+    @State private var appliedInitialFilters = false
     @State private var liveModels: [KnownModel]? = nil
     @State private var isLoadingLive = false
     @State private var loadFailed = false
     @State private var query = ModelBrowserQuery()
     @State private var detailModel: KnownModel? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) var dismiss
 
     private var effectiveModels: [KnownModel] { liveModels ?? door.models }
@@ -29,11 +35,20 @@ struct ModelBrowserView: View {
                             query: query,
                             tiered: door.showsConfidentialityTags,
                             selectedID: selectedModel,
-                            allowsCustomID: door.allowsCustomID)
+                            allowsCustomID: door.allowsCustomID,
+                            carried: initialFilters)
     }
 
     var body: some View {
-        NavigationStack {
+        if embedsNavigationStack {
+            NavigationStack { page }
+        } else {
+            page
+        }
+    }
+
+    private var page: some View {
+        Group {
             let listing = listing
             List {
                 if !effectiveModels.isEmpty {
@@ -84,15 +99,23 @@ struct ModelBrowserView: View {
                     // it redirects to.
                     offersLoader: door.offersLoader.map { loader in
                         { await loader(model.aliasOf ?? model.id) }
-                    }
+                    },
+                    reasoning: door.reasoning?(model.id)
                 )
             }
             .task { await loadLive() }
+            .onAppear {
+                guard !appliedInitialFilters else { return }
+                appliedInitialFilters = true
+                query.filters.formUnion(initialFilters)
+            }
             .refreshable { await loadLive(force: true) }
             .toolbar {
                 #if os(iOS) || os(visionOS)
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("cancel") { dismiss() }
+                if embedsNavigationStack {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("cancel") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if isLoadingLive { ProgressView() }
@@ -111,13 +134,16 @@ struct ModelBrowserView: View {
     /// caption under it says what is currently hiding rows.
     @ViewBuilder
     private func controls(_ listing: ModelBrowserListing) -> some View {
-        HStack(spacing: 8) {
+        // Stacked at accessibility sizes: side by side, "recommended" broke into a column of letter pairs.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        layout {
             Text(listing.countLabel)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .textCase(.lowercase)
                 .accessibilityIdentifier("modelBrowser.count")
-            Spacer(minLength: 6)
+            if !stacked { Spacer(minLength: 6) }
             Menu {
                 Picker("sort", selection: $query.sort) {
                     ForEach(listing.sorts, id: \.self) { sort in
@@ -212,34 +238,30 @@ struct ModelBrowserView: View {
             pick(model)
         } label: {
             VStack(alignment: .leading, spacing: 2) {
-                // One flowing line: name (truncates, never wraps) → tags right
-                // after it → price/context right-aligned.
-                HStack(spacing: 6) {
-                    if row.isSelected {
-                        Image(systemName: "checkmark")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .fixedSize()
+                if dynamicTypeSize.isAccessibilitySize {
+                    // The name on its own line, whole; the tags and price under it.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        selectedMark(row)
+                        Text(model.displayName).tint(.primary).textCase(.lowercase)
                     }
-                    Text(model.displayName)
-                        .tint(.primary)
-                        .textCase(.lowercase)
-                        .lineLimit(1)
-                    // RETIRING, next to `new` and in its place when both would
-                    // show: a model on its way out is the more decision-relevant
-                    // fact, and two badges is where the name starts truncating.
-                    if model.isRetiring {
-                        badge("retiring", .orange)
-                    } else if model.isNew {
-                        badge("new", Color.accentColor)
+                    HStack(spacing: 6) {
+                        tags(model)
+                        Spacer(minLength: 6)
+                        meta(model)
                     }
-                    Spacer(minLength: 6)
-                    Text(model.metaLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)      // reference data — quiet gray
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .fixedSize()                      // price stays intact; the name yields first
+                } else {
+                    // One flowing line: name (truncates, never wraps) → tags right
+                    // after it → price/context right-aligned.
+                    HStack(spacing: 6) {
+                        selectedMark(row)
+                        Text(model.displayName)
+                            .tint(.primary)
+                            .textCase(.lowercase)
+                            .lineLimitGrowing(1)
+                        tags(model)
+                        Spacer(minLength: 6)
+                        meta(model)
+                    }
                 }
                 // Only when the list is flat. Grouped, the header above the row
                 // already says the vendor or the tier, and repeating it spends
@@ -248,7 +270,7 @@ struct ModelBrowserView: View {
                     HStack(spacing: 6) {
                         if row.showsVendor, !model.vendor.isEmpty {
                             Text(model.vendor).font(.caption).foregroundStyle(.secondary)
-                                .textCase(.lowercase).lineLimit(1)
+                                .textCase(.lowercase).lineLimitGrowing(1)
                         }
                         if row.showsTier, let tier = row.tier {
                             confidentialityTag(tier).fixedSize()
@@ -278,6 +300,44 @@ struct ModelBrowserView: View {
                 Label("model info", systemImage: "info.circle")
             }
         }
+    }
+
+    @ViewBuilder
+    private func selectedMark(_ row: ModelBrowserListing.Row) -> some View {
+        if row.isSelected {
+            Image(systemName: "checkmark")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private func tags(_ model: KnownModel) -> some View {
+        if model.capabilities?.contains(.vision) == true {
+            Image(systemName: ImageModelChoice.markerGlyph)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .accessibilityLabel(ImageModelChoice.marker)
+        }
+        // RETIRING, next to `new` and in its place when both would
+        // show: a model on its way out is the more decision-relevant
+        // fact, and two badges is where the name starts truncating.
+        if model.isRetiring {
+            badge("retiring", .orange)
+        } else if model.isNew {
+            badge("new", Color.accentColor)
+        }
+    }
+
+    private func meta(_ model: KnownModel) -> some View {
+        Text(model.metaLabel)
+            .font(.caption)
+            .foregroundStyle(.secondary)      // reference data — quiet gray
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()                      // price stays intact; the name yields first
     }
 
     private func badge(_ text: String, _ tint: Color) -> some View {

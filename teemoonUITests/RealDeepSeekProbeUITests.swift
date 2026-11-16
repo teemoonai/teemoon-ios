@@ -31,7 +31,7 @@ final class RealDeepSeekProbeUITests: XCTestCase {
         app.launchArguments = ["-scrollTrace"]
         app.launch()
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 40), "composer never appeared")
 
         // Web search must be ON — it is what attaches a tool, which is what makes

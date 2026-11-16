@@ -4,6 +4,9 @@ import Testing
 
 @Suite("WhereGetPolicy")
 struct WhereGetPolicyTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     private func grok(id: UUID = UUID(), endpoint: String = "https://api.x.ai/v1/chat/completions") -> Provider {
         var p = Provider.grok
@@ -220,18 +223,34 @@ struct WhereGetPolicyTests {
         #expect(p.destruction(for: Provider.grok) == .unequipCloud)
     }
 
-    @Test func exceedsAvailableMemoryIgnoresUnknownBudget() {
-        #expect(!LocalMemory.exceedsAvailable(sizeMB: 3000, availableMB: 0))
-        #expect(LocalMemory.exceedsAvailable(sizeMB: 3000, availableMB: 2000))
-        #expect(!LocalMemory.exceedsAvailable(sizeMB: 1000, availableMB: 2000))
+    /// The "may not fit" label and the start-here hero read total RAM against the model's floor, never free memory:
+    /// an 8 GB Pixel 8a that runs E2B was told it may not fit (Android Test Lab, 2026-10-30). Physical memory as
+    /// phones report it: an "8 GB" iPhone about 7.5 GiB, a "6 GB" one about 5.6, a "4 GB" one about 3.7.
+    @Test func theFitLabelIsTheRAMFloorNotFreeMemory() throws {
+        let gib: (Double) -> UInt64 = { UInt64($0 * 1_073_741_824) }
+        let e2b = try #require(LocalModelCatalog.all.first { $0.fileName == "gemma-4-E2B-it.litertlm" })
+        let e4b = try #require(LocalModelCatalog.all.first { $0.fileName == "gemma-4-E4B-it.litertlm" })
+        #expect(LocalMemory.marketedRAMGB(physicalBytes: gib(7.5)) == 8)
+        #expect(LocalMemory.marketedRAMGB(physicalBytes: gib(5.6)) == 6)
+        #expect(LocalMemory.marketedRAMGB(physicalBytes: gib(3.7)) == 4)
+        #expect(!LocalMemory.belowFloor(e2b, physicalBytes: gib(7.5)))   // Pixel 8a, iPhone 16 Pro
+        #expect(!LocalMemory.belowFloor(e2b, physicalBytes: gib(5.6)))   // 6 GB iPhone
+        #expect(LocalMemory.belowFloor(e2b, physicalBytes: gib(3.7)))    // 4 GB
+        #expect(!LocalMemory.belowFloor(e4b, physicalBytes: gib(7.5)))
+        #expect(LocalMemory.belowFloor(e4b, physicalBytes: gib(5.6)))
     }
 
     @Test func recommendedPhoneModelDoesNotHeroADownloadThatWouldFail() {
         let model = LocalModelCatalog.all[0]
-        #expect(WhereGetPolicy.recommendedPhoneModel(availableMB: 0) == model)
-        #expect(WhereGetPolicy.recommendedPhoneModel(availableMB: model.sizeMB) == nil)
-        #expect(WhereGetPolicy.recommendedPhoneModel(
-            availableMB: model.sizeMB + LocalMemory.headroomMB) == model)
+        #expect(WhereGetPolicy.recommendedPhoneModel(physicalBytes: UInt64(7.5 * 1_073_741_824)) == model)
+        #expect(WhereGetPolicy.recommendedPhoneModel(physicalBytes: UInt64(3.7 * 1_073_741_824)) == nil)
+    }
+
+    /// The load gate asks for the measured peak plus headroom; until a model's peak is measured, its file size.
+    @Test func theLoadGateUsesThePeakOnceMeasured() {
+        #expect(LocalMemory.loadNeedMB(sizeMB: 2468, peakFootprintMB: nil) == 2980)
+        #expect(LocalMemory.loadNeedMB(sizeMB: 2468, peakFootprintMB: 1500) == 2012)
+        #expect(LocalModelCatalog.all.allSatisfy { $0.peakFootprintMB == nil }, "a peak was set: update the floor check")
     }
 
     @Test func firstRunIsEmptyAllWithAFitAndNothingMoreUrgent() {
@@ -328,16 +347,28 @@ struct WhereGetPolicyTests {
         #expect(identified.isWarm(provider: Provider.grok, modelID: "x") == nil)
     }
 
-    @Test func warnsUnencryptedNearIsProxiedOnly() {
+    /// where-near-unencrypted-muted (2026-11-07): a near.ai model that isn't end-to-end encrypted says so in the
+    /// muted line. Orange is only for a row the user must act on.
+    @Test func anUnencryptedNearRowCaptionIsMuted() {
         NearAIModelCatalog.resetTierCache()
-        #expect(!policy(providers: [Provider.nearAI]).warnsUnencryptedNear(Provider.nearAI))
         let proxied = Provider(
             name: "near.ai",
             endpoint: "https://cloud-api.near.ai/v1/chat/completions",
             model: "anthropic/claude-opus-4-6"
         )
-        #expect(policy(providers: [proxied]).warnsUnencryptedNear(proxied))
-        #expect(!policy(providers: [Provider.grok]).warnsUnencryptedNear(Provider.grok))
+        var thirdParty = proxied
+        thirdParty.model = "moonshotai/kimi-k2.5"
+        for p in [proxied, thirdParty] {
+            let rows = policy(providers: [p])
+            #expect(rows.readyCaption(for: p)?.hasSuffix("not end-to-end encrypted") == true)
+            #expect(rows.captionTone(for: p, missingWeights: false, pullFailed: false) == .muted)
+        }
+        let own = policy(providers: [Provider.nearAI])
+        #expect(own.captionTone(for: Provider.nearAI, missingWeights: false, pullFailed: false) == .muted)
+        let box = ollama()
+        #expect(policy(providers: [box]).captionTone(for: box, missingWeights: false, pullFailed: true) == .attention)
+        let phone = Provider.local(LocalModelCatalog.all[0])
+        #expect(policy(providers: [phone]).captionTone(for: phone, missingWeights: true, pullFailed: false) == .attention)
     }
 
     /// A key does not make a custom endpoint browsable: its `/models` may not

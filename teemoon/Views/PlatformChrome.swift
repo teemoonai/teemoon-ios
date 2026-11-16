@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 /// THE VERB FOR "ACTIVATE THIS CONTROL", WHICH IS NOT "TAP" ON A MAC.
 ///
 /// Instruction copy was written for the phone and shipped verbatim to macOS:
-/// "tap the model chip above the message field", "tap a provider to fill the
+/// "tap the model chip in the message box", "tap a provider to fill the
 /// fields", "download failed — tap to retry". Nobody taps a Mac. It is a small
 /// wrong word in a visible place, and telling a user to perform a gesture their
 /// device does not have is the same class of tell as an empty File menu.
@@ -151,6 +151,20 @@ enum Clipboard {
     }
 }
 
+/// Where the model chip is, for copy that sends people to it: inside the message box on iOS (the one-panel composer),
+/// still above the field on macOS.
+enum ModelChipCopy {
+    static var switchMidChat: String {
+        #if os(macOS)
+        "to switch model mid-chat, \(PointerVerb.act) the model chip above the message field"
+        #else
+        "to switch model mid-chat, \(PointerVerb.act) the model chip in the message box"
+        #endif
+    }
+    static var settingsFooter: String { "manage hosts and keys here. \(switchMidChat)." }
+    static var placesKeysFooter: String { "\(switchMidChat) — not here." }
+}
+
 enum PointerVerb {
     /// "tap" / "click"
     static var act: String {
@@ -193,9 +207,12 @@ enum ControlMetrics {
         #if os(macOS)
         28
         #else
-        44
+        34   // the composer panel's row height (docs/COMPOSER_PANEL.md); the row keeps 44 hit areas
         #endif
     }
+
+    /// The largest text size those pills grow to: two share one row, and past this the model's name truncates to a letter.
+    static let pillLargestTextSize: DynamicTypeSize = .xxxLarge
 
     /// Horizontal padding inside those pills.
     static var pillHorizontalPadding: CGFloat {

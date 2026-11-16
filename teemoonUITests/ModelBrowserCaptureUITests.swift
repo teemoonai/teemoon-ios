@@ -20,6 +20,8 @@ import XCTest
 
 final class ModelBrowserCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     /// From `TEST_RUNNER_SITE_E2EE_MODEL` (teemoon-web's model registry); was a
     /// literal "z-ai/glm-5.2", which near.ai retired on 2026-09-12.
     private static var model: String {

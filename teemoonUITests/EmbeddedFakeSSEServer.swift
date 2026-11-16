@@ -45,6 +45,8 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
     /// refused with HTTP 400, everything else streams. The "turn off & retry"
     /// test needs exactly this — the retry only answers if it went out bare.
     var rejectToolsWith400 = false
+    /// A model that refuses the reasoning level: 400 "Invalid reasoning effort." when the body carries one.
+    var rejectEffortWith400 = false
     /// Every completion request's body, in order — journeys that assert what
     /// reached the wire (the system prompt, the search tool) read it.
     private let bodiesLock = NSLock()
@@ -78,13 +80,13 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
     /// Go quiet mid-stream every `stallEvery` blocks, for `stallDuration`.
     ///
     /// The 2026-08-25 jitter cannot be reproduced by a continuous stream:
-    /// `StreamingMessageView.stallDelay` is 1s, so the trailing activity chip
+    /// `StallIndicator.showAfter` is 3s, so the trailing activity chip
     /// only mounts once the wire has been silent for longer than that, and it
     /// is the chip's spring that moves the transcript. A bursty provider does
     /// this several times a generation (near.ai's silent reasoning gaps,
     /// fireworks' kilochar flushes); this is that shape on demand.
     ///
-    /// `stallDuration` MUST exceed 1s or the chip never appears and the
+    /// `stallDuration` MUST exceed 3s or the chip never appears and the
     /// fixture silently proves nothing.
     var stallEvery: Int = 0
     var stallDuration: TimeInterval = 0
@@ -158,6 +160,8 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
                 self.bodiesLock.lock(); self._requestBodies.append(body); self.bodiesLock.unlock()
                 if self.rejectToolsWith400, body.contains("\"tools\"") {
                     self.sendError(conn, status: 400)
+                } else if self.rejectEffortWith400, body.contains("\"reasoning_effort\"") {
+                    self.sendError(conn, status: 400, message: "Invalid reasoning effort.")
                 } else if self.statusCode >= 400 {
                     self.sendError(conn, status: self.statusCode)
                 } else {
@@ -169,9 +173,9 @@ final class EmbeddedFakeSSEServer: @unchecked Sendable {
         }
     }
 
-    private func sendError(_ conn: NWConnection, status: Int) {
+    private func sendError(_ conn: NWConnection, status: Int, message: String? = nil) {
         let reason = status == 401 ? "Unauthorized" : "Internal Server Error"
-        let body = #"{"error":{"message":"synthetic \#(status)","type":"server_error"}}"#
+        let body = #"{"error":{"message":"\#(message ?? "synthetic \(status)")","type":"server_error"}}"#
         let response = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\n"
             + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
         conn.send(content: Data(response.utf8), completion: .contentProcessed { _ in conn.cancel() })

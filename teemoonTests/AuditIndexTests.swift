@@ -111,19 +111,17 @@ struct AuditIndexTests {
         #expect(AuditIndex(fixedIndex: nil).projectPointer(image: "otel/opentelemetry-collector-contrib") == nil)
     }
 
-    // MARK: tag-addressed audit page (additive sibling to the digest path spec)
-
-    @Test func tagAuditURL_resolvesForAssessedTag() {
-        let url = seeded().tagAuditURL(image: "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.2-4.8.1-distroless",
-                                       tag: "4.5.2-4.8.1-distroless")
-        #expect(url?.absoluteString ==
-            "https://github.com/teemoonai/audits/blob/main/images/nvcr.io/nvidia/k8s/dcgm-exporter/tag-4.5.2-4.8.1-distroless.md")
-    }
-
-    @Test func tagAuditURL_unassessedTagGivesNoLink() {
-        // A tag the audit hasn't reviewed → no link (never overclaim a drifted tag).
-        #expect(seeded().tagAuditURL(image: "nvcr.io/nvidia/k8s/dcgm-exporter", tag: "9.9.9") == nil)
-        #expect(seeded().tagAuditURL(image: "docker.io/library/nginx", tag: "latest") == nil)
+    /// trust-leaks-wording: a LEAKS page's exposure summary is read verbatim; an index without it still decodes.
+    @Test func exposureSummaryDecodesOptionally() throws {
+        let page = "images/docker.io/lmsysorg/sglang/sha256-\(Self.digest).md"
+        let json = #"{ "schema": 1, "images": {}, "manifests": {}, "measured": [], "exposure": { "PAGE": { "scope": "wholesale", "summary": "every prompt is logged." } } }"#
+            .replacingOccurrences(of: "PAGE", with: page)
+        let idx = AuditIndex(fixedIndex: try JSONDecoder().decode(AuditIndex.Index.self, from: Data(json.utf8)))
+        let url = try #require(URL(string: "https://github.com/teemoonai/audits/blob/main/\(page)"))
+        #expect(idx.exposureSummary(for: url) == "every prompt is logged.")
+        let bare = try JSONDecoder().decode(AuditIndex.Index.self,
+                                            from: Data(#"{ "schema": 1, "images": {}, "manifests": {}, "measured": [] }"#.utf8))
+        #expect(bare.exposure == nil)
     }
 
     @Test func missingProjectAndTagFieldsDecodeToNoLink() throws {
@@ -135,7 +133,6 @@ struct AuditIndexTests {
         #expect(idx.tagAudits == nil)
         let index = AuditIndex(fixedIndex: idx)
         #expect(index.projectPointer(image: "otel/opentelemetry-collector-contrib") == nil)
-        #expect(index.tagAuditURL(image: "nvcr.io/nvidia/k8s/dcgm-exporter", tag: "4.5.2-4.8.1-distroless") == nil)
     }
 
     @Test func assessedImageLinks() {
@@ -356,11 +353,15 @@ struct EgressRollupTests {
                                    allTouchersCovered: true) == .leaks)
         #expect(everydayAuditState(classes: [.leaks],
                                    allTouchersCovered: false) == .leaks)
-        // Full coverage, no leaks/inconclusive → reviewed. compromisable
-        // control-plane pages don't demote it (their verdicts state no
-        // data-plane reach); qualified-pass doesn't either.
-        #expect(everydayAuditState(classes: [.privateReview, .qualifiedPass, .compromisable],
+        // Full coverage, all private or qualified-pass → reviewed.
+        #expect(everydayAuditState(classes: [.privateReview, .qualifiedPass],
                                    allTouchersCovered: true) == .reviewed)
+        // trust-audit-claim (the maintainer 2026-11-06): a compromisable page is the caveat, not green — the old rule
+        // let it read "reviewed".
+        #expect(everydayAuditState(classes: [.privateReview, .qualifiedPass, .compromisable],
+                                   allTouchersCovered: true) == .reviewedWithCaveat)
+        // A page with no class, or one this build doesn't know, is a gap — it used to be dropped.
+        #expect(everydayAuditState(classes: [.privateReview, nil], allTouchersCovered: true) == .incomplete)
         // A coverage gap can never read as an all-clear…
         #expect(everydayAuditState(classes: [.privateReview],
                                    allTouchersCovered: false) == .incomplete)
@@ -446,5 +447,30 @@ struct AuditIndexRefreshTests {
         try await Task.sleep(for: .milliseconds(200))
         #expect(relaunched.index?.images["nearaidev/x"] == ["sha256:abc"])
         #expect(IndexStubProtocol.requests.count == 1, "the fresh snapshot should have answered")
+    }
+}
+
+/// trust-audit-claim (the maintainer 2026-11-06): the index's age and schema.
+@Suite("AuditIndex age and schema")
+@MainActor
+struct AuditIndexAgeTests {
+    @Test func aWeekOldIndexIsNoIndexForTheEverydayClaim() throws {
+        let index = try #require(AuditIndex.decodeIndex(Data(#"{"schema":1,"images":{},"manifests":{},"measured":[]}"#.utf8)))
+        let loaded = Date(timeIntervalSince1970: 1_800_000_000)
+        let idx = AuditIndex(fixedIndex: index, loadedAt: loaded)
+        #expect(idx.isFresh(now: loaded.addingTimeInterval(AuditIndex.everydayMaxAge - 1)))
+        #expect(!idx.isFresh(now: loaded.addingTimeInterval(AuditIndex.everydayMaxAge + 1)))
+        #expect(!AuditIndex(fixedIndex: index).isFresh(), "no load date: unknown age, never fresh")
+    }
+
+    @Test func anotherSchemaIsRecognisedSoTheCacheIsDropped() {
+        #expect(AuditIndex.declaresOtherSchema(Data(#"{"schema":2}"#.utf8)))
+        #expect(!AuditIndex.declaresOtherSchema(Data(#"{"schema":1}"#.utf8)))
+        #expect(!AuditIndex.declaresOtherSchema(Data("not json".utf8)), "a broken body is not a schema change")
+        let defaults = UserDefaults(suiteName: "audit-\(UUID().uuidString)")!
+        defaults.set(Data("x".utf8), forKey: "ai.teemoon.auditIndex.json")
+        let idx = AuditIndex(defaults: defaults)
+        idx.clearCache()
+        #expect(defaults.data(forKey: "ai.teemoon.auditIndex.json") == nil && idx.index == nil)
     }
 }

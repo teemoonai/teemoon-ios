@@ -128,6 +128,13 @@ enum LocalInferenceOracle {
         // position, so it reads as a model reply rather than as an error.
         "could not be decrypted",
         "re-verify the connection",
+        // The lowercase card (2026-10-28).
+        "couldn't be decrypted",
+        "re-verify from the lock icon",
+        "found nothing for this query",
+        "teemoon couldn't read",
+        "took too long to answer",
+        "something went wrong talking to",
     ]
 
     /// The reply a model gives when it has lost the thread. Non-empty, fluent,

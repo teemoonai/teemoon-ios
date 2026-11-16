@@ -124,6 +124,8 @@ struct CollateralServiceTests {
         #expect(!result.isVerified)
     }
 
+    /// A stub that answers nothing it knows still fails closed: its error is neither a network error nor an
+    /// HTTP status, so it can't be read as an outage.
     @Test func unavailableCollateral_failsClosed() async throws {
         let snapshot = try Self.loadSnapshot()
         let verifier = DCAPVerifier(collateral: IntelPCSCollateralProvider(http: StubHTTP(responses: [:])))
@@ -133,6 +135,37 @@ struct CollateralServiceTests {
             return
         }
         #expect(reason.contains("collateral"))
+    }
+
+    /// near-send-gate-rule (the maintainer 2026-11-06): Intel unreachable — a real 503, or no network — is "couldn't
+    /// check", soft, never the hard .failed.
+    @Test func anIntelOutageIsUncheckedNotFailed() async throws {
+        let snapshot = try Self.loadSnapshot()
+        struct Down: CollateralHTTPClient {
+            let error: Error
+            func get(_ url: URL) async throws -> (body: Data, headers: [String: String]) { throw error }
+        }
+        for error: Error in [CollateralHTTPError(status: 503, host: "api.trustedservices.intel.com", path: "/tcb"),
+                             URLError(.notConnectedToInternet), URLError(.timedOut)] {
+            let verifier = DCAPVerifier(collateral: IntelPCSCollateralProvider(http: Down(error: error)))
+            let result = await verifier.verify(quoteHex: snapshot.quoteHex, nowSecs: snapshot.nowSecs)
+            #expect(result.isUnchecked, "\(error) → \(result)")
+            #expect(!result.isHardFailure)
+        }
+    }
+
+    /// android, 2026-11-06: a quote that can't be parsed must never ride the outage path into a soft state.
+    @Test func anUnparseableQuoteStaysHardEvenWhenIntelIsDown() async {
+        struct Down: CollateralHTTPClient {
+            func get(_ url: URL) async throws -> (body: Data, headers: [String: String]) { throw URLError(.timedOut) }
+        }
+        let verifier = DCAPVerifier(collateral: IntelPCSCollateralProvider(http: Down()))
+        for hex in ["zz-not-hex", String(repeating: "00", count: 64), String(repeating: "ab", count: 700)] {
+            let result = await verifier.verify(quoteHex: hex, nowSecs: 1_800_000_000)
+            #expect(!result.isUnchecked && result.isHardFailure, "\(hex.prefix(12))… → \(result)")
+        }
+        #expect(!DCAPVerifier.couldntCheck(IntelPCSCollateralProvider.CollateralError.quoteFieldsInvalid("bad URL")))
+        #expect(!DCAPVerifier.couldntCheck(IntelPCSCollateralProvider.CollateralError.quoteMissingPCKChain))
     }
 
     // MARK: - Byte-exact sub-object extraction

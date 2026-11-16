@@ -82,7 +82,7 @@ struct PlacesKeysHubView: View {
                     )
                 }
             } footer: {
-                Text("to switch model mid-chat, \(PointerVerb.act) the model chip above the message field — not here.")
+                Text(ModelChipCopy.placesKeysFooter)
                     .textCase(.lowercase)
             }
         }

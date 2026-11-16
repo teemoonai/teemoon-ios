@@ -13,7 +13,10 @@
 import XCTest
 
 final class NoKeySendGateCaptureUITests: XCTestCase {
-    override func setUpWithError() throws { continueAfterFailure = false }
+    override func setUpWithError() throws {
+        try CaptureRig.skipUnlessAsked()
+        continueAfterFailure = false
+    }
 
     func testKeylessBraveAnswersIsGatedAndBadged() throws {
         let app = XCUIApplication()

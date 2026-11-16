@@ -298,7 +298,7 @@ extension KnownModel {
     static let nearAIAttestedThirdPartyIDs: Set<String> = [
         "deepseek/deepseek-v3.2", "minimax/minimax-m2.5", "moonshotai/kimi-k2.5",
         "moonshotai/kimi-k2.6", "moonshotai/kimi-k3", "qwen/qwen3-32b",
-        "qwen/qwen3.5-397b-a17b", "z-ai/glm-5",
+        "qwen/qwen3.5-397b-a17b", "z-ai/glm-5", "z-ai/glm-5.3",
     ]
 
     // ── Fireworks.ai ─────────────────────────────────────────────────────────
@@ -343,8 +343,6 @@ extension KnownModel {
     static let fireworksPrices: [String: String] = [
         "accounts/fireworks/models/kimi-k3":                       "$3.00/$15.00",
         "accounts/fireworks/models/ember-1":                       "$3.00/$15.00",
-        // 975B MoE (41B active) from Thinking Machines Lab, multimodal.
-        "accounts/fireworks/models/inkling":                       "$1.00/$4.05",
         "accounts/fireworks/models/deepseek-v4p1-flash":           "$0.30/$1.20",
         "accounts/fireworks/models/deepseek-v4p1-flash-1017":      "$0.30/$1.20",
         "accounts/fireworks/models/muse-spark-open":               "$1.25/$4.25",
@@ -352,9 +350,8 @@ extension KnownModel {
         "accounts/fireworks/models/glm-5p3-flash":                 "$0.15/$0.50",
         "accounts/fireworks/models/qwen3p8-max":                   "$2.00/$6.00",
         "accounts/fireworks/models/minimax-m3":                    "$0.30/$1.20",
-        "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b": "$0.05/$0.20",
-        "accounts/fireworks/models/nemotron-3-ultra-nvfp4":        "$0.60/$2.40",
-        "accounts/fireworks/models/gpt-oss-120b":                  "$0.15/$0.60",
+        "accounts/fireworks/models/minimax-m3p1-flash":            "$0.15/$0.60",
+        "accounts/fireworks/models/kimi-k3p1-pro":                 "$2.00/$10.00",
     ]
 
     // ── The one fixed service ────────────────────────────────────────────────

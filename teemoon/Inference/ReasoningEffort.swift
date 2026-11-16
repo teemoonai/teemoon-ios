@@ -3,9 +3,10 @@
 //  teemoon
 //
 //  How long the SAME model on the SAME provider thinks. Never a model or
-//  provider switch. Chat sends `.fast` (the maintainer, 2026-10-19, after an internal eval:
+//  provider switch. Chat sends `.fast` (the maintainer, 2026-10-19, after pm's eval:
 //  low lost no objective task; an omitted level let GLM 5.3 overthink into
-//  the output cap). Never "none": grok-4.3 at none got the hard maths wrong.
+//  the output cap). Never "none" by default (grok-4.3 at none got the hard maths wrong); only developer
+//  mode's per-model choice can send it, where the model lists it (docs/REASONING_LEVEL.md).
 //
 
 import Foundation
@@ -23,15 +24,23 @@ enum ReasoningEffort: String, Codable, Sendable, CaseIterable {
     /// Request-body fields for this effort, or nil where the provider takes no
     /// such parameter. Which field, if any, is `ReasoningControl`'s call.
     func bodyFields(for provider: Provider) -> [String: Any]? {
+        bodyFields(for: provider, chosen: ReasoningLevel.chosen(for: provider))
+    }
+
+    /// `chosen` is developer mode's level for this model (docs/REASONING_LEVEL.md); nil sends today's low.
+    func bodyFields(for provider: Provider, chosen: String?) -> [String: Any]? {
         guard !Self.refused.value.contains(Self.refusalKey(provider)) else { return nil }
         let high = self == .thinkHarder
-        switch ReasoningControl.current(for: provider) {
+        let control = ReasoningControl.current(for: provider)
+        let chosen = ReasoningLevel.usable(chosen, for: control)
+        let level = ReasoningLevel.sent(self, chosen: chosen)
+        switch control {
         case .effort(let cap):
-            var fields: [String: Any] = ["reasoning_effort": high ? "high" : "low"]
+            var fields: [String: Any] = ["reasoning_effort": level]
             if high, let cap { fields["max_tokens"] = cap }
             return fields
-        case .openRouter: return ["reasoning": ["effort": high ? "high" : "low"]]
-        case .thinkingSwitch: return ["chat_template_kwargs": ["enable_thinking": high]]
+        case .openRouter: return ["reasoning": ["effort": level]]
+        case .thinkingSwitch: return ["chat_template_kwargs": ["enable_thinking": high || chosen == "on"]]
         case .onDevice, .none: return nil
         }
     }
@@ -69,9 +78,7 @@ enum ReasoningEffort: String, Codable, Sendable, CaseIterable {
     /// decides support, not a list.
     private static let refused = LockedBox<Set<String>>([])
 
-    private static func refusalKey(_ provider: Provider) -> String {
-        "\(provider.openAIBaseURL?.host?.lowercased() ?? "")|\(provider.model)"
-    }
+    private static func refusalKey(_ provider: Provider) -> String { ReasoningLevel.key(provider) }
 
     /// True when a 400 names the effort parameter ("Invalid reasoning effort.").
     static func isRefusal(status: Int, body: Data) -> Bool {
@@ -86,6 +93,12 @@ enum ReasoningEffort: String, Codable, Sendable, CaseIterable {
 
     static func noteRefused(by provider: Provider) {
         refused.value.insert(refusalKey(provider))
+        // The chip drops a Think Harder's level on the resend, mid-turn.
+        NotificationCenter.default.post(name: .reasoningLevelRefused, object: nil)
+    }
+
+    static func wasRefused(by provider: Provider) -> Bool {
+        refused.value.contains(refusalKey(provider))
     }
 
     static func forgetRefusals() { refused.value = [] }
@@ -164,4 +177,9 @@ enum ReasoningControl: Equatable, Sendable {
     /// DEBUG + --uitesting only (ContentView's seed): the kind a probe would have stored.
     @MainActor static var seededKinds: [String: LocalServerKind] = [:]
     #endif
+}
+
+extension Notification.Name {
+    /// A server refused the reasoning level; the turn is resent with none.
+    static let reasoningLevelRefused = Notification.Name("reasoningLevelRefused")
 }

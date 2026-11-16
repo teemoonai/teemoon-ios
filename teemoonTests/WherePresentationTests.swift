@@ -11,6 +11,19 @@ import Testing
 
 struct WherePresentationTests {
 
+    /// UI audit #5 (2026-10-25): the chip read "glm-5p3-flash". It shows the name the provider's own catalogue
+    /// gave the model (saved by LiveCatalogStore), else the id as before; a phone model keeps its own name.
+    @Test func theChipShowsTheCataloguesNameWhenThereIsOne() {
+        let fireworks = Provider(name: "fireworks", endpoint: "https://api.fireworks.ai/inference/v1",
+                                 model: "accounts/fireworks/models/glm-5p3-flash")
+        #expect(WhereProviderPresentation.modelLabel(for: fireworks, catalogName: "GLM-5.3 Flash") == "glm-5.3 flash")
+        #expect(WhereProviderPresentation.modelLabel(for: fireworks, catalogName: "  ")
+                == WhereProviderPresentation.modelLabel(for: fireworks))
+        let phone = Provider.local(LocalModelCatalog.all[0])
+        #expect(WhereProviderPresentation.modelLabel(for: phone, catalogName: "something else")
+                == WhereProviderPresentation.modelLabel(for: phone))
+    }
+
     @Test func selfHostedIsHome() {
         let p = Provider(
             name: "second mac",

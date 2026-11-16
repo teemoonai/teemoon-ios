@@ -8,6 +8,10 @@ import SwiftUI
 struct ImageRowView: View {
     let image: ImageEntry
     let rung: TrustRung
+    /// Trust scope's word on this image's value, e.g. " · in the quote ✓" for the guest OS.
+    var valueSuffix: String = ""
+    /// Trust scope's lines for this image, e.g. the compose manager's running digest.
+    var scopeLines: [TrustScopeLine] = []
 
     /// 1 = sees plaintext (data path), 2 = can reach it by privilege, 3 = holds
     /// device privilege (SYS_ADMIN / GPU), 4 = reads logs. nil = ordinary row.
@@ -57,22 +61,12 @@ struct ImageRowView: View {
         case nil:             return nil
         }
     }
-    private var egress: String {
-        switch tier {
-        case 1:  return "plaintext egress"
-        case 2:  return "process-access egress"
-        case 3:  return "metrics egress"
-        case 4:  return "log-forwarding egress"
-        default: return ""
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Text(image.name)
+            FlowLayout(spacing: 6) {
+                Text(image.wrappingName)
                     .font(.system(.footnote, design: .monospaced)).fontWeight(.medium)
-                    .lineLimit(1).truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
                 // The provenance-tier chip rides inline beside the name for
                 // every non-local row (the local engine says "built in-enclave"
                 // in its note instead). A red `unverified` chip always shows;
@@ -118,11 +112,10 @@ struct ImageRowView: View {
                 if image.kind == .guestOS {
                     FableAuditBlock(url: url,
                                     title: "fable miniaudit · guest OS",
-                                    subtitle: "image + disk-encryption posture reviewed · this measurement",
                                     verdict: AuditIndex.shared.verdict(for: url),
                                     verdictClass: AuditIndex.shared.verdictClass(for: url))
                 } else {
-                    FableAuditBlock(url: url, subtitle: "source reviewed for \(egress) · this exact build",
+                    FableAuditBlock(url: url,
                                     verdict: AuditIndex.shared.verdict(for: url),
                                     verdictClass: AuditIndex.shared.verdictClass(for: url))
                 }
@@ -150,7 +143,10 @@ struct ImageRowView: View {
                 // image — the copy affordance yields the full sha256 (what a
                 // reader pastes into sigstore / the GitHub API), while the
                 // display stays truncated. Prose stays plain text.
-                ValuePill(value: digest, fullValue: image.digestFull)
+                ValuePill(value: digest + valueSuffix, fullValue: image.digestFull)
+            }
+            ForEach(Array(scopeLines.enumerated()), id: \.offset) { _, line in
+                TrustScopeLineView(line: line)
             }
             // Guest-OS verification register — DISTINCT from the per-image
             // provenance links (those resolve digest→commit LIVE each session;
@@ -211,14 +207,14 @@ struct ImageRowView: View {
                             Image(systemName: line.state == .holds ? "checkmark.circle" : "exclamationmark.circle")
                                 .font(.caption)
                                 .foregroundStyle(line.state == .holds ? teeVerified : .orange)
-                                .frame(width: 16)
+                                .glyphColumn(16, relativeTo: .caption)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(line.title).font(.caption).fontWeight(.medium)
                                 proofText(line.detail, tokenFont: .caption2.monospaced())
                                     .font(.caption2)
                                     .fixedSize(horizontal: false, vertical: true)
                                 if rung.showsLinks && !line.links.isEmpty {
-                                    HStack(spacing: 14) {
+                                    FlowLayout(spacing: 14) {
                                         ForEach(line.links) { link in
                                             if let url = URL(string: link.url) {
                                                 Link(destination: url) {
@@ -267,7 +263,8 @@ struct ImageRowView: View {
                 .padding(.top, 1)
             }
             if rung.showsLinks && !image.links.isEmpty {
-                HStack(spacing: 14) {
+                // Wraps whole links: an HStack gave "audit · private" a column a letter wide.
+                FlowLayout(spacing: 14) {
                     ForEach(image.links) { link in
                         if let url = URL(string: link.url) {
                             Link(destination: url) {

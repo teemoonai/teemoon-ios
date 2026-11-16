@@ -32,6 +32,8 @@ struct GenerationEngine: Sendable {
     let tools: [any Tool]
     let initialMessages: [WireMessage]
     let prompt: String
+    /// The images of the message being sent.
+    let promptImages: [WireImage]
     /// Produces each turn. Swapping this is the whole point: HTTP for remote,
     /// MLX for on-device, a stub in tests.
     let transport: any GenerationTransport
@@ -90,6 +92,7 @@ struct GenerationEngine: Sendable {
         tools: [any Tool],
         initialMessages: [WireMessage],
         prompt: String,
+        promptImages: [WireImage] = [],
         transport: any GenerationTransport,
         groundsItsOwnAnswers: Bool = false,
         maxToolRounds: Int = GenerationEngine.defaultMaxToolRounds
@@ -99,6 +102,7 @@ struct GenerationEngine: Sendable {
         self.tools = tools
         self.initialMessages = initialMessages
         self.prompt = prompt
+        self.promptImages = promptImages
         self.transport = transport
         self.groundsItsOwnAnswers = groundsItsOwnAnswers
     }
@@ -115,13 +119,15 @@ struct GenerationEngine: Sendable {
         prompt: String,
         urlSession: URLSession,
         effort: ReasoningEffort? = nil,
-        affinityID: String? = nil
+        affinityID: String? = nil,
+        promptImages: [WireImage] = []
     ) {
         self.init(
             events: events,
             tools: tools,
             initialMessages: initialMessages,
             prompt: prompt,
+            promptImages: promptImages,
             transport: HTTPTransport(
                 provider: provider, apiKey: apiKey, teeContext: teeContext,
                 tools: tools, urlSession: urlSession, effort: effort, affinityID: affinityID
@@ -152,6 +158,20 @@ struct GenerationEngine: Sendable {
         return { raw in grounds ? BraveAnswersFormat.split(raw).visible : raw }
     }
 
+    /// A message's `content`: the plain string, or (with images) the text part followed by each image as
+    /// an `image_url` data URL, the OpenAI-compatible form. E2EE seals the array whole (E2EEPeer).
+    static func content(_ text: String, _ images: [WireImage]) -> Any {
+        guard !images.isEmpty else { return text }
+        var parts: [[String: Any]] = []
+        if !text.isEmpty { parts.append(["type": "text", "text": text]) }
+        for image in images {
+            let url = image.dataURL
+            WireImageSummary.register(image, dataURL: url)
+            parts.append(["type": "image_url", "image_url": ["url": url]])
+        }
+        return parts
+    }
+
     // MARK: - The loop
 
     func run(onText: @escaping @Sendable (String) -> Void) async throws {
@@ -159,8 +179,8 @@ struct GenerationEngine: Sendable {
         // per-iteration `let events = events` shadowed the property in a way
         // that made an earlier capture in the same scope illegal.
         let events = events
-        var messages: [[String: Any]] = initialMessages.map { ["role": $0.role, "content": $0.content] }
-        messages.append(["role": "user", "content": prompt])
+        var messages: [[String: Any]] = initialMessages.map { ["role": $0.role, "content": Self.content($0.content, $0.images)] }
+        messages.append(["role": "user", "content": Self.content(prompt, promptImages)])
 
         var remainingToolRounds = maxToolRounds
         var textToolCallRoundHappened = false
@@ -385,7 +405,8 @@ struct GenerationEngine: Sendable {
                 onDeviceRun: report.onDeviceRun,
                 teeVerification: verification,
                 isE2EEActive: report.isE2EEActive,
-                effortLevels: effortLevels
+                effortLevels: effortLevels,
+                finish: turn.finish
             ))
             return
         }

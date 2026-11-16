@@ -147,7 +147,8 @@ struct MeasuredConfigTests {
     /// The inner document is action-log-pinned + hash-checked — never claimed
     /// as hardware-measured (mr_config covers the outer harness only).
     @Test func bindingNoteNeverClaimsHardwareMeasured() {
-        #expect(MeasuredConfig.bindingNote.contains("pinned by the attested action log"))
+        #expect(TrustScopeText.measuredBindingNote(.bound).contains("pinned by the attested action log"))
+        #expect(TrustScopeText.measuredBindingNote(.notBound).contains("pinned by the action log"))
         #expect(MeasuredConfig.bindingNote.contains("hash-checked"))
         #expect(!MeasuredConfig.bindingNote.lowercased().contains("hardware-measured"))
     }

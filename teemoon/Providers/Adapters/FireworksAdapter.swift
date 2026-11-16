@@ -134,7 +134,7 @@ enum FireworksAdapter {
                     + ModelCatalog.displayName(forID: r.name),
                 // Parsed HERE, at the wire, not re-parsed by every reader of the
                 // model. Fireworks is the only provider that publishes this.
-                deprecationDate: KnownModel.deprecationDate(fromProvider: r.deprecationDate),
+                deprecationDate: KnownModel.deprecationDate(fromProvider: r.deprecationDate?.text),
                 openWeights: true)
         }
         return sortByVendorThenRecency(models, records: records)
@@ -255,6 +255,49 @@ extension FireworksAdapter {
         let nextPageToken: String?
         let totalSize: Int?
 
+        enum CodingKeys: String, CodingKey { case models, nextPageToken, totalSize }
+
+        /// Row by row: a row this decoder cannot read is dropped and logged. One unexpected field
+        /// once failed the whole list (2026-10-28), and the picker fell back to a list with no capabilities.
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            nextPageToken = try c.decodeIfPresent(String.self, forKey: .nextPageToken)
+            totalSize = try? c.decodeIfPresent(Int.self, forKey: .totalSize)
+            var rows: [Model] = []
+            if var list = try? c.nestedUnkeyedContainer(forKey: .models) {
+                while !list.isAtEnd {
+                    if let row = try? list.decode(Model.self) {
+                        rows.append(row)
+                    } else {
+                        _ = try? list.decode(SkippedRow.self)
+                        logger.warning("[list] dropped a fireworks row the decoder could not read")
+                    }
+                }
+            }
+            models = rows
+        }
+
+        /// Consumes one array element of any shape.
+        private struct SkippedRow: Decodable {}
+
+        /// `"2026-11-07"`, an RFC 3339 timestamp, or (since 2026-10-28) `{"day":7,"month":11,"year":2026}`.
+        struct ProviderDate: Decodable {
+            /// As `KnownModel.deprecationDate(fromProvider:)` reads it.
+            let text: String
+
+            private struct Parts: Decodable { let day: Int; let month: Int; let year: Int }
+
+            init(from decoder: any Decoder) throws {
+                let c = try decoder.singleValueContainer()
+                if let text = try? c.decode(String.self) {
+                    self.text = text
+                } else {
+                    let p = try c.decode(Parts.self)
+                    text = String(format: "%04d-%02d-%02d", p.year, p.month, p.day)
+                }
+            }
+        }
+
         struct Model: Decodable {
             /// Full resource id — `accounts/fireworks/models/kimi-k2p6`. This is
             /// exactly what `/chat/completions` expects as `model`.
@@ -270,7 +313,7 @@ extension FireworksAdapter {
             let state: String?
             let status: Status?
             /// Set once retirement is announced — such a model must not be offered.
-            let deprecationDate: String?
+            let deprecationDate: ProviderDate?
             let contextLength: Int?
             let trainingContextLength: Int?
             let supportsServerless: Bool?

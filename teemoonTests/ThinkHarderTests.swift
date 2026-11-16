@@ -16,7 +16,7 @@ import Testing
 struct ThinkHarderTests {
 
     @Test @MainActor func itReasksTheQuestionTheReplyAnswered() throws {
-        let container = try ModelContainer(for: ChatThread.self, Message.self,
+        let container = try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = container.mainContext
         let thread = ChatThread()

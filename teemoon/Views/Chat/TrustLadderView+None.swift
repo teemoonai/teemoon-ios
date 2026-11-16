@@ -43,16 +43,16 @@ extension TrustLadderView {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: "lock.iphone")
-                    .font(.system(size: 40, weight: .semibold))
+                    .scaledFont(size: 40, weight: .semibold, relativeTo: .title)
                     .foregroundStyle(teeVerified)
                     // decorative: the title under it says the same thing, and VoiceOver read the raw symbol
                     // name ("lock.laptopcomputer") — the accessibility audit's finding, 2026-10-05
                     .accessibilityHidden(true)
-                Text("nothing leaves this phone")
+                Text("nothing leaves this phone unless you turn on web search")
                     .font(.title.weight(.bold))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("attestation.onDevice.hero")
-                Text("\(modelName) runs on this device. your messages are answered here, so there is no server to trust and no network to protect them on.")
+                Text("\(modelName) runs on this device. your messages are answered here, so there is no server to trust and no network to protect them on. web search, if you turn it on, sends its queries to Brave.")
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -61,8 +61,8 @@ extension TrustLadderView {
             EvidenceCard(title: "what this means",
                          subtitle: "the whole picture — nothing hidden.") {
                 noneRow("checkmark.circle.fill", teeVerified,
-                        "your messages never leave the phone",
-                        "the model is a file on this device and teemoon runs it here. nothing about this chat is transmitted, so there is nothing in transit to intercept.")
+                        "your messages never leave the phone; with web search on, only its queries go to Brave",
+                        "the model is a file on this device and teemoon runs it here. with web search off, nothing about this chat is transmitted; with it on, only the search queries go to Brave.")
                 noneRow("checkmark.circle.fill", teeVerified,
                         "no operator to trust",
                         "there is no company on the other end of this chat, because there is no other end. nobody is metering it and nobody could be asked to hand it over.")
@@ -111,7 +111,7 @@ extension TrustLadderView {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: "lock.laptopcomputer")
-                    .font(.system(size: 40, weight: .semibold))
+                    .scaledFont(size: 40, weight: .semibold, relativeTo: .title)
                     .foregroundStyle(teeVerified)
                     // decorative: the title under it says the same thing, and VoiceOver read the raw symbol
                     // name ("lock.laptopcomputer") — the accessibility audit's finding, 2026-10-05
@@ -163,7 +163,7 @@ extension TrustLadderView {
             // protection here to imply.
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: "lock.open")
-                    .font(.system(size: 40, weight: .semibold))
+                    .scaledFont(size: 40, weight: .semibold, relativeTo: .title)
                     .foregroundStyle(.secondary)
                     // decorative: the title under it says the same thing, and VoiceOver read the raw symbol
                     // name ("lock.laptopcomputer") — the accessibility audit's finding, 2026-10-05
@@ -200,7 +200,7 @@ extension TrustLadderView {
             if session.noConfidentialEndpoint {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "info.circle").font(.footnote)
-                        .foregroundStyle(.tertiary).frame(width: 18)
+                        .foregroundStyle(.tertiary).glyphColumn(18, relativeTo: .footnote)
                     Text("near.ai runs many models inside sealed hardware — \(modelName) just isn't one of them. It's served as an ordinary model, not a confidential one.")
                         .font(.footnote).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -226,19 +226,31 @@ extension TrustLadderView {
             Button {
                 if cta.opensPicker { showEncryptedModelPicker = true } else { showNearAIKeyForm = true }
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: cta.opensPicker ? "checkmark.shield.fill" : "shield")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(cta.title)
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(cta.opensPicker ? AnyShapeStyle(teeVerified) : AnyShapeStyle(.primary))
-                        Text(cta.detail)
-                            .font(.footnote)
-                            .foregroundStyle(cta.opensPicker ? AnyShapeStyle(teeVerified.opacity(0.8)) : AnyShapeStyle(.secondary))
+                let words = VStack(alignment: .leading, spacing: 2) {
+                    Text(cta.title)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(cta.opensPicker ? AnyShapeStyle(teeVerified) : AnyShapeStyle(.primary))
+                    Text(cta.detail)
+                        .font(.footnote)
+                        .foregroundStyle(cta.opensPicker ? AnyShapeStyle(teeVerified.opacity(0.8)) : AnyShapeStyle(.secondary))
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                let glyph = Image(systemName: cta.opensPicker ? "checkmark.shield.fill" : "shield")
+                Group {
+                    if typeSize.isAccessibilitySize {
+                        // Glyphs above the words: beside them the words got a one-word column ("en-cryp-tion").
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack { glyph; Spacer(minLength: 0); Image(systemName: "arrow.right") }
+                            words
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            glyph
+                            words
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.right")
+                        }
                     }
-                    .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Image(systemName: "arrow.right")
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity)
@@ -296,7 +308,7 @@ extension TrustLadderView {
 
     func noneRow(_ icon: String, _ tint: Color, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).font(.body).foregroundStyle(tint).frame(width: 20)
+            Image(systemName: icon).font(.body).foregroundStyle(tint).glyphColumn(20, relativeTo: .body)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.callout).fontWeight(.medium)
                 Text(detail).font(.footnote).foregroundStyle(.secondary)

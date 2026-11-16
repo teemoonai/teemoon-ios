@@ -123,7 +123,7 @@ enum AttestationService {
         let quoteVerification = gw?.intelQuote.flatMap { try? TDXQuoteVerifier.verify(quoteHex: $0) }
         let gpuArch = modelAtt?.gpuArch ?? gpu?.arch
 
-        return AttestationRecord(
+        var record = AttestationRecord(
             composeHash:          gw?.info?.composeHash  ?? "",
             mrtd:                 gw?.info?.tcbInfo?.mrtd ?? "",
             osImageHash:          gw?.info?.osImageHash   ?? "",
@@ -157,6 +157,13 @@ enum AttestationService {
             providerID:           providerID,
             model:                model
         )
+        record.gpuNodeReportJSON = gpu?.reportJSON
+        record.gatewayAdvertisedReportData = gw?.reportData
+        record.modelAdvertisedReportData = modelAtt?.advertisedReportData
+        record.gpuAdvertisedReportData = gpu?.advertisedReportData
+        record.modelComposeManifest = modelAtt?.appCompose
+        record.gpuNodeHost = gpu == nil ? nil : gpuNodeURL?.host
+        return record
     }
 
     /// The gateway's own attestation and the nonce it must echo, or nil when

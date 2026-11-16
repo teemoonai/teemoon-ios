@@ -84,6 +84,11 @@ enum PlatformColors {
         #endif
     }()
 
+    /// Sheet chrome (the where sheet's reasoning bar): halfway between a grouped sheet's ground and its card fill,
+    /// one step off each, solid so rows scrolling under it don't tint it. Android's sheetBand, the same values.
+    static let sheetBand: Color = dynamic(light: (249 / 255, 249 / 255, 251 / 255),
+                                          dark: (36 / 255, 36 / 255, 38 / 255))
+
     /// A colour that resolves against the live appearance, light or dark.
     ///
     /// Both platforms support this and neither shares an API for it: UIKit hands
@@ -224,22 +229,127 @@ enum AppFontWidth: String, CaseIterable {
     }
 }
 
+/// Settings → appearance → size: steps relative to the phone's text size, so Dynamic Type still works under every
+/// choice. `system` is the phone's own; it stores "large", the name builds before 1.1.0 wrote for the same step.
 enum AppFontSize: String, CaseIterable {
-    case xsmall, small, medium, large, xlarge
+    case xsmall, small, medium, system = "large", xlarge
 
-    func getFontSize() -> DynamicTypeSize {
+    private var offset: Int {
         switch self {
-        case .xsmall:
-            .xSmall
-        case .small:
-            .small
-        case .medium:
-            .medium
-        case .large:
-            .large
-        case .xlarge:
-            .xLarge
+        case .xsmall: -3
+        case .small: -2
+        case .medium: -1
+        case .system: 0
+        case .xlarge: 1
         }
+    }
+
+    /// The step to draw at when the phone is at `phone`, clamped to the range SwiftUI has.
+    func dynamicTypeSize(phone: DynamicTypeSize) -> DynamicTypeSize {
+        let all = DynamicTypeSize.allCases
+        let i = (all.firstIndex(of: phone) ?? all.firstIndex(of: .large)!) + offset
+        return all[min(max(i, 0), all.count - 1)]
+    }
+}
+
+/// Applies the size setting on top of the phone's. Reads the phone's size from the app, not the environment: a
+/// sheet inherits the size its presenter already set, and reading that would apply the offset twice.
+struct AppTextSize: ViewModifier {
+    let size: AppFontSize
+    @State private var phone = Self.phoneSize()
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.dynamicTypeSize, size.dynamicTypeSize(phone: phone))
+            #if os(iOS)
+            .onReceive(NotificationCenter.default.publisher(for: UIContentSizeCategory.didChangeNotification)) { _ in
+                phone = Self.phoneSize()
+            }
+            #endif
+    }
+
+    @MainActor static func phoneSize() -> DynamicTypeSize {
+        #if os(iOS)
+        DynamicTypeSize(UIApplication.shared.preferredContentSizeCategory) ?? .large
+        #else
+        .large
+        #endif
+    }
+}
+
+extension View {
+    func appTextSize(_ size: AppFontSize) -> some View { modifier(AppTextSize(size: size)) }
+
+    /// The design's point size at the default text setting, growing with the phone's setting (and the size step
+    /// above) like `style` does. Words people read use this or a text style, never a bare `.system(size:)`.
+    func scaledFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default,
+                    relativeTo style: Font.TextStyle? = nil) -> some View {
+        modifier(ScaledSystemFont(size: size, weight: weight, design: design,
+                                  style: style ?? ScaledText.nearestStyle(to: size)))
+    }
+
+    /// `lineLimit(lines)` at the ordinary sizes; at the accessibility sizes the text wraps instead of truncating.
+    func lineLimitGrowing(_ lines: Int) -> some View { modifier(GrowingLineLimit(lines: lines)) }
+
+    /// A minimum height that holds one line of `style` text, growing with it.
+    func scaledMinHeight(_ height: CGFloat, relativeTo style: Font.TextStyle, alignment: Alignment = .center) -> some View {
+        modifier(ScaledMinHeight(height: height, style: style, alignment: alignment))
+    }
+}
+
+/// Plain rules behind `scaledFont` and `lineLimitGrowing`.
+enum ScaledText {
+    /// iOS default (`.large`) point sizes, smallest first.
+    static let defaultSizes: [(Font.TextStyle, CGFloat)] = [
+        (.caption2, 11), (.caption, 12), (.footnote, 13), (.subheadline, 15), (.callout, 16), (.body, 17),
+        (.title3, 20), (.title2, 22), (.title, 28), (.largeTitle, 34),
+    ]
+
+    /// The text style whose default size is closest to `size`, so it scales the way a style of that size would.
+    static func nearestStyle(to size: CGFloat) -> Font.TextStyle {
+        defaultSizes.min { abs($0.1 - size) < abs($1.1 - size) }!.0
+    }
+
+    /// Three times the lines at the accessibility sizes: a name that fit one line no longer does.
+    static func lineLimit(_ lines: Int, at size: DynamicTypeSize) -> Int {
+        size.isAccessibilitySize ? lines * 3 : lines
+    }
+}
+
+private struct ScaledSystemFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, style: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+private struct ScaledMinHeight: ViewModifier {
+    @ScaledMetric private var height: CGFloat
+    private let alignment: Alignment
+
+    init(height: CGFloat, style: Font.TextStyle, alignment: Alignment) {
+        _height = ScaledMetric(wrappedValue: height, relativeTo: style)
+        self.alignment = alignment
+    }
+
+    func body(content: Content) -> some View { content.frame(minHeight: height, alignment: alignment) }
+}
+
+private struct GrowingLineLimit: ViewModifier {
+    let lines: Int
+    @Environment(\.dynamicTypeSize) private var size
+
+    func body(content: Content) -> some View {
+        content.lineLimit(ScaledText.lineLimit(lines, at: size))
     }
 }
 

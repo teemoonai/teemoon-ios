@@ -2,7 +2,7 @@
 //  ListPriceSnapshot.swift
 //  teemoon
 //
-//  GENERATED from OpenRouter's public /api/v1/models on 2026-10-22 by the
+//  GENERATED from OpenRouter's public /api/v1/models on 2026-11-14 by the
 //  maintainers' release refresh — do not edit by hand; it is regenerated
 //  before every release.
 //
@@ -18,7 +18,7 @@ import Foundation
 
 enum ListPriceSnapshot {
 
-    static let snapshotDate = "2026-10-22"
+    static let snapshotDate = "2026-11-14"
 
     /// Vendor host → the namespace its ids live under below.
     static let hosts: [String: String] = [
@@ -33,6 +33,7 @@ enum ListPriceSnapshot {
     static let prices: [String: String] = [
         "anthropic/claude-fable-5":                    "$10.00/$50.00",
         "anthropic/claude-fable-5.1":                  "$10.00/$50.00",
+        "anthropic/claude-fable-5.2":                  "$8.00/$40.00",
         "anthropic/claude-haiku-4.5":                  "$1.00/$5.00",
         "anthropic/claude-haiku-5.5":                  "$0.10/$0.50",
         "anthropic/claude-opus-4.1":                   "$15.00/$75.00",
@@ -49,17 +50,17 @@ enum ListPriceSnapshot {
         "deepseek/deepseek-chat":                      "$0.26/$1.03",
         "deepseek/deepseek-chat-v3-0324":              "$0.29/$1.14",
         "deepseek/deepseek-chat-v3.1":                 "$0.25/$0.95",
-        "deepseek/deepseek-r1-0528":                   "$0.50/$2.15",
+        "deepseek/deepseek-r1-0528":                   "$0.57/$2.29",
         "deepseek/deepseek-v3.1-terminus":             "$0.27/$1.00",
-        "deepseek/deepseek-v3.2":                      "$0.28/$0.42",
+        "deepseek/deepseek-v3.2":                      "$0.26/$0.38",
         "deepseek/deepseek-v3.2-exp":                  "$0.27/$0.41",
         "deepseek/deepseek-v4-flash":                  "$0.09/$0.18",
-        "deepseek/deepseek-v4-flash-0731":             "$0.44/$1.32",
-        "deepseek/deepseek-v4-flash-vision-exp":       "$0.22/$0.65",
-        "deepseek/deepseek-v4-pro":                    "$0.96/$1.91",
-        "deepseek/deepseek-v4-pro-0813":               "$1.32/$3.96",
-        "deepseek/deepseek-v4.1-flash":                "$0.30/$1.20",
-        "deepseek/deepseek-v4.1-flash-1017":           "$0.30/$1.20",
+        "deepseek/deepseek-v4-flash-0731":             "$0.06/$0.18",
+        "deepseek/deepseek-v4-flash-vision-exp":       "$0.44/$1.32",
+        "deepseek/deepseek-v4-pro":                    "$0.90/$1.50",
+        "deepseek/deepseek-v4-pro-0813":               "$0.11/$4.44",
+        "deepseek/deepseek-v4.1-flash":                "$0.05/$0.20",
+        "deepseek/deepseek-v4.1-flash-1017":           "$0.04/$0.50",
         "google/gemini-2.5-flash":                     "$0.30/$2.50",
         "google/gemini-2.5-flash-image":               "$0.30/$2.50",
         "google/gemini-2.5-flash-lite":                "$0.10/$0.40",
@@ -81,12 +82,16 @@ enum ListPriceSnapshot {
         "google/gemini-3.7-flash":                     "$0.75/$3.75",
         "google/gemini-3.8-flash":                     "$0.83/$4.13",
         "google/gemini-4-argon":                       "$2.00/$10.00",
+        "google/gemini-4-carbon":                      "$2.00/$10.00",
+        "google/gemini-4-hydrogen":                    "$1.50/$7.50",
         "google/gemini-nano-banana-2.1":               "$1.50/$7.50",
+        "google/gemini-omni-1.1-flash":                "$1.50/$9.00",
+        "google/gemini-omni-1.2-flash":                "$1.50/$9.00",
         "google/gemma-2-27b-it":                       "$0.65/$0.65",
         "google/gemma-3-12b-it":                       "$0.05/$0.15",
         "google/gemma-3-27b-it":                       "$0.08/$0.35",
-        "google/gemma-3-4b-it":                        "$0.04/$0.05",
-        "google/gemma-4-26b-a4b-it":                   "$0.09/$0.30",
+        "google/gemma-3-4b-it":                        "$0.05/$0.10",
+        "google/gemma-4-26b-a4b-it":                   "$0.07/$0.23",
         "google/gemma-4-31b-it":                       "$0.20/$0.40",
         "mistralai/codestral-2508":                    "$0.30/$0.90",
         "mistralai/devstral-2512":                     "$0.40/$2.00",
@@ -96,7 +101,7 @@ enum ListPriceSnapshot {
         "mistralai/mistral-large":                     "$2.00/$6.00",
         "mistralai/mistral-large-2407":                "$2.00/$6.00",
         "mistralai/mistral-large-2512":                "$0.50/$1.50",
-        "mistralai/mistral-large-4-0":                 "$1.36/$4.18",
+        "mistralai/mistral-large-4-0":                 "$0.70/$2.10",
         "mistralai/mistral-medium-3":                  "$0.40/$2.00",
         "mistralai/mistral-medium-3-5":                "$1.50/$7.50",
         "mistralai/mistral-medium-3.1":                "$0.40/$2.00",
@@ -105,15 +110,12 @@ enum ListPriceSnapshot {
         "mistralai/mistral-small-24b-instruct-2501":   "$0.05/$0.08",
         "mistralai/mistral-small-2603":                "$0.15/$0.60",
         "mistralai/mistral-small-3.1-24b-instruct":    "$0.35/$0.56",
-        "mistralai/mistral-small-3.2-24b-instruct":    "$0.09/$0.25",
+        "mistralai/mistral-small-3.2-24b-instruct":    "$0.10/$0.30",
         "mistralai/mixtral-8x22b-instruct":            "$2.00/$6.00",
         "mistralai/voxtral-small-24b-2507":            "$0.10/$0.30",
-        "openai/gpt-3.5-turbo":                        "$0.50/$1.50",
         "openai/gpt-3.5-turbo-0613":                   "$1.00/$2.00",
         "openai/gpt-3.5-turbo-16k":                    "$3.00/$4.00",
-        "openai/gpt-3.5-turbo-instruct":               "$1.50/$2.00",
         "openai/gpt-4":                                "$30.00/$60.00",
-        "openai/gpt-4-turbo":                          "$10.00/$30.00",
         "openai/gpt-4.1":                              "$2.00/$8.00",
         "openai/gpt-4.1-mini":                         "$0.40/$1.60",
         "openai/gpt-4.1-nano":                         "$0.10/$0.40",
@@ -147,7 +149,7 @@ enum ListPriceSnapshot {
         "openai/gpt-5.5-pro":                          "$30.00/$180.00",
         "openai/gpt-5.6-luna":                         "$0.20/$1.20",
         "openai/gpt-5.6-luna-pro":                     "$0.20/$1.20",
-        "openai/gpt-5.6-sol":                          "$4.00/$20.00",
+        "openai/gpt-5.6-sol":                          "$4.40/$22.00",
         "openai/gpt-5.6-sol-pro":                      "$4.00/$20.00",
         "openai/gpt-5.6-terra":                        "$2.00/$12.00",
         "openai/gpt-5.6-terra-pro":                    "$2.00/$12.00",
@@ -159,20 +161,16 @@ enum ListPriceSnapshot {
         "openai/gpt-6-sol-pro":                        "$2.00/$10.00",
         "openai/gpt-6.1-sol":                          "$2.00/$10.00",
         "openai/gpt-6.1-sol-pro":                      "$2.00/$10.00",
+        "openai/gpt-6.1-terra":                        "$1.00/$5.00",
+        "openai/gpt-6.1-terra-pro":                    "$1.00/$5.00",
         "openai/gpt-audio":                            "$2.50/$10.00",
         "openai/gpt-audio-mini":                       "$0.60/$2.40",
         "openai/gpt-chat-latest":                      "$5.00/$30.00",
         "openai/gpt-oss-120b":                         "$0.15/$0.60",
-        "openai/gpt-oss-20b":                          "$0.02/$0.09",
+        "openai/gpt-oss-20b":                          "$0.03/$0.13",
         "openai/gpt-oss-safeguard-20b":                "$0.08/$0.30",
-        "openai/o1":                                   "$15.00/$60.00",
-        "openai/o1-pro":                               "$150.00/$600.00",
         "openai/o3":                                   "$2.00/$8.00",
-        "openai/o3-mini":                              "$1.10/$4.40",
-        "openai/o3-mini-high":                         "$1.10/$4.40",
         "openai/o3-pro":                               "$20.00/$80.00",
-        "openai/o4-mini":                              "$1.10/$4.40",
-        "openai/o4-mini-high":                         "$1.10/$4.40",
     ]
 
     /// The list price for `modelID` as served by `host`, or "" when the host

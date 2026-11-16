@@ -20,6 +20,8 @@ import XCTest
 
 final class WhereSegmentsCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     override func setUp() { continueAfterFailure = false }
 
     private func save(_ shot: XCUIScreenshot, as name: String) {

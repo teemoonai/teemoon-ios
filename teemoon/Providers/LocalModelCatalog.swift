@@ -82,6 +82,15 @@ struct LocalModel: Identifiable, Hashable, Sendable {
     /// Google built what the repo claims.
     let sha256: String
 
+    /// The smallest phone, in marketed GB of RAM, that can run it. Below it the download is labelled "may not fit";
+    /// at or above it, only the load gate decides. Total RAM, not free memory: free memory moves with whatever
+    /// else is open, and file size is not the cost, because the weights are mapped from the file.
+    var minRAMGB = 6
+
+    /// Measured peak `phys_footprint`, MB, of a load plus a turn with images. nil until measured on a phone; the
+    /// load gate then falls back to the file size, which overstates it.
+    var peakFootprintMB: Int?
+
     var sizeLabel: String {
         sizeMB >= 1024
             ? String(format: "%.1f GB", Double(sizeMB) / 1024)
@@ -109,7 +118,10 @@ enum LocalModelCatalog {
             supportsTools: true,
             fileName: "gemma-4-E2B-it.litertlm",
             revision: "9262660a1676eed6d0c477ab1a86344430854664",
-            sha256: "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+            sha256: "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
+            // Provisional (pm, 2026-10-30): raise to 8 if the measured peak + 512 MB won't fit a 6 GB iPhone's
+            // ~3 GB process limit, so nobody downloads 2.4 GB to be refused.
+            minRAMGB: 6
         ),
         LocalModel(
             id: "litert-community/gemma-4-E4B-it-litert-lm",
@@ -134,11 +146,15 @@ enum LocalModelCatalog {
             supportsTools: true,
             fileName: "gemma-4-E4B-it.litertlm",
             revision: "f7ad3343bd6ebc9607f4dc3bc4f2398bd5749bc5",
-            sha256: "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0"
+            sha256: "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+            minRAMGB: 8   // provisional, as E2B's
         ),
     ]
 
     static func model(id: String) -> LocalModel? { all.first { $0.id == id } }
+
+    /// Images to Gemma on the phone (IMAGES.md §4b, 1.1.0); each model still has to fit (PhoneImageMemory).
+    static let imagesOnDevice = true
 }
 
 // MARK: - Storage
@@ -276,6 +292,101 @@ enum LocalModelStorage {
 
     static func delete(_ model: LocalModel) throws {
         try FileManager.default.removeItem(at: directory(for: model.id))
+    }
+
+    /// LiteRT's compiled caches (GPU weights and programs, the drafter's, the
+    /// vision encoder's). Inside the model's folder so `delete(_:)` takes them;
+    /// never tmp/, which iOS purges and no delete reaches.
+    static func engineCacheDirectory(forBundle bundle: URL) -> URL {
+        bundle.deletingLastPathComponent().appending(component: "litert-cache")
+    }
+
+    /// LiteRT names each cache after the bundle's name, mtime and size ("<file>_<mtime>_<size>…"), so a cache
+    /// for an older copy of the bundle does not count.
+    static func engineCacheKey(forBundle bundle: URL) -> String? {
+        guard let values = try? bundle.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              let mtime = values.contentModificationDate, let size = values.fileSize else { return nil }
+        return "\(bundle.lastPathComponent)_\(Int(mtime.timeIntervalSince1970))_\(size)"
+    }
+
+    /// Whether this bundle's cache is there: any file carrying its key, and for a vision load one that
+    /// names the vision encoder too.
+    static func engineCachePresent(forBundle bundle: URL, vision: Bool) -> Bool {
+        guard let key = engineCacheKey(forBundle: bundle) else { return false }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: engineCacheDirectory(forBundle: bundle).path)) ?? []
+        guard names.contains(where: { $0.hasPrefix(key) }) else { return false }
+        return !vision || names.contains { $0.localizedCaseInsensitiveContains("vision") }
+    }
+
+    /// Each cache file's mtime, to see LiteRT write one during a load.
+    static func engineCacheSnapshot(forBundle bundle: URL) -> [String: Date] {
+        let dir = engineCacheDirectory(forBundle: bundle)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        var out: [String: Date] = [:]
+        for name in names {
+            out[name] = (try? dir.appending(component: name).resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+        }
+        return out
+    }
+
+    static func bytesOnDisk(in directory: URL) -> Int {
+        guard let e = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.fileSizeKey])
+        else { return 0 }
+        var bytes = 0
+        for case let url as URL in e {
+            bytes += (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        }
+        return bytes
+    }
+
+    /// What deleting the model frees: the folder as it is, caches included.
+    static func sizeOnDiskLabel(for model: LocalModel) -> String {
+        sizeLabel(bytes: bytesOnDisk(in: directory(for: model.id)), else: model)
+    }
+
+    static func sizeLabel(bytes: Int, else model: LocalModel) -> String {
+        guard bytes > 0 else { return model.sizeLabel }
+        let mb = bytes / (1024 * 1024)
+        return mb >= 1024 ? String(format: "%.1f GB", Double(mb) / 1024) : "\(mb) MB"
+    }
+
+    private static let engineCacheSuffixes = ["_mldrift_weight_cache.bin", "_mldrift_program_cache.bin", ".xnnpack_cache"]
+
+    static func isStaleEngineCacheFile(_ name: String) -> Bool {
+        engineCacheSuffixes.contains { name.hasSuffix($0) }
+    }
+
+    /// Removes LiteRT caches left where earlier builds put them: tmp/ (every
+    /// release through 1.0.6) and loose beside the bundle (a 2026-09-21 bench
+    /// build, dev phones only). Only top-level files; `litert-cache/` is never
+    /// entered. Returns the bytes freed.
+    @discardableResult
+    static func reclaimStaleEngineCaches(in directories: [URL]) -> Int {
+        let fm = FileManager.default
+        var freed = 0
+        for directory in directories {
+            guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey])
+            else { continue }
+            for url in files where isStaleEngineCacheFile(url.lastPathComponent) {
+                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values?.isRegularFile == true else { continue }
+                do {
+                    try fm.removeItem(at: url)
+                    freed += values?.fileSize ?? 0
+                } catch {
+                    logger.error("[local] could not remove stale cache \(url.lastPathComponent, privacy: .public): \(error)")
+                }
+            }
+        }
+        if freed > 0 { logger.info("[local] reclaimed \(freed / (1024 * 1024), privacy: .public) MB of stale LiteRT caches") }
+        return freed
+    }
+
+    /// The launch-time sweep: tmp/ and every catalogued model's folder.
+    static func reclaimStaleEngineCaches() {
+        reclaimStaleEngineCaches(in: [FileManager.default.temporaryDirectory]
+            + LocalModelCatalog.all.map { directory(for: $0.id) })
     }
 
     /// Everything needed to run this model, or nil if it isn't installed.

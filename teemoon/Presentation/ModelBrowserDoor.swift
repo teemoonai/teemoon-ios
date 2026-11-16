@@ -24,6 +24,8 @@ struct ModelBrowserDoor {
     /// Who can serve a given model, for the model card. nil for a catalogue
     /// that publishes no such list — an empty table would imply it does.
     var offersLoader: ((String) async -> [ModelOffer])? = nil
+    /// A model id on this door's setup, for developer mode's reasoning menu. nil where there is no setup yet.
+    var reasoning: (@MainActor (String) -> ReasoningLevel.Setup)? = nil
 
     /// The Where sheet's door: a setup's whole catalogue.
     @MainActor
@@ -33,7 +35,8 @@ struct ModelBrowserDoor {
             liveLoader: WhereProviderPresentation.liveModelsLoader(for: provider, apiKey: apiKey, homeKind: homeKind),
             showsConfidentialityTags: WhereProviderPresentation.showsConfidentialityTags(for: provider),
             allowsCustomID: !provider.isNearAI,
-            offersLoader: WhereProviderPresentation.offersLoader(for: provider, apiKey: apiKey))
+            offersLoader: WhereProviderPresentation.offersLoader(for: provider, apiKey: apiKey),
+            reasoning: { ReasoningLevel.Setup(provider, model: $0, serverKind: homeKind) })
     }
 
     /// The trust ladder's door: near.ai filtered to what teemoon can seal —

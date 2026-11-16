@@ -79,11 +79,11 @@ struct CodeBlock: View {
 
     private func copy() {
         UIPasteboard.general.string = code
-        withAnimation(.spring(duration: 0.35, bounce: 0.1)) { copied = true }
+        withAnimation(Motion.swap) { copied = true }
         Task {
             try? await Task.sleep(nanoseconds: 1_400_000_000)
             await MainActor.run {
-                withAnimation(.spring(duration: 0.35, bounce: 0.1)) { copied = false }
+                withAnimation(Motion.swap) { copied = false }
             }
         }
     }

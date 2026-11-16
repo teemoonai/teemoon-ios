@@ -32,7 +32,7 @@ struct WhereGetSection<Header: View>: View {
     @Binding var pullingOnProvider: Provider?
     @Binding var detailTarget: ModelDetailTarget?
 
-    let openBrowse: (Provider) -> Void
+    let openBrowse: (Provider, ModelBrowserQuery.Filter) -> Void
     let startAndSelect: (LocalModel) -> Void
 
     var body: some View {
@@ -76,10 +76,12 @@ struct WhereGetSection<Header: View>: View {
             pullRows
 
             // 3. A computer you don't have set up yet.
-            addProviderRow(label: "connect a computer",
-                           glyph: WhereLocality.home.systemImage,
-                           caption: "ollama, lm studio, or any openai-compatible server",
-                           selfHosted: true)
+            if policy.show.showsHomeGetRows {
+                addProviderRow(label: "connect a computer",
+                               glyph: WhereLocality.home.systemImage,
+                               caption: "ollama, lm studio, or any openai-compatible server",
+                               selfHosted: true)
+            }
 
             // 4. The catalogs, one row per known provider, in `Provider.presets`
             //    order. Unkeyed ones are listed too — the point of this list is
@@ -135,9 +137,10 @@ struct WhereGetSection<Header: View>: View {
             case .cloud:
                 // Custom endpoints the user typed themselves — not presets, so
                 // they need their own browse row.
-                ForEach(policy.browseableProviders.filter(policy.isCustom)) { provider in
+                ForEach(policy.browseableProviders.filter(policy.isCustom)
+                    .filter { policy.serverRow(for: $0, keyed: true) != .hidden }) { provider in
                     Button {
-                        openBrowse(provider)
+                        openBrowse(provider, policy.show.filters)
                     } label: {
                         WhereRow(
                             glyph: "magnifyingglass",
@@ -255,7 +258,7 @@ struct WhereGetSection<Header: View>: View {
             // not in `ready now`, because nothing is equipped, and not in `get`,
             // because the key made it look done. The same key-without-record
             // state grok was in, with the opposite symptom.
-            if configured == nil {
+            if configured == nil, !policy.show.isFiltering {
                 Button {
                     idsBeforeAdd = Set(providerStore.providers.map(\.id))
                     addingPreset = preset
@@ -291,10 +294,10 @@ struct WhereGetSection<Header: View>: View {
                     }
                 }
             }
-        } else {
+        } else if case .shown(let trailing) = policy.serverRow(for: provider, keyed: keyed) {
             Button {
                 if keyed {
-                    openBrowse(provider)
+                    openBrowse(provider, policy.show.filters)
                 } else {
                     idsBeforeAdd = Set(providerStore.providers.map(\.id))
                     addingPreset = preset
@@ -307,8 +310,8 @@ struct WhereGetSection<Header: View>: View {
                     glyph: WhereLocality.cloud.systemImage,
                     glyphTint: Color.accentColor,
                     title: preset.name.lowercased(),
-                    showsE2EETag: preset.capabilities.contains(.endToEndEncryption),
-                    trailingText: policy.presetTrailingText(for: provider, keyed: keyed),
+                    showsE2EETag: preset.claimsEndToEndEncryption,
+                    trailingText: trailing,
                     trailingGlyph: "chevron.right",
                     caption: WhereProviderPresentation.presetCaption(for: preset),
                     captionLineLimit: 2
@@ -392,7 +395,7 @@ struct WhereGetSection<Header: View>: View {
     }
 
     private func tooLargeForMemory(_ model: LocalModel) -> Bool {
-        LocalMemory.exceedsAvailable(sizeMB: model.sizeMB)
+        LocalMemory.belowFloor(model)
     }
 
     private var getFooter: String {

@@ -159,7 +159,55 @@ enum MarkdownStreamSplitter {
         if isInsideUnclosedFence(tail) { return tail }
         var result = stabilizeIncompleteTable(tail)
         result = stabilizeIncompleteLink(result)
-        return result
+        return stabilizeIncompleteEmphasis(result)
+    }
+
+    /// An unclosed `*`/`_` opener in the last paragraph loses its marker, as an incomplete link shows its
+    /// label; a run at the very end is a marker still arriving and is held too. Same rule as Android's
+    /// `stabilizeIncompleteEmphasis`; EmphasisTailTests carries both platforms' cases.
+    private static func stabilizeIncompleteEmphasis(_ markdown: String) -> String {
+        let chars = Array(markdown)
+        var start = 0
+        if let r = markdown.range(of: "\n\n", options: .backwards) {
+            start = markdown.distance(from: markdown.startIndex, to: r.upperBound)
+        }
+        struct Run { let at: Int; let ch: Character; let len: Int }
+        var open: [Run] = [], drop: [Run] = []
+        var i = start, codeRun = 0
+        while i < chars.count {
+            let c = chars[i]
+            if c == "\\" && codeRun == 0 { i += 2; continue }
+            if c == "`" {
+                var n = 0
+                while i < chars.count && chars[i] == "`" { n += 1; i += 1 }
+                if codeRun == 0 { codeRun = n } else if codeRun == n { codeRun = 0 }
+                continue
+            }
+            if codeRun != 0 || (c != "*" && c != "_") { i += 1; continue }
+            var n = 0
+            while i + n < chars.count && chars[i + n] == c { n += 1 }
+            let before: Character? = i > start ? chars[i - 1] : nil
+            let after: Character? = i + n < chars.count ? chars[i + n] : nil
+            let canOpen = after.map { !$0.isWhitespace } ?? false
+            let canClose = before.map { !$0.isWhitespace } ?? false
+            let intraword = c == "_" && (before?.isLetter == true || before?.isNumber == true)
+                && (after?.isLetter == true || after?.isNumber == true)
+            if intraword {
+            } else if canClose, let k = open.lastIndex(where: { $0.ch == c }) {
+                open.removeSubrange(k...)
+            } else if canOpen {
+                open.append(Run(at: i, ch: c, len: n))
+            } else if after == nil, before != nil {
+                drop.append(Run(at: i, ch: c, len: n))
+            }
+            i += n
+        }
+        if codeRun != 0 { return markdown }
+        let cuts = (open + drop).sorted { $0.at > $1.at }
+        guard !cuts.isEmpty else { return markdown }
+        var out = chars
+        for r in cuts { out.removeSubrange(r.at..<(r.at + r.len)) }
+        return String(out)
     }
 
     private static func isInsideUnclosedFence(_ markdown: String) -> Bool {

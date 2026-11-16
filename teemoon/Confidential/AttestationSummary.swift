@@ -11,7 +11,8 @@ import Foundation
 
 /// Resolution state of a single verification step.
 enum StepState: Equatable {
-    case done, live, pending, stuck
+    /// `unchecked`: the check couldn't run (Intel unreachable): orange, never the red ✕ (trust-unchecked-glyph).
+    case done, live, pending, stuck, unchecked
 }
 
 /// Roll-up state of one attestation pillar.
@@ -77,7 +78,7 @@ struct AttestationSummary {
     var dcapVerification: RecordDCAPVerification? = nil
     /// NVIDIA NRAS outcome for the record's GPU evidence (nil = pending).
     var nrasVerification: NRASVerification? = nil
-    /// TLS-attestation outcome — HTTPS terminates in the model TEE (nil = pending).
+    /// teemoon's separate TLS probe of the model node's direct host, not the chat's gateway connection (nil = pending).
     var tlsAttestation: TLSAttestation? = nil
     /// Verdict of the model-layer (inner) compose hash check (nil = pending /
     /// not attempted). `.hashMismatch` is an adversarial integrity break;
@@ -101,6 +102,11 @@ struct AttestationSummary {
     /// false so a caller that does not supply it gets the cautious reading
     /// rather than an unearned claim.
     var e2eeIntact: Bool = false
+    /// `ConfidentialSession.provenanceInconclusive`: the code check settled without an answer.
+    var provenanceInconclusive: Bool = false
+    /// `ModelNodeAudit`: "only you … can read" is said only over a reviewed build (trust-leaks-wording).
+    var auditState: EverydayAuditState? = nil
+    var leaksExposure: String? = nil
 
     // MARK: Header content
 
@@ -158,7 +164,8 @@ struct AttestationSummary {
     }
 
     var headerSubtitle: String {
-        if state == .verifying && timedOut {
+        // Only with a key in hand is anything encrypted yet (trust-pending-state, the maintainer 2026-11-06).
+        if state == .verifying && timedOut, attestation?.modelEd25519PubKey != nil {
             return "messages are encrypted, but the destination can\u{2019}t be confirmed yet."
         }
         switch state {
@@ -166,7 +173,11 @@ struct AttestationSummary {
             switch runResult {
             case .failed:  return "we couldn\u{2019}t confirm this conversation is sealed. treat it as unencrypted until it re-verifies."
             case .flagged: return "your session is sealed, but one check couldn\u{2019}t be completed. read it before you trust this chat."
-            default:       return "only you and the attested TEE hardware can read these messages."
+            default:
+                if auditState == .leaks, let leaksExposure { return "\(AuditedSealText.leaksLead) \(leaksExposure)" }
+                if provenanceState == .unchecked { return ProvenanceUncheckedText.header }
+                guard auditState == .reviewed else { return AuditedSealText.notReviewed }
+                return "only you and the attested TEE hardware can read these messages."
             }
         case .degraded:
             if degradeIsHardFailure {
@@ -287,23 +298,21 @@ struct AttestationSummary {
         attestation?.e2eeKeyBoundToModelTEE
     }
 
+    /// The key matches report_data but the quote's signature or chain failed (T6): not bound, and said so.
+    var keyInUnverifiedQuote: Bool {
+        attestation?.e2eeKeyInModelReportData == true && attestation?.modelQuoteVerification?.isVerified == false
+    }
+
+    /// DCAP or NVIDIA hasn't answered: the seal can't be claimed yet, however the key binding reads (Q4).
+    var hardwareChecksPending: Bool {
+        [dcapState, nrasState].contains { $0 == .live || $0 == .pending }
+    }
+
     /// Whether the provider routes through a separate GPU node.
     var hasGPUNode: Bool {
         guard let p = provider else { return false }
         guard let inference = p.inferenceBaseURL else { return false }
         return inference != p.openAIBaseURL
-    }
-
-    /// GPU node TDX verification.
-    /// Returns true/false only when the GPU actually responded with a quote.
-    /// Returns nil (informational) when the GPU node is unreachable — this is
-    /// supplementary, not a security failure, since the model TEE is verified via gateway.
-    var gpuTdxValid: Bool? {
-        if let gpuV = attestation?.gpuQuoteVerification {
-            return gpuV.isVerified
-        }
-        // GPU unreachable → informational (gray dash), not a failure.
-        return nil
     }
 
     /// Whether the GPU row should be shown at all.
@@ -313,18 +322,8 @@ struct AttestationSummary {
         return hasGPUNode || attestation?.gpuArch != nil
     }
 
-    var gpuTdxDetail: String {
-        guard let gpuV = attestation?.gpuQuoteVerification else {
-            return "GPU node unreachable — verified via gateway"
-        }
-        if gpuV.isVerified {
-            return "TDX quote verified on device"
-        } else if !gpuV.signatureValid {
-            return "TDX signature verification failed"
-        } else {
-            return gpuV.certChainError ?? "Certificate chain invalid"
-        }
-    }
+    /// The expert card's GPU row is NVIDIA's result in every state; never the GPU node's Intel TDX line.
+    var gpuRowDetail: String { nrasDetail }
 
     /// Response ECDSA signature — true if all verified, false if any mismatch, nil if no data yet.
     /// Gateway-trust-only responses surface the row (data exists) but never turn it green
@@ -370,6 +369,7 @@ struct AttestationSummary {
         switch imageProvenance {
         case .allVerified: return .done
         case .incomplete:  return .stuck
+        case nil where provenanceInconclusive: return .unchecked
         case nil:          return state == .verifying ? .live : .pending
         }
     }
@@ -377,15 +377,18 @@ struct AttestationSummary {
     var provenanceDetail: String {
         switch imageProvenance {
         case .allVerified(let refs, let thirdParty):
-            let sidecars = thirdParty.isEmpty ? "" : " · \(thirdParty.count) third-party sidecar(s) pinned by manifest"
-            return "\(refs.count) near.ai image(s) signed by its published workflow\(sidecars)"
+            let sidecars = thirdParty.isEmpty ? "" : " · \(Self.counted(thirdParty.count, "third-party sidecar")) pinned by manifest"
+            return "\(Self.counted(refs.count, "near.ai image")) signed by its published workflow\(sidecars)"
         case .incomplete(let verified, let failures, _):
             let total = verified.count + failures.count
-            return "\(failures.count) of \(total) near.ai image(s) unverified — \(Self.namedFailures(failures))"
+            return "\(failures.count) of \(Self.counted(total, "near.ai image")) unverified — \(Self.namedFailures(failures))"
         case nil:
             return "Checking image provenance…"
         }
     }
+
+    /// "1 image" / "2 images" — never "(s)".
+    static func counted(_ n: Int, _ noun: String) -> String { n == 1 ? "1 \(noun)" : "\(n) \(noun)s" }
 
     /// Names the failing images and why, bounded so the line stays readable:
     /// e.g. "`glm51-sgl-awq-tp4-patched` (no published attestation (GitHub
@@ -423,6 +426,7 @@ struct AttestationSummary {
         switch dcapVerification {
         case .some(let v) where v.hasHardFailure: return .stuck
         case .some(let v) where v.allPresentVerified: return .done
+        case .some(let v) where v.hasUnchecked: return .unchecked
         case .some: return .stuck
         case nil: return state == .verifying ? .live : .pending
         }
@@ -433,6 +437,7 @@ struct AttestationSummary {
         if dcap.hasHardFailure {
             return dcap.failureReason ?? "Quote failed DCAP verification (or collateral unavailable)"
         }
+        if dcap.hasUnchecked { return "intel's hardware check couldn't be completed (service unreachable)." }
         switch dcap.worstTcbStatus {
         case .upToDate:
             return "QE binding + TCB verified, up to date"
@@ -450,20 +455,41 @@ struct AttestationSummary {
     /// failed (bad verdict, nonce mismatch, or NRAS unreachable — fail-closed),
     /// `.live`/`.pending` = still checking.
     var nrasState: StepState? {
-        guard attestation?.nvidiaPayload != nil else { return nil }
+        // A verdict with no payload is the missing-evidence couldn't-check: the row must show it.
+        guard attestation?.nvidiaPayload != nil || nrasVerification != nil else { return nil }
         switch nrasVerification {
         case .verified: return .done
-        // Both a genuine rejection and an unreachable check are unverified (the
-        // session degrades either way); the hard-vs-soft distinction drives the
-        // hero severity, not this per-row glyph.
-        case .failed, .inconclusive: return .stuck
+        // An unreachable NVIDIA couldn't check (orange); only a rejection is red (near-send-gate-rule).
+        case .failed: return .stuck
+        case .inconclusive: return .unchecked
         case nil: return state == .verifying ? .live : .pending
         }
     }
 
+    /// The TLS card describes teemoon's separate probe of the model node; never say the chat's connection is pinned.
+    static let transportTitle = "model node's tls key"
+    static let transportSubtitle = "teemoon's own probe, separate from your chat. your messages go through near.ai's gateway over ordinary tls, sealed end-to-end to the model's key."
+    static let transportLabel = "model node's certificate"
+
+    /// The probe row: an unreachable probe couldn't check (orange); a mismatch is red.
+    var tlsRow: (state: StepState, detail: String)? {
+        switch tlsAttestation {
+        case .verified?:
+            return (.done, "teemoon's probe of the model node's host saw a certificate whose key is bound into that node's attestation (`report_data`). your chat doesn't use this connection: it goes through near.ai's gateway, which isn't pinned.")
+        case .failed(let why)?: return (.stuck, "probe of the model node: \(why)")
+        case .inconclusive(let why)?:
+            return (.unchecked, why == NRASVerification.teemoonFault ? why : "probe of the model node: \(why) — could not complete")
+        case .notPerformed?, nil: return nil
+        }
+    }
+
+    /// The GPU row for a model node that sent no `nvidia_payload`; the banner keeps `NRASVerification.evidenceAbsent`.
+    static let noNVIDIAEvidence = "no nvidia evidence in this attestation"
+
     var nrasDetail: String {
         switch nrasVerification {
         case .verified: return "NVIDIA confirmed genuine attested GPUs for this request"
+        case .inconclusive(NRASVerification.evidenceAbsent): return Self.noNVIDIAEvidence
         case .failed(let reason), .inconclusive(let reason): return reason
         case nil: return "Checking GPU evidence with NVIDIA…"
         }
@@ -552,7 +578,7 @@ struct AttestationSummary {
 
     private func pillarState(_ checks: [PillarCheck]) -> PillarState {
         if checks.contains(where: { $0.state == .stuck }) { return .attention }
-        if state == .verifying { return .checking }
+        if state == .verifying || checks.contains(where: { $0.state == .pending || $0.state == .live }) { return .checking }
         return .verified
     }
 
@@ -585,7 +611,6 @@ struct AttestationSummary {
                     : "Chains to Intel’s SGX Root CA"),
             row("Attestation freshness", nonceEchoed, detail: nonceDetail),
             row("NVIDIA GPU attestation", nrasState, detail: nrasDetail),
-            showGPURow ? row("GPU secure enclave", gpuTdxValid, detail: gpuTdxDetail, showWhilePending: false) : nil,
         ].compactMap { $0 }
         let st = pillarState(checks)
         let line: String
@@ -609,7 +634,9 @@ struct AttestationSummary {
         let st = pillarState(checks)
         let line: String
         switch st {
-        case .verified:  line = "The enclave booted near.ai’s published open-source code — nothing swapped in."
+        // Placeholder words (review page: trust-code-claim). Must not claim the running manager: the phone checks the
+        // compose's default image, not the digest compose-manager logged starting (1.2).
+        case .verified:  line = "Every image the measured launch config names traces to near.ai’s published source."
         case .attention: line = "Some running code could not be traced to near.ai’s published source."
         case .checking:  line = "Tracing the running images to near.ai’s published source…"
         }
@@ -702,11 +729,11 @@ struct AttestationSummary {
     var provenanceEvidence: String? {
         switch imageProvenance {
         case .allVerified(let verified, let thirdParty):
-            let sidecars = thirdParty.isEmpty ? "" : " · \(thirdParty.count) third-party sidecar(s) pinned"
+            let sidecars = thirdParty.isEmpty ? "" : " · \(Self.counted(thirdParty.count, "third-party sidecar")) pinned"
             let repos = Set(verified.compactMap(\.sourceRepo)).sorted()
                 .map { $0.replacingOccurrences(of: "https://github.com/", with: "") }
             let source = repos.isEmpty ? "github.com/nearai" : repos.joined(separator: ", ")
-            return "\(verified.count) image(s) → \(source)\(sidecars)"
+            return "\(Self.counted(verified.count, "image")) → \(source)\(sidecars)"
         case .incomplete(let verified, let failures, _):
             return "\(failures.count) of \(verified.count + failures.count) unverified — \(Self.namedFailures(failures))"
         case nil:
@@ -779,10 +806,10 @@ struct AttestationSummary {
         }
         switch imageProvenance {
         case .allVerified(let refs, let thirdParty):
-            let sidecars = thirdParty.isEmpty ? "" : ", \(thirdParty.count) third-party sidecar(s) digest-pinned"
-            lines.append("Image provenance (Sigstore/Rekor): Verified (\(refs.count) near.ai image(s)\(sidecars))")
+            let sidecars = thirdParty.isEmpty ? "" : ", \(Self.counted(thirdParty.count, "third-party sidecar")) digest-pinned"
+            lines.append("Image provenance (Sigstore/Rekor): Verified (\(Self.counted(refs.count, "near.ai image"))\(sidecars))")
         case .incomplete(let verified, let failures, _):
-            lines.append("Image provenance (Sigstore/Rekor): INCOMPLETE (\(failures.count) of \(verified.count + failures.count) near.ai image(s) unverified)")
+            lines.append("Image provenance (Sigstore/Rekor): INCOMPLETE (\(failures.count) of \(Self.counted(verified.count + failures.count, "near.ai image")) unverified)")
         case nil: break
         }
         if let nonce = nonceEchoed {

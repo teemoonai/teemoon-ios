@@ -7,6 +7,7 @@
 
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 import os
 
 struct ContentView: View {
@@ -28,8 +29,17 @@ struct ContentView: View {
     /// reached by a deep link is a full screen of content and is not.
     @State var settingsDetent: PresentationDetent = .medium
     @State var showChats = false
+    @State private var chatImport = ChatImportModel()
+    /// The Files import sheet until its dismissal finishes: the delete offer waits for it.
+    @State private var importSheetUp = false
+    /// A failed import's alert, raised once the file picker has gone.
+    @State private var importAlert: ChatImportText.Alert?
     @State var currentThread: Thread?
     @FocusState var isPromptFocused: Bool
+    #if os(iOS)
+    /// The composer is a UIKit field outside SwiftUI's focus system: ask it for the keyboard here too.
+    @State private var composerFocus = ComposerFocus()
+    #endif
     /// The store-open failure banner: shown once at launch when the app is
     /// running on the in-memory fallback (see `TeemoonApp.storeOpenFailure`).
     @State private var showStoreFailure = TeemoonApp.storeOpenFailure != nil
@@ -231,6 +241,9 @@ struct ContentView: View {
                    !other.isEmpty {
                     seeded.equippedModels = [model, other]
                 }
+                if ProcessInfo.processInfo.environment["UITEST_SEED_LOCAL_SEES_IMAGES"] == "1" {
+                    seeded.modelCapabilities = [.vision]
+                }
                 providerStore.providers.removeAll()
                 providerStore.addProvider(seeded)
                 providerStore.currentProviderID = seeded.id.uuidString
@@ -321,7 +334,13 @@ struct ContentView: View {
             // the Where sheet slid up: two vertical animations in opposite
             // directions, in the same region, for no reason.
             isPromptFocused = !providerStore.providers.isEmpty
+            #if os(iOS)
+            if !providerStore.providers.isEmpty { composerFocus.request() }
+            #endif
         }
+        #if os(iOS)
+        .environment(composerFocus)
+        #endif
         .gesture(DeviceLayout.current == .phone ?
             DragGesture()
                 .onChanged { gesture in
@@ -335,7 +354,12 @@ struct ContentView: View {
         .sheet(isPresented: $showChats, onDismiss: {
             // Only auto-focus for new empty threads — existing conversations
             // don't warrant assuming the user wants to type immediately.
-            if currentThread?.messages.isEmpty != false { isPromptFocused = true }
+            if currentThread?.messages.isEmpty != false {
+                isPromptFocused = true
+                #if os(iOS)
+                composerFocus.request()
+                #endif
+            }
         }) {
             ChatsListView(currentThread: $currentThread, isPromptFocused: $isPromptFocused)
                 // Same reason as the settings sheet below: the composer chips
@@ -348,7 +372,13 @@ struct ContentView: View {
         .onChange(of: showChats) { _, isShowing in
             // Resign focus when the sheet opens so iOS doesn't automatically
             // restore the TextField as first responder during the dismiss animation.
-            if isShowing { isPromptFocused = false }
+            if isShowing {
+                isPromptFocused = false
+                #if os(iOS)
+                // The composer is a UIKit field outside SwiftUI's focus system: "false" alone doesn't reach it.
+                ComposerTextView.dropKeyboard()
+                #endif
+            }
         }
         .onChange(of: showSettings) { _, isShown in
             // Read BEFORE SettingsView consumes the flags in its onAppear. The
@@ -357,10 +387,16 @@ struct ContentView: View {
             guard isShown else { return }
             settingsDetent = (showSettingsSearch || showSettingsProviders) ? .large : .medium
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $showSettings, onDismiss: {
+            if chatImport.showChatsRequested {
+                chatImport.showChatsRequested = false
+                showChats = true
+            }
+        }) {
             SettingsView(currentThread: $currentThread, openToProviders: $showSettingsProviders,
                          openToSearch: $showSettingsSearch)
                 .environment(llm)
+                .environment(chatImport)
                 // OPAQUE. The default sheet material is translucent, and the
                 // composer chips sat right behind this one — the Where chip
                 // bled through as an orange smear across "places & keys" and
@@ -375,6 +411,56 @@ struct ContentView: View {
                                      ? [.medium, .large] : [.large],
                                      selection: $settingsDetent)
         }
+        // "show chats" on the done step: Settings (or the sheet below) closes, then the chats list opens.
+        .onChange(of: chatImport.showChatsRequested) { _, requested in
+            guard requested else { return }
+            if showSettings {
+                showSettings = false
+            } else {
+                chatImport.showChatsRequested = false
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(450))
+                    showChats = true
+                }
+            }
+        }
+        // A near.ai export opened from Files or the share sheet: the import sheet reads it and asks first.
+        .onOpenURL { url in
+            if let bundleID = Bundle.main.bundleIdentifier, ShareInbox.entryID(from: url, bundleID: bundleID) != nil {
+                NotificationCenter.default.post(name: .teemoonShareArrived, object: nil)
+                return
+            }
+            guard url.isFileURL, !chatImport.isBusy else { return }
+            showSettings = false
+            chatImport.dismissResult()
+            chatImport.check(url: url, container: modelContext.container, fromOutside: true)
+        }
+        // A file opened from Files or the share sheet: the same sheet as Settings', at the file-chosen step.
+        .sheet(isPresented: Binding(get: { chatImport.showsSheet }, set: { if !$0 { chatImport.dismissResult() } }),
+               onDismiss: { importSheetUp = false }) {
+            NavigationStack { NearImportView(importer: chatImport) }
+                .presentationBackground(PlatformColors.background)
+                .presentationDetents([.large])
+        }
+        .onChange(of: chatImport.showsSheet) { _, shown in if shown { importSheetUp = true } }
+        .chatImportDeleteOffer(chatImport, fromOutside: true, sheetUp: importSheetUp)
+        // A bad file fails while the picker is still dismissing, and an alert raised then is silently dropped.
+        .onChange(of: chatImport.failureAlert) { _, alert in
+            // The page shows its own alert; this one is for a file opened from outside.
+            guard let alert, chatImport.openedFromOutside else { importAlert = nil; return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(600))
+                if chatImport.failureAlert == alert { importAlert = alert }
+            }
+        }
+        .alert(importAlert?.title ?? "",
+               isPresented: Binding(get: { importAlert != nil },
+                                    set: { if !$0 { importAlert = nil; chatImport.dismissResult() } }),
+               presenting: importAlert) { _ in
+            Button(ChatImportText.alertButton) { importAlert = nil; chatImport.dismissResult() }
+        } message: { alert in
+            if let message = alert.message { Text(message) }
+        }
         #if !os(visionOS)
         .tint(settings.appTintColor.getColor())
         #endif
@@ -382,7 +468,7 @@ struct ContentView: View {
         .onChange(of: settings.appTintColor, initial: true) { _, tint in tint.applyToWindows() }
         #endif
         .fontDesign(settings.appFontDesign.getFontDesign())
-        .environment(\.dynamicTypeSize, settings.appFontSize.getFontSize())
+        .appTextSize(settings.appFontSize)
         .fontWidth(settings.appFontWidth.getFontWidth())
         .onAppear {
             settings.incrementNumberOfVisits()

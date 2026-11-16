@@ -38,7 +38,7 @@ struct ProviderModelSection: View {
             case .connected:
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 13)).foregroundStyle(.green)
+                        .scaledFont(size: 13).foregroundStyle(.green)
                     Text("key accepted").foregroundStyle(.secondary).textCase(.lowercase)
                     Spacer()
                     // No retry on success. "check again" next to a green tick
@@ -124,7 +124,7 @@ struct ProviderModelSection: View {
                     // button below be the obvious next move.
                     Text(form.isOllama ? "no models installed on this server yet"
                                        : "this server returned no models")
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(.secondary)
                         .textCase(.lowercase)
                 } else {
@@ -180,7 +180,7 @@ struct ProviderModelSection: View {
                 // Same one-line layout as the browser catalog: name → tier badge →
                 // price·context on the right (+ warm / checkmark for the inline picker).
                 HStack(spacing: 6) {
-                    Text(m.displayName).tint(.primary).textCase(.lowercase).lineLimit(1)
+                    Text(m.displayName).tint(.primary).textCase(.lowercase).lineLimitGrowing(1)
                     if form.showsInlineTiers {
                         confidentialityTag(NearAIModelCatalog.confidentiality(forID: m.id)).fixedSize()
                     }
@@ -199,7 +199,7 @@ struct ProviderModelSection: View {
                             .lineLimit(1).fixedSize()
                     }
                     if form.model == m.id {
-                        Image(systemName: "checkmark").font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "checkmark").scaledFont(size: 13, weight: .semibold)
                             .foregroundStyle(.tint)
                     }
                 }
@@ -279,7 +279,7 @@ struct ProviderModelSection: View {
     private func inlineError(_ kind: EndpointModelCatalog.FailureKind) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 13)).foregroundStyle(.red)
+                .scaledFont(size: 13).foregroundStyle(.red)
             Text(form.failureMessage(kind)).font(.footnote).foregroundStyle(.secondary)
             Spacer()
         }
@@ -314,6 +314,10 @@ func confidentialityTag(_ tier: NearAIModelCatalog.Confidentiality) -> some View
             .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1))
     case .proxied:
         Text("proxied")
+            .font(.caption2).fontWeight(.medium)
+            .foregroundStyle(.secondary)
+    case .unknown:
+        Text("not yet confirmed")
             .font(.caption2).fontWeight(.medium)
             .foregroundStyle(.secondary)
     }

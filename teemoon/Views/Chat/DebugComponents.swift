@@ -54,7 +54,7 @@ struct EncryptedBodyDebugRow: View {
         } label: {
             HStack {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9))
+                    .scaledFont(size: 9)
                     .foregroundStyle(.quaternary)
                 Text("request body")
                     .font(.system(.caption2, design: .monospaced))
@@ -141,12 +141,12 @@ struct ToolCallDebugRow: View {
         } label: {
             HStack {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9))
+                    .scaledFont(size: 9)
                     .foregroundStyle(.quaternary)
                 Text(label)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                    .lineLimitGrowing(1)
                     .truncationMode(.middle)
                 Spacer()
             }
@@ -172,7 +172,7 @@ struct ToolCallDebugRow: View {
                 } label: {
                     HStack {
                         Image(systemName: rawExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9))
+                            .scaledFont(size: 9)
                             .foregroundStyle(.quaternary)
                         Text("raw json")
                             .font(.system(.caption2, design: .monospaced))
@@ -200,7 +200,7 @@ struct ToolCallDebugRow: View {
             } label: {
                 HStack {
                     Image(systemName: llmExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9))
+                        .scaledFont(size: 9)
                         .foregroundStyle(.quaternary)
                     Text("processed for llm")
                         .font(.system(.caption2, design: .monospaced))
@@ -278,7 +278,7 @@ struct CollapsibleDebugRow: View {
         } label: {
             HStack {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9))
+                    .scaledFont(size: 9)
                     .foregroundStyle(.quaternary)
                 Text(label)
                     .font(.system(.caption2, design: .monospaced))

@@ -83,6 +83,8 @@ final class ConfidentialSession {
     /// nil = not yet checked (pending or no manifest); set once verification
     /// completes. A definitive `.incomplete` degrades the security state.
     var imageProvenance: ProvenanceService.ManifestProvenance?
+    /// What `imageProvenance` was computed for: an inconclusive re-check keeps it only for the same record.
+    var provenanceKey: String?
     /// Verdict of the model-layer (inner) compose hash check against the action
     /// log's pinned `file_sha256` (nil = not attempted yet). `.hashMismatch` is
     /// an adversarial integrity break and degrades the session (see
@@ -112,6 +114,14 @@ final class ConfidentialSession {
     /// (GLM-5.1 AWQ vs served FP8 drift) and replace it with whatever
     /// production currently serves.
     var freezeAttestationFixtures = false
+    /// The record-age clock; tests move it.
+    var now: () -> Date = Date.init
+    /// near.ai's direct TEE host for a model, from its `/endpoints` directory.
+    var directBase: (String) async -> URL? = { await EndpointDirectory.shared.directBase(forModel: $0) }
+
+    /// The record fetch `refreshAttestation` runs; nil = near.ai lists no direct host for the model. Tests hold it.
+    @ObservationIgnored
+    var fetchRecord: (Provider, URL, String) async throws -> AttestationRecord? = ConfidentialSession.liveFetch
 
     /// Verifier used for image provenance (overridable in tests).
     let provenanceService: ProvenanceService
@@ -130,7 +140,7 @@ final class ConfidentialSession {
     /// Verifier used for NRAS (overridable in tests).
     let nrasService: NRASService
 
-    /// TLS-attestation outcome (HTTPS terminates inside the model TEE).
+    /// The model node's TLS probe outcome (not the chat's gateway connection).
     /// nil = not yet checked; `.failed` degrades; `.notPerformed` is neutral.
     var tlsAttestation: TLSAttestation?
 
@@ -139,17 +149,35 @@ final class ConfidentialSession {
 
     @ObservationIgnored
     var provenanceTask: Task<Void, Never>?
+    /// Reads the model artifact from the scoped model-layer YAML, off the main actor (tests observe it here).
+    @ObservationIgnored
+    var modelLayerParse: @Sendable (String, String?) -> ModelArtifact? = {
+        ModelArtifact.parse(fromComposeYAML: $0, servingModel: $1)
+    }
     /// False from the moment a provenance pass starts until it has written
     /// its result (or given up as inconclusive). While false with a task
     /// alive, a session that is otherwise sealed reads `.verifying`, not
     /// `.ok` — so the header never goes green and then orange.
     var provenanceSettled = true
+    /// The last pass for this record settled inconclusive (GitHub didn't answer) with no verdict to keep:
+    /// the code wasn't checked. Never gates; the trust screen says so (trust-provenance-unchecked).
+    var provenanceInconclusive = false
     /// Identifies the pass that owns `provenanceSettled`: a cancelled pass
     /// finishing late must not mark a newer one settled.
     var provenanceRun = UUID()
 
     @ObservationIgnored
     var dcapTask: Task<Void, Never>?
+
+    /// (record, reason) pairs the user has already said "send anyway" to.
+    var confirmedDegrades: Set<String> = []
+    /// Trust scope (a)(b)(2)(c) for the current record; nil while it runs or when there is no GPU node report.
+    var trustScope: TrustScope?
+    @ObservationIgnored
+    var trustScopeTask: Task<Void, Never>?
+    let runningPairCheck = RunningPairCheck()
+    /// Every check ends in a verdict: the near.ai tier wait and the verifiers' deadline.
+    let deadline: VerdictDeadline
 
     @ObservationIgnored
     var nrasTask: Task<Void, Never>?
@@ -167,8 +195,10 @@ final class ConfidentialSession {
          provenanceService: ProvenanceService = ProvenanceService(),
          dcapService: DCAPService = DCAPService(),
          nrasService: NRASService = NRASService(),
-         tlsService: TLSAttestationVerifier = TLSAttestationVerifier()) {
+         tlsService: TLSAttestationVerifier = TLSAttestationVerifier(),
+         deadline: VerdictDeadline? = nil) {
         self.providers = providers
+        self.deadline = deadline ?? VerdictDeadline()
         self.provenanceService = provenanceService
         self.dcapService = dcapService
         self.nrasService = nrasService
@@ -186,47 +216,86 @@ final class ConfidentialSession {
         providers.credential(for: provider)
     }
 
-    /// Whether a send right now would be application-layer sealed.
-    var canSeal: Bool { currentTEEContext()?.e2eePeer != nil }
+    /// Whether a send right now would be application-layer sealed. Record facts only: never builds a peer.
+    var canSeal: Bool {
+        guard let provider = providers.activeProvider,
+              provider.capabilities.contains(.attestation),
+              let attestation else { return false }
+        return TEEContext.seals(provider: provider, attestation: attestation)
+    }
 
     /// The TEE request context for the active provider, or nil when the
     /// provider doesn't support attestation or no record has landed yet.
-    /// The single place a `TEEContext` is derived.
+    /// The single place a `TEEContext` is derived. Each call is a fresh client keypair: call it per request,
+    /// never from a view body or a verdict (read `canSeal`).
     func currentTEEContext() -> TEEContext? {
         guard let provider = providers.activeProvider,
               provider.capabilities.contains(.attestation),
               let attestation else { return nil }
         return TEEContext(provider: provider,
                           apiKey: providers.credential(for: provider),
-                          attestation: attestation)
+                          attestation: attestation,
+                          makePeer: makePeer)
     }
+    /// Builds a request's E2EE peer (a fresh X25519 keypair); tests count calls here.
+    @ObservationIgnored var makePeer: (Data) throws -> E2EEPeer = { try E2EEPeer(modelEd25519PubKey: $0) }
+
+    /// The checks ended without an answer (near.ai's tier gave up): the ask must not say "still checking".
+    var deadlinePassed: Bool { tierGaveUp }
 
     /// One turn: refresh a stale record, wait for the E2EE key if this
     /// provider attests, derive the context, and open the bookkeeping.
     /// `ChatViewModel` must not write E2EE fields itself.
-    func prepareTurn() async -> TEEContext? {
+    func prepareTurn(for place: TurnPlace? = nil) async -> TEEContext? {
+        guard ownsTurn(place) else { return nil }
         refreshAttestationIfStale()
         if providers.activeProvider?.capabilities.contains(.attestation) == true {
             _ = await e2eeKey(waitingUpTo: .seconds(15))
-            // A verdict still in flight reads as neutral in `attestationState`,
+            // A verdict still in flight once read as neutral in `attestationState`,
             // so a send in that window went out on an unsettled gate — on the
             // phone, every other message to a host whose TLS check fails
             // (2026-09-09). Settle first; the caller re-reads `sendPolicy`.
             await settleVerifiers(waitingUpTo: Self.verifierSettleTimeout)
         }
+        // Switched during the wait: the context and the gate would be the new model's, not this turn's.
+        guard ownsTurn(place) else { return nil }
         let context = currentTEEContext()
         beginRequest(expectingE2EE: context?.e2eePeer != nil)
         return context
     }
 
-    /// How long `prepareTurn` holds a send for the DCAP, GPU and TLS verdicts
-    /// of a refresh that is still running. Tests shorten it.
+    /// The provider and model a turn was composed for. The session's state is about the ACTIVE one, so a
+    /// turn whose place is no longer selected opens nothing and books nothing (T3).
+    struct TurnPlace: Equatable, Sendable {
+        let providerID: UUID
+        let model: String
+        init(_ provider: Provider) { providerID = provider.id; model = provider.model }
+    }
+
+    /// nil = the active provider, for callers that check nothing else.
+    func ownsTurn(_ place: TurnPlace?) -> Bool {
+        guard let place else { return true }
+        guard let active = activeProvider else { return false }
+        return active.id == place.providerID && active.model == place.model
+    }
+
+    /// How long `prepareTurn` holds a send for everything `sendPending` covers, a stale record's refetch
+    /// included. Tests shorten it.
     static var verifierSettleTimeout: Duration = .seconds(15)
 
     /// The first record has not arrived: the only state in which a silent
     /// verifier is news. Once a record is in, `.verifying` is the provenance
     /// sweep, and a slow sweep is not an unreachable verifier.
     var awaitsFirstRecord: Bool { attestationState == .verifying && attestation == nil }
+
+    /// What the "taking too long" timer restarts on: a new state, or a re-run that leaves the state as it was.
+    struct FirstRecordWait: Equatable {
+        var state: AttestationState
+        var attempt: Int
+    }
+    /// Counts `refreshAttestation` runs.
+    var attestationAttempt = 0
+    var firstRecordWaitID: FirstRecordWait { FirstRecordWait(state: attestationState, attempt: attestationAttempt) }
 
     /// What it means when near.ai publishes no direct host for the model.
     ///
@@ -237,25 +306,58 @@ final class ConfidentialSession {
     enum MissingHostOutcome { case degraded, ordinary }
 
     nonisolated static func outcome(whenNoDirectHostFor model: String) -> MissingHostOutcome {
-        NearAIModelCatalog.confidentiality(forID: model) == .teeOwn ? .degraded : .ordinary
+        switch NearAIModelCatalog.confidentiality(forID: model) {
+        case .teeOwn, .unknown: .degraded
+        case .teeThirdParty, .proxied: .ordinary
+        }
     }
 
-    /// A hard-block-capable verdict has been asked for and has not answered:
-    /// DCAP, GPU (NRAS) or TLS. Provenance is not counted — its failures are
-    /// soft, and it is neutral while in flight by design.
+    /// What a send waits for in `prepareTurn`: `.hardware` (a verdict, a stale record's refetch, the near.ai tier)
+    /// asks "still checking near.ai's hardware" at the settle timeout; `.provenance` alone asks its own question.
+    enum PendingKind: Equatable, Sendable { case hardware, provenance }
+
+    var pendingKind: PendingKind? { verdictsPending ? .hardware : provenancePending ? .provenance : nil }
+
+    /// Image provenance in flight for the current record. Never drop it from `sendPending`: the chip reads
+    /// verifying until it answers (formal/ ChipNeverVerifyingAtSend).
+    var provenancePending: Bool {
+        guard providers.activeProvider?.capabilities.contains(.attestation) == true else { return false }
+        return imageProvenance == nil && !provenanceSettled && provenanceTask != nil
+    }
+
+    /// A record past `attestationMaxAge` whose refetch is in flight: a send now would seal to the old key.
+    var staleRefetchPending: Bool {
+        guard attestationFetchInFlight, attestationTask?.isCancelled == false, let record = attestation else { return false }
+        return now().timeIntervalSince(record.fetchedAt) > Self.attestationMaxAge
+    }
+
+    /// Every pending kind: the gate, the marks and Shortcuts read this, never `verdictsPending` alone.
+    var sendPending: Bool { pendingKind != nil }
+
+    /// The hardware kind of pending: a DCAP, NVIDIA, TLS or trust-scope verdict not in yet, a stale record's
+    /// refetch, or the near.ai tier still unknown. Provenance is `provenancePending`.
     var verdictsPending: Bool {
         // Only an attested send has verdicts to wait for; a handle left by a
         // previous session must never count for a plain-TLS provider.
-        guard providers.activeProvider?.capabilities.contains(.attestation) == true else { return false }
+        guard let provider = providers.activeProvider, provider.capabilities.contains(.attestation) else { return false }
         return (dcapTask != nil && dcapVerification == nil)
             || (nrasTask != nil && gpuAttestation == nil)
             || (tlsTask != nil && tlsAttestation == nil)
+            || (trustScopeTask != nil && trustScope == nil)
+            || staleRefetchPending
+            || (deadline.tier(for: provider.model) == .unknown && !deadline.tierGaveUp(on: provider.model))
     }
 
-    /// Waits until no hard-block-capable verdict is pending, or `timeout`.
+    /// near.ai's tier was still unknown at `VerdictDeadline`: can't check, never "verifying…" forever.
+    var tierGaveUp: Bool {
+        guard let provider = providers.activeProvider, provider.capabilities.contains(.attestation) else { return false }
+        return deadline.tierGaveUp(on: provider.model)
+    }
+
+    /// Waits until nothing is pending (`sendPending`), or `timeout`.
     func settleVerifiers(waitingUpTo timeout: Duration) async {
         let deadline = ContinuousClock.now + timeout
-        while verdictsPending, ContinuousClock.now < deadline {
+        while sendPending, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(100))
         }
     }
@@ -264,16 +366,18 @@ final class ConfidentialSession {
     /// unsealed request — `beginRequest(expectingE2EE: false)` followed by
     /// `finishTurn` did, and once the key arrived `degradeIsHardFailure` called
     /// it plaintext-went-out, a hard block only a provider switch cleared.
-    func abandonTurn(reason: String?) {
+    func abandonTurn(for place: TurnPlace? = nil, reason: String?) {
+        guard ownsTurn(place) else { return }
         lastRequestUsedE2EE = nil
         lastE2EEFailReason = reason
     }
 
     /// Close the turn. Outcome and (optional) signature check are
     /// recorded here so the view-model does not increment counters.
-    func finishTurn(debugInfo: LastRequestDebugInfo?, error: LLMError?,
-                    verification: ResponseVerification? = nil) {
-        recordRequestOutcome(debugInfo: debugInfo, error: error)
+    func finishTurn(for place: TurnPlace? = nil, debugInfo: LastRequestDebugInfo?, error: LLMError?,
+                    verification: ResponseVerification? = nil, countsAsE2EE: Bool = true) {
+        guard ownsTurn(place) else { return }
+        recordRequestOutcome(debugInfo: debugInfo, error: error, countsAsE2EE: countsAsE2EE)
         if let verification {
             recordVerification(verification)
         } else if let verification = debugInfo?.teeVerification {
@@ -292,13 +396,14 @@ final class ConfidentialSession {
     /// Records the actual outcome of a completed request: whether E2EE was
     /// active on the wire, the session message count, and a human-readable
     /// reason when E2EE failed.
-    func recordRequestOutcome(debugInfo: LastRequestDebugInfo?, error: LLMError?) {
+    func recordRequestOutcome(debugInfo: LastRequestDebugInfo?, error: LLMError?, countsAsE2EE: Bool = true) {
         if let debugInfo {
             lastRequestUsedE2EE = debugInfo.isE2EEActive
-            if debugInfo.isE2EEActive { e2eeMessageCount += 2 }  // one sent + one received
+            // A send that left before its record was confirmed is not counted (Message.sentBeforeConfirmed).
+            if debugInfo.isE2EEActive, countsAsE2EE { e2eeMessageCount += 2 }  // one sent + one received
         }
         if lastRequestUsedE2EE != true, let error {
-            lastE2EEFailReason = error.httpStatus.map { "Server rejected request (HTTP \($0))" }
+            lastE2EEFailReason = error.httpStatus.map { "the server rejected the request (http \($0))." }
                 ?? error.userMessage
         }
     }
@@ -415,6 +520,8 @@ final class ConfidentialSession {
 
     @ObservationIgnored
     var attestationTask: Task<Void, Never>?
+    /// The current `attestationTask` has not finished; read by `staleRefetchPending`.
+    var attestationFetchInFlight = false
 
     /// Maximum age before the Ed25519 key is considered stale and refetched.
     static let attestationMaxAge: TimeInterval = 600 // 10 minutes

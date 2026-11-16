@@ -13,6 +13,9 @@ import Testing
 
 @Suite("NearAIModelCatalog")
 struct NearAIModelCatalogTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     /// A CLOSED-WEIGHT MODEL CAN NEVER BE PROMOTED TO near.ai's OWN ENCLAVE,
     /// whatever the catalogue says about it.
@@ -60,6 +63,60 @@ struct NearAIModelCatalogTests {
     /// near.ai proxies whole vendor namespaces it does not host: the ids
     /// that arrived 2026-09-12 fell through every rule to "own fleet", and
     /// the catalog tool refused to write a list the app would mislabel.
+    /// Gardener #7 (2026-10-25): an id no rule names fell through to own-fleet, so a new
+    /// near.ai model wore "end-to-end encrypted" until the catalogue answered. It is unknown:
+    /// no encryption claim, never "ordinary", and the catalogue's owned_by settles it.
+    @Test func anUnlistedIDIsNeverOwnFleetUntilTheCatalogueSaysSo() {
+        NearAIModelCatalog.resetTierCache()
+        defer { NearAIModelCatalog.resetTierCache() }
+        for id in ["acme/brand-new-model-1", "brand-new-model-2", "mistralai/mistral-large-4"] {
+            #expect(NearAIModelCatalog.classify(id) == .unknown, "\(id)")
+            #expect(NearAIModelCatalog.confidentiality(forID: id) != .teeOwn, "\(id)")
+            #expect(!NearAIModelCatalog.isAttestable(id), "\(id)")
+            #expect(ConfidentialSession.outcome(whenNoDirectHostFor: id) == .degraded, "\(id): must not read as ordinary")
+        }
+        NearAIModelCatalog.recordTiers(["acme/brand-new-model-1": .teeOwn])
+        #expect(NearAIModelCatalog.confidentiality(forID: "acme/brand-new-model-1") == .teeOwn)
+    }
+
+    /// 2026-10-28 (Android found it first): before near.ai's tier list has been seen once (a fresh install,
+    /// a first setup, cleared storage) a namespace guess still claimed own fleet. Unknown until the list is seen.
+    @Test func noIDIsOwnFleetBeforeTheTierListIsSeen() {
+        NearAIModelCatalog.$tierListSeenOverride.withValue(false) {
+            for id in ["z-ai/glm-5.3-flash-unseen", "qwen/qwen3-brand-new", "deepseek-ai/deepseek-v9", "openai/gpt-oss-121b"] {
+                #expect(NearAIModelCatalog.confidentiality(forID: id) == .unknown, "\(id)")
+                #expect(ConfidentialSession.outcome(whenNoDirectHostFor: id) == .degraded, "\(id): must not read as ordinary")
+            }
+        }
+        NearAIModelCatalog.$tierListSeenOverride.withValue(true) {
+            #expect(NearAIModelCatalog.confidentiality(forID: "qwen/qwen3-brand-new") == .teeOwn, "the namespace guess, once the list is seen")
+        }
+    }
+
+    /// 2026-10-31, fresh install on the simulator: before the tier list was seen, an own-fleet near.ai id had no
+    /// attestation capability, so the app treated it as plain TLS and sent without asking (near.ai answered 401).
+    /// Not knowing the tier must not mean "nothing to encrypt": the send still goes through the attested gate.
+    @Test func anUnseenOwnFleetIDStillGoesThroughTheAttestedGate() {
+        NearAIModelCatalog.$tierListSeenOverride.withValue(false) {
+            for id in ["z-ai/glm-5.2", "z-ai/glm-5.3-flash", "deepseek-ai/deepseek-v9"] {
+                var provider = Provider.nearAI
+                provider.model = id
+                #expect(provider.capabilities.contains(.attestation), "\(id): sent as plain TLS without asking")
+                #expect(!provider.claimsEndToEndEncryption, "\(id): claimed e2ee before near.ai vouched for it")
+            }
+        }
+        NearAIModelCatalog.$tierListSeenOverride.withValue(true) {
+            var provider = Provider.nearAI
+            provider.model = "deepseek-ai/deepseek-v9"
+            #expect(provider.claimsEndToEndEncryption, "the claim returns once the list is seen")
+        }
+    }
+
+    @Test func recordingTiersMarksTheListSeen() {
+        NearAIModelCatalog.recordTiers(["z-ai/glm-5.3-flash": .teeOwn])
+        #expect(NearAIModelCatalog.tierListSeen)
+    }
+
     @Test func proxiedVendorNamespacesAreNotOwnFleet() {
         #expect(NearAIModelCatalog.classify("x-ai/grok-4.6") == .proxied)
         #expect(NearAIModelCatalog.classify("deepseek/deepseek-v4.1-flash") == .proxied)
@@ -222,6 +279,9 @@ struct NearAIModelCatalogTests {
 
 @Suite("NearAIModelCatalog ordering")
 struct NearAIModelCatalogOrderingTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     private func row(_ id: String, _ created: TimeInterval?) -> KnownModel {
         KnownModel(id: id, displayName: id, vendor: NearAIModelCatalog.vendorLabel(forID: id),
@@ -337,4 +397,9 @@ struct NearAIRecencyTests {
         let rows = await NearAIModelCatalog.buildModels(from: list.data)
         #expect(rows.first?.created == Date(timeIntervalSince1970: 1788000000))
     }
+}
+
+extension NearAIModelCatalog {
+    /// What a launch with near.ai's list saved or fetched does: marks the tier list seen. Sticky, like the app.
+    static func seeTierListForTests() { recordTiers(["nearai/tier-list-seen-by-tests": .teeOwn]) }
 }

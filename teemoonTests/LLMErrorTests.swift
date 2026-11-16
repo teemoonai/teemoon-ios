@@ -29,7 +29,7 @@ struct LLMErrorTests {
         let msg = LLMError.providerMessage(httpStatus: 401, provider: "OpenAI")
         #expect(msg.contains("401"))
         #expect(msg.contains("OpenAI"))
-        #expect(msg.contains("API key"))
+        #expect(msg.contains("api key"))
     }
 
     @Test func providerMessage_402() {
@@ -51,7 +51,7 @@ struct LLMErrorTests {
     @Test func nvidiaUnservedModel404NamesTheModelNotTheURL() {
         let body = #"{"status":404,"title":"Not Found","detail":"Function 'b0fcd392-e905-4ab4-8eb9-aeae95c30b37': Not found for account 'iqVNM_S9wj9BaKVMYqRKW'"}"#
         let msg = apiErrorMessage(from: body, httpStatus: 404, provider: "nvidia")
-        #expect(msg.contains("does not serve this model"))
+        #expect(msg.contains("doesn't serve this model"))
         #expect(msg.contains("404"))
         #expect(!msg.contains("URL"))
         #expect(!msg.contains("b0fcd392"))
@@ -61,13 +61,13 @@ struct LLMErrorTests {
     @Test func problemDetailsBodyShowsItsDetail() {
         let body = #"{"status":429,"title":"Too Many Requests","detail":"Rate limit exceeded for this model."}"#
         let msg = apiErrorMessage(from: body, httpStatus: 429, provider: "nvidia")
-        #expect(msg == "nvidia (HTTP 429): Rate limit exceeded for this model.")
+        #expect(msg == "nvidia (http 429): Rate limit exceeded for this model.")
     }
 
     @Test func anErrorEnvelopeStillWinsOverProblemDetails() {
         let body = #"{"error":{"message":"bad request"},"detail":"ignored"}"#
         let msg = apiErrorMessage(from: body, httpStatus: 400, provider: "x")
-        #expect(msg == "x (HTTP 400): bad request")
+        #expect(msg == "x (http 400): bad request")
     }
 
     @Test func providerMessage_404() {
@@ -106,8 +106,8 @@ struct LLMErrorTests {
 
     @Test func groundingMessage_401() {
         let msg = LLMError.groundingMessage(httpStatus: 401)
-        #expect(msg.contains("Brave"))
-        #expect(msg.contains("API key"))
+        #expect(msg.contains("brave"))
+        #expect(msg.contains("api key"))
     }
 
     @Test func groundingMessage_402() {
@@ -126,19 +126,19 @@ struct LLMErrorTests {
     /// for a key Brave had said, in the body, was invalid.
     @Test func groundingMessage_422InvalidTokenNamesTheKey() {
         let msg = LLMError.groundingMessage(httpStatus: 422, responseBody: Self.invalidToken)
-        #expect(msg.contains("rejected the API key (HTTP 422)"))
+        #expect(msg.contains("rejected the api key (http 422)"))
         #expect(msg.contains("subscription token is invalid"))
-        #expect(msg.contains("Settings → Search"))
+        #expect(msg.contains("settings → search"))
     }
 
     @Test func groundingMessage_appendsBravesDetailWhenTheBodyHasOne() {
         let body = #"{"error":{"code":"PLAN","detail":"The option is not included in the plan."}}"#
         #expect(LLMError.groundingMessage(httpStatus: 400, responseBody: body)
-                == "Brave web search returned an error (HTTP 400): The option is not included in the plan.")
+                == "brave web search returned an error (http 400): The option is not included in the plan.")
         // No body, or not Brave's shape: the bare status, as before.
-        #expect(LLMError.groundingMessage(httpStatus: 422) == "Brave web search returned an error (HTTP 422).")
+        #expect(LLMError.groundingMessage(httpStatus: 422) == "brave web search returned an error (http 422).")
         #expect(LLMError.groundingMessage(httpStatus: 500, responseBody: "<html>bad gateway</html>")
-                == "Brave web search returned an error (HTTP 500).")
+                == "brave web search returned an error (http 500).")
     }
 
     /// The tool loop stops on a refused key instead of retrying three rephrased

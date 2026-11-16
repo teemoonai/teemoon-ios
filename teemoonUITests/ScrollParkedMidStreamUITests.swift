@@ -22,7 +22,8 @@
 //  TWO WAYS THIS FIXTURE GOES QUIETLY GREEN AGAINST A BROKEN BUILD, both
 //  paid for on device (2026-08-25):
 //
-//    1. No stalls. `stallDelay` is 1s, so a continuous stream never mounts
+//    1. No stalls. `StallIndicator.showAfter` is 3s (it was 1s when this
+//       was written), so a continuous stream never mounts
 //       the chip. The first run of this driver also had the reply FINISH
 //       before the park began — 20s of "nothing moved" that measured a
 //       settled transcript, not a parked one. `parkCoversStream` below is
@@ -57,9 +58,9 @@ final class ScrollParkedMidStreamUITests: XCTestCase {
     /// Every other block, so the parked window below spans several toggles
     /// rather than catching one and calling it a pattern.
     private static let stallEvery = 2
-    /// Over the 1s `stallDelay`, with margin for the pacer's own lag — at
-    /// 1.0s exactly the chip races the next token and mounts intermittently.
-    private static let stallDuration: TimeInterval = 1.5
+    /// Over `StallIndicator.showAfter` (3s), with margin for the pacer's own lag — at
+    /// exactly 3s the chip races the next token and mounts intermittently.
+    private static let stallDuration: TimeInterval = 3.5
     /// A THINKING BLOCK ABOVE THE ANSWER, which `reasoningLines: 0` has none
     /// of. It renders inside `TimelineView(.periodic(by: 1))` and carries a
     /// live label, so it re-lays-out once a second from OFFSCREEN ABOVE a
@@ -102,7 +103,7 @@ final class ScrollParkedMidStreamUITests: XCTestCase {
         let transcript = app.transcript
         XCTAssertTrue(transcript.waitForExistence(timeout: 20), "never landed back in the thread")
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20), "composer never appeared")
         composer.tap()
         composer.typeText("park me")
@@ -194,7 +195,7 @@ final class ScrollParkedMidStreamUITests: XCTestCase {
         let transcript = app.transcript
         XCTAssertTrue(transcript.waitForExistence(timeout: 20), "never landed in the thread")
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20), "composer never appeared")
         composer.tap()
         composer.typeText("park me")
@@ -268,7 +269,7 @@ final class ScrollParkedMidStreamUITests: XCTestCase {
 
         let transcript = app.transcript
         XCTAssertTrue(transcript.waitForExistence(timeout: 20))
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("park me")
@@ -327,7 +328,7 @@ final class ScrollParkedMidStreamUITests: XCTestCase {
         row.tap()
 
         XCTAssertTrue(app.transcript.waitForExistence(timeout: 20))
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         // XCUI LOSES THE FIRST TAP HERE sometimes: "Neither element nor any
         // descendant has keyboard focus" killed a run on 2026-08-26 before it

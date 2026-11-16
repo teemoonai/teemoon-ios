@@ -28,7 +28,7 @@ struct ProviderEditActionsSection: View {
                                  ? "active provider" : "use this provider")
                             Spacer()
                             if providerStore.currentProviderID == pid.uuidString {
-                                Image(systemName: "checkmark").font(.system(size: 13, weight: .semibold))
+                                Image(systemName: "checkmark").scaledFont(size: 13, weight: .semibold)
                             }
                         }
                     }

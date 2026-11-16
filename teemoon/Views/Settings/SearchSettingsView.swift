@@ -87,7 +87,7 @@ private struct BuiltInGroundingSection: View {
                 Text("search is built in here")
                 Spacer()
                 Image(systemName: "checkmark")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold)
             }
             .foregroundStyle(.secondary)
         }
@@ -109,9 +109,7 @@ private struct SearchSetupSections: View {
     /// typing in it. So this is re-evaluated on appear and when the field gives
     /// up focus — never on each keystroke.
     @State private var showsGetKeyPath = true
-    /// Result of the last real request to brave, or nil before one has run.
-    @State private var check: BraveWebSearchTool.KeyCheck?
-    @State private var checking = false
+    @State private var keyCheck = BraveKeyCheckRun()
     @Binding var key: String
     @Binding var enabled: Bool
     @Binding var showKey: Bool
@@ -128,7 +126,7 @@ private struct SearchSetupSections: View {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("the model looks things up on its own initiative")
-                        .font(.system(size: 20, weight: .semibold))
+                        .scaledFont(size: 20, weight: .semibold)
                     // THE MODEL DECIDES. teemoon does not pre-fetch results for
                     // every message — the web_search tool is offered, and the
                     // model calls it with its own query when it judges that it
@@ -175,7 +173,7 @@ private struct SearchSetupSections: View {
                     // and the benchmark claims floating around ("94.1% on
                     // SimpleQA") belong to Answers, not to this.
                     Text("when it needs more information, it calls brave's llm context api and receives the extracted page content — not just links. nothing is fetched unless the model decides it needs it.")
-                        .font(.system(size: 14))
+                        .scaledFont(size: 14)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -213,7 +211,7 @@ private struct SearchSetupSections: View {
                             // and this one asks for a card, so the destination
                             // should be legible before the tap, not after.
                             Text("brave.com/search/api")
-                                .font(.system(size: 16, weight: .semibold))
+                                .scaledFont(size: 16, weight: .semibold)
                                 // R1: this row is the accent-carrying action on
                                 // the screen, so it states its own colour.
                                 .foregroundStyle(Color.accentColor)
@@ -221,12 +219,12 @@ private struct SearchSetupSections: View {
                             // orphaned onto the second line. "on file" was the
                             // droppable one — a card IS on file once given.
                             Text("get a key · account and a card · a few minutes")
-                                .font(.system(size: 13))
+                                .scaledFont(size: 13)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
                         Image(systemName: "arrow.up.right")
-                            .font(.system(size: 13, weight: .semibold))
+                            .scaledFont(size: 13, weight: .semibold)
                             .foregroundStyle(Color.accentColor)
                     }
                 }
@@ -257,26 +255,26 @@ private struct SearchSetupSections: View {
                 .submitLabel(.done)
                 .onSubmit { editingKey = false }
 
-            if checking {
+            if keyCheck.checking {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("checking with brave…")
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .foregroundStyle(.secondary)
                 }
-            } else if let check, check != .valid {
+            } else if let check = keyCheck.result, check != .valid {
                 Label {
                     Text(KeyCheckCopy.message(for: check))
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: KeyCheckCopy.icon(for: check))
                         .foregroundStyle(KeyCheckCopy.tint(for: check))
                 }
                 .foregroundStyle(.secondary)
-            } else if check == .valid {
+            } else if keyCheck.result == .valid {
                 Label("brave accepted this key", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 13))
+                    .scaledFont(size: 13)
                     .foregroundStyle(.secondary)
                     .symbolRenderingMode(.multicolor)
             }
@@ -289,19 +287,16 @@ private struct SearchSetupSections: View {
             Text("stored in the keychain on this device — not synced, so a new phone means doing this again. brave sees the search terms, never your conversation.")
         }
         .onAppear { showsGetKeyPath = key.isEmpty }
+        .onChange(of: key) { keyCheck.keyEdited() }
         .onChange(of: editingKey) { _, focused in
             // CHECK ON RELEASE, never per keystroke — a check per character
             // would spend a real search on every letter of a 40-character key.
             guard !focused, !key.isEmpty else { return }
+            let key = key
             Task {
-                checking = true
-                check = await BraveWebSearchTool.checkKey(key)
-                checking = false
-                // Only a key brave ACCEPTED turns search on by itself. Out of
-                // credit is still a real key worth keeping, but silently
-                // enabling it would light the chip on a thing that cannot
-                // search today.
-                if check == .valid { enabled = true }
+                // Only a key brave ACCEPTED turns search on by itself; out of
+                // credit is kept but must not light the chip.
+                if await keyCheck.check(key) == .valid { enabled = true }
             }
         }
         .onChange(of: editingKey) { _, focused in
@@ -487,7 +482,7 @@ private struct PreviewShell: View {
                 Section {
                     Label {
                         Text(KeyCheckCopy.message(for: outcome))
-                            .font(.system(size: 13))
+                            .scaledFont(size: 13)
                             .fixedSize(horizontal: false, vertical: true)
                     } icon: {
                         Image(systemName: KeyCheckCopy.icon(for: outcome))

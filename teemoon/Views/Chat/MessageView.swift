@@ -35,7 +35,51 @@ final class CacheEntry<T> {
 
 // MARK: - MessageView
 
+/// The words for a reply row's marker and mark (approved 2026-11-06). Ids live in reply-machine.json.
+enum ReplyMarkerWords {
+    static func marker(of message: Message) -> ReplyMarker? {
+        guard message.role == .assistant else { return nil }
+        return ReplyStatus.reloadMarker(message.statusRaw.flatMap(ReplyStatus.init(rawValue:)))
+    }
+
+    static func line(_ marker: ReplyMarker) -> String {
+        switch marker {
+        case .didntFinish: "this reply didn't finish."
+        case .stopped: "you stopped this reply."
+        case .cutShort: "this reply was cut short."
+        case .decryptFailed: "this reply couldn't be decrypted, so it isn't shown."
+        }
+    }
+
+    static func line(_ mark: SentBeforeConfirmed.Mark) -> String {
+        switch mark {
+        case .sentWhileChecking: "sent while near.ai's hardware was still being checked"
+        case .checkFailedAfterSend: "near.ai's hardware failed its check after this was sent. treat this reply as not private."
+        }
+    }
+
+    /// The failed-after-send mark is a hard failure: the trust screens' red. Everything else stays secondary.
+    static func color(of mark: SentBeforeConfirmed.Mark) -> Color {
+        mark == .checkFailedAfterSend ? .red : .secondary
+    }
+
+    /// The answer text to draw, or nil when there is none (a row that keeps no text draws no empty block).
+    static func answerToDraw(_ answer: String?) -> String? {
+        guard let answer, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return answer
+    }
+
+    /// The retry control's word, in the accent colour after the didn't-finish line (as Android has it).
+    static let retry = "retry"
+
+    /// Retry is offered only on a didn't-finish marker, and only on the newest reply.
+    static func offersRetry(_ message: Message, isNewest: Bool) -> Bool {
+        isNewest && marker(of: message) == .didntFinish
+    }
+}
+
 struct MessageView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var collapsed = true
     let message: Message
     let isLLMRunning: Bool
@@ -44,23 +88,14 @@ struct MessageView: View {
     var onThinkHarder: (() -> Void)? = nil
     var thinkHarderAvailable: () -> Bool = { true }
 
-    // MARK: - Cached thinking-content parse (persisted messages only)
+    // MARK: - Cached thinking-content parse
     //
-    // ONCE PER MESSAGE, NOT ONCE PER APPEARANCE.
-    //
-    // These used to be `@State` filled from `onAppear`. That was free while the
-    // transcript was a plain VStack, because a row appeared exactly once — but
-    // the transcript is a LazyVStack now, so a row is torn down when it leaves
-    // the viewport and rebuilt with fresh (empty) @State when it comes back.
-    // Per-appearance parsing turns every scroll-back into a re-parse of the
-    // whole message and is precisely the hitch a lazy stack is supposed to
-    // remove. A process-wide cache keyed on the message id fixes that: a
-    // persisted message's content never changes, so the id is a complete key.
-    //
-    // NSCache, like `_attrCache` below, so it evicts under memory pressure
-    // rather than growing with the session.
+    // Once per message text, not per appearance. A reply row is saved empty at turn start and can be drawn then, so
+    // a hit counts only while the text it parsed is still the message's text (ReplyParseCacheTests).
 
-    private struct ThinkParse {
+    struct ThinkParse {
+        /// The text this was parsed from.
+        let source: String
         let thinking: String?
         let answer: String?
         /// True when the `<think>` block was never closed. Folded in here so
@@ -79,16 +114,19 @@ struct MessageView: View {
         return cache
     }()
 
-    private var thinkParse: ThinkParse {
-        let key = message.id.uuidString as NSString
-        if let hit = Self._thinkCache.object(forKey: key) { return hit.value }
-        let (t, a) = ThinkingContentParser.parse(message.content)
+    private var thinkParse: ThinkParse { Self.thinkParse(id: message.id, content: message.content) }
+
+    static func thinkParse(id: UUID, content: String) -> ThinkParse {
+        let key = id.uuidString as NSString
+        if let hit = _thinkCache.object(forKey: key), hit.value.source == content { return hit.value }
+        let (t, a) = ThinkingContentParser.parse(content)
         let parsed = ThinkParse(
+            source: content,
             thinking: t,
             answer: a,
-            isThinking: !message.content.contains("</think>"),
-            thinkingNeedsStructuredText: t.map(Self.needsStructuredText) ?? false)
-        Self._thinkCache.setObject(CacheEntry(parsed), forKey: key)
+            isThinking: !content.contains("</think>"),
+            thinkingNeedsStructuredText: t.map(needsStructuredText) ?? false)
+        _thinkCache.setObject(CacheEntry(parsed), forKey: key)
         return parsed
     }
 
@@ -227,11 +265,11 @@ struct MessageView: View {
                 toggleCollapsed()
             } label: {
                 Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 12))
+                    .scaledFont(size: 12)
                     .fontWeight(.medium)
             }
 
-            Text("\(isThinking ? "thinking..." : "thought for") \(time)")
+            Text("\(isThinking ? "thinking…" : "thought for") \(time)")
                 .italic()
         }
         .buttonStyle(.borderless)
@@ -285,6 +323,8 @@ struct MessageView: View {
                                                               structured: parse.thinkingNeedsStructuredText)
                                             .foregroundStyle(.secondary)
                                     }
+                                    // The Capsule takes any height offered; without this the text centres in it.
+                                    .fixedSize(horizontal: false, vertical: true)
                                     .padding(.leading, 5)
                                 }
                             }
@@ -296,14 +336,45 @@ struct MessageView: View {
                     }
 
                     let sources = message.groundingSources
-                    if let afterThink {
-                        let hasSources = thinking == nil && !sources.isEmpty
+                    if let afterThink = ReplyMarkerWords.answerToDraw(afterThink) {
+                        let hasSources = !sources.isEmpty
                         renderedAssistantText(afterThink, cacheKeySuffix: "c", structured: true)
                             .padding(.bottom, hasSources ? 12 : 0)
                     }
 
-                    if thinking == nil, !sources.isEmpty {
+                    if !sources.isEmpty {
+                        // Fades and grows in when sources arrive (motion audit #8). The animation rides the transition:
+                        // not on appear (a recycled cell replays it), not on the body (that moved the text). RM: fade.
                         SourceStackChipView(sources: sources)
+                            .transition(Motion.grow(from: 0.95, anchor: .leading, reduceMotion: reduceMotion)
+                                .animation(Motion.fade))
+                    }
+
+                    if let marker = ReplyMarkerWords.marker(of: message) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(ReplyMarkerWords.line(marker))
+                                .accessibilityIdentifier("chat.replyMarker")
+                            if marker == .didntFinish, let onRetry {
+                                Button(action: onRetry) {
+                                    // Scales with the line; the frame keeps a 44 pt target at every text size.
+                                    Text(ReplyMarkerWords.retry)
+                                        .foregroundStyle(Color.accentColor)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                        .contentShape(.rect)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("retry")
+                                .accessibilityIdentifier("chat.replyRetry")
+                            }
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    }
+                    if let mark = SentBeforeConfirmed.mark(message.sentBeforeConfirmed) {
+                        Text(ReplyMarkerWords.line(mark))
+                            .font(.footnote)
+                            .foregroundStyle(ReplyMarkerWords.color(of: mark))
+                            .accessibilityIdentifier("chat.replyMark")
                     }
 
                 }
@@ -319,6 +390,13 @@ struct MessageView: View {
                 }
                 #endif
             } else {
+                VStack(alignment: .trailing, spacing: 6) {
+                let images = ImageAttachment.images(of: message)
+                if !images.isEmpty {
+                    MessageImagesRow(images: images)
+                        .padding(.leading, 48)
+                }
+                if !message.content.isEmpty {
                 Text(message.content)
                 #if os(iOS) || os(visionOS)
                     .padding(.horizontal, 16)
@@ -337,9 +415,9 @@ struct MessageView: View {
                         if onRetry != nil {
                             Button { onRetry?() } label: {
                                 Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 8, weight: .semibold))
+                                    .scaledFont(size: 8, weight: .semibold, relativeTo: .caption2)
                                     .foregroundStyle(.secondary)
-                                    .frame(width: 16, height: 16)
+                                    .glyphColumn(16, relativeTo: .caption2, square: true)
                                     .background(Self.platformBackgroundColor, in: Circle())
                                     .overlay(Circle().stroke(Color.secondary.opacity(0.4), lineWidth: 1))
                             }
@@ -351,7 +429,8 @@ struct MessageView: View {
                             .transition(.opacity)
                         }
                     }
-                    .animation(.easeIn(duration: 0.4), value: onRetry != nil)
+                    // Ease-out: an entrance decelerates (motion audit #6; it was ease-in 0.4).
+                    .animation(Motion.fade, value: onRetry != nil)
                     .contextMenu {
                         Button {
                             #if os(iOS) || os(visionOS)
@@ -365,6 +444,8 @@ struct MessageView: View {
                         }
                     }
                     .padding(.leading, 48)
+                }
+                }
             }
         }
         .onAppear {
@@ -414,4 +495,3 @@ struct MessageView: View {
             .padding()
     }
 }
-

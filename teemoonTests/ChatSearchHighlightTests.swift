@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import teemoon
 
@@ -74,5 +75,27 @@ struct ChatSearchHighlightTests {
     @Test func attributed_plainSnippetHasNoEmphasis() {
         let result = ChatSearchHighlight.attributed("nothing matched here")
         #expect(result.runs.allSatisfy { $0.inlinePresentationIntent != .stronglyEmphasized })
+        #expect(result.runs.allSatisfy { $0.attributes[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] == nil })
+    }
+
+    /// the maintainer 2026-11-12 ("yes to the search match change"): matched words are bold in the primary label colour, no
+    /// tint, in titles and snippets; the rest of a snippet keeps its secondary colour.
+    @Test func attributed_matchedRunsArePrimaryAndBoldNeverTheTint() {
+        let result = ChatSearchHighlight.attributed("the \(open)kettle\(close) broke")
+        let primary = result.runs.filter { $0.attributes[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] == .primary }
+            .map { String(result[$0.range].characters) }
+        #expect(primary == ["kettle"])
+        #expect(result.runs.allSatisfy { $0.attributes[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] != .orange },
+                "a match took the tint")
+        let bold = result.runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }
+            .map { String(result[$0.range].characters) }
+        #expect(bold == ["kettle"])
+    }
+
+    /// the maintainer 2026-11-12: titles are semibold, so a bold title match showed nothing. In search results the title is
+    /// regular and only its matched words are bold; outside search, titles stay semibold.
+    @Test func searchResultTitlesAreRegularSoTheirMatchesShow() {
+        #expect(ChatSearchHighlight.titleWeight(isSearchResult: true) == .regular)
+        #expect(ChatSearchHighlight.titleWeight(isSearchResult: false) == .semibold)
     }
 }

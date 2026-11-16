@@ -10,9 +10,30 @@
 
 import CryptoKit
 import Foundation
+import os
 import TDXQuoteVerifier
 
 // MARK: - Data model
+
+/// Remembers one manifest's SHA-256 so repeated reads don't re-hash it. Don't make it per-read state again:
+/// `attestationState` reads `codeIdentityVerified` several times per view body.
+final class ComposeDigest: Sendable {
+    private let hash: @Sendable (String) -> String
+    private let memo = OSAllocatedUnfairLock<(manifest: String, hex: String)?>(initialState: nil)
+
+    init(hash: @escaping @Sendable (String) -> String = ComposeDigest.sha256Hex) { self.hash = hash }
+
+    func hex(of manifest: String) -> String {
+        if let hit = memo.withLock({ $0 }), hit.manifest == manifest { return hit.hex }
+        let hex = hash(manifest)
+        memo.withLock { $0 = (manifest, hex) }
+        return hex
+    }
+
+    static func sha256Hex(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
 
 /// Cryptographic attestation data returned by the near.ai attestation endpoint.
 struct AttestationRecord {
@@ -67,8 +88,8 @@ struct AttestationRecord {
     var modelPreviouslyDeployedAt: String? = nil
 
     /// One expert-sheet caption line for the model enclave's deployment
-    /// recency: "config deployed 2026-07-16 · previous 2026-07-12 · per the
-    /// signed action log". Dates only (the log carries nanoseconds; the value
+    /// recency: "config deployed 2026-07-16 · previous 2026-07-12"; the view adds
+    /// `TrustScopeText.deploymentSuffix`. Dates only (the log carries nanoseconds; the value
     /// here is recency and cadence, not the wall-clock instant). nil when the
     /// action log carried no timestamps.
     var deploymentCaption: String? {
@@ -77,7 +98,7 @@ struct AttestationRecord {
         if let prev = modelPreviouslyDeployedAt, prev.count >= 10 {
             line += " · previous \(prev.prefix(10))"
         }
-        return line + " · per the signed action log"
+        return line
     }
     /// Ethereum-style address of the gateway TEE signing key (gateway_attestation.signing_address).
     /// Used when inference goes through the gateway router.
@@ -104,6 +125,26 @@ struct AttestationRecord {
     /// provider — making stale-model display structurally impossible,
     /// independent of which refresh trigger or task race slips through.
     var model: String? = nil
+    /// The GPU node's report as served: trust scope (a)(b) check its compose-manager quote and boot log.
+    var gpuNodeReportJSON: Data? = nil
+    /// The model node's host the report came from: the chat path is resolved for this host.
+    var gpuNodeHost: String? = nil
+    /// The report_data each leg's JSON advertises beside its quote; DCAPService fails a quote whose own differs.
+    var gatewayAdvertisedReportData: String? = nil
+    var modelAdvertisedReportData: String? = nil
+    var gpuAdvertisedReportData: String? = nil
+    /// The model leg's measured compose (its info.tcb_info.app_compose), read from the attestation its quote came from.
+    var modelComposeManifest: String? = nil
+    /// Holds SHA-256 of `composeManifest` once worked out; copies of the record share it.
+    var composeDigest = ComposeDigest()
+    var modelComposeDigest = ComposeDigest()
+    var gpuNodeComposeDigest = ComposeDigest()
+
+    /// Lowercase hex SHA-256 of `composeManifest`, hashed once per record.
+    var composeManifestSHA256: String? {
+        guard let manifest = composeManifest, !manifest.isEmpty else { return nil }
+        return composeDigest.hex(of: manifest)
+    }
 
     /// Whether the gateway signing address is cryptographically bound to the TDX quote's report_data.
     ///
@@ -123,7 +164,7 @@ struct AttestationRecord {
         return reportData.prefix(20) == addrBytes
     }
 
-    /// Same binding for the model node's ECDSA address against the GPU-leg quote.
+    /// Same binding for the model node's ECDSA address against the GPU-leg quote, which must itself verify.
     /// The report's `signing_address` JSON field alone proves nothing.
     var gpuSigningKeyBoundToHardware: Bool? {
         guard let qv = gpuQuoteVerification,
@@ -131,12 +172,18 @@ struct AttestationRecord {
         let addrHex = addr.hasPrefix("0x") ? String(addr.dropFirst(2)) : addr
         guard let addrBytes = try? Data(hexString: addrHex), addrBytes.count == 20,
               qv.measurements.reportData.count >= 20 else { return false }
-        return qv.measurements.reportData.prefix(20) == addrBytes
+        return qv.measurements.reportData.prefix(20) == addrBytes && qv.isVerified
     }
 
-    /// Whether the E2EE Ed25519 key is cryptographically bound to the model TEE's TDX quote.
-    /// Checks that the key appears in the first 32 bytes of the model quote's report_data.
+    /// Whether the E2EE Ed25519 key is cryptographically bound to the model TEE's TDX quote: the key is in the
+    /// first 32 bytes of report_data AND the quote verified. A key in a quote that didn't verify is not bound (T6).
     var e2eeKeyBoundToModelTEE: Bool? {
+        guard let inReportData = e2eeKeyInModelReportData else { return nil }
+        return inReportData && modelQuoteVerification?.isVerified == true
+    }
+
+    /// Only that the key bytes appear in the model quote's report_data, whether or not the quote verified.
+    var e2eeKeyInModelReportData: Bool? {
         guard let mqv = modelQuoteVerification,
               let key = modelEd25519PubKey, key.count == 32 else { return nil }
         let reportData = mqv.measurements.reportData
@@ -144,31 +191,27 @@ struct AttestationRecord {
         return reportData.prefix(32) == key
     }
 
-    /// Whether the code the gateway enclave actually booted matches the manifest
-    /// we were shown — i.e. the "running code" binding.
-    ///
-    /// Two links, both required:
-    ///  1. `SHA256(app_compose) == compose_hash` — the displayed manifest hashes
-    ///     to the reported compose hash (manifest integrity).
-    ///  2. `mr_config == "01" ‖ compose_hash` — the gateway quote's MRCONFIGID
-    ///     register commits to that hash, proving the enclave booted *this*
-    ///     manifest and not a substituted one (dstack tags MRCONFIGID with a
-    ///     leading `01` version byte; near.ai's own verifier checks the same).
-    ///
-    /// nil when the inputs aren't present (no manifest / hash / gateway quote).
-    /// This binding is only as strong as the quote it reads MRCONFIGID from —
-    /// full strength requires real DCAP quote verification. It does NOT verify that the
-    /// manifest's image digests came from near.ai's source — that is the
-    /// separate provenance check.
+    /// The booted code is the manifest shown: SHA256(app_compose) == compose_hash and mr_config == 01 ‖ compose_hash on
+    /// the gateway, and every model-node quote commits to the compose it served. Never drop the model nodes from this.
     var codeIdentityVerified: Bool? {
+        if modelNodesBootedTheirCompose == false { return false }
         guard let manifest = composeManifest, !manifest.isEmpty,
               !composeHash.isEmpty,
               let qv = quoteVerification else { return nil }
-        let computed = SHA256.hash(data: Data(manifest.utf8))
-            .map { String(format: "%02x", $0) }.joined()
-        guard computed == composeHash.lowercased() else { return false }
-        let expectedPrefix = "01" + composeHash.lowercased()
-        return qv.measurements.mrConfigID.hexString.lowercased().hasPrefix(expectedPrefix)
+        guard composeDigest.hex(of: manifest) == composeHash.lowercased() else { return false }
+        return QuoteChecks.mrConfigCommits(qv.measurements.mrConfigID, toComposeSHA256: composeHash)
+    }
+
+    /// The model leg's and the GPU node's quotes each commit to their own app_compose (dstack MRCONFIGID);
+    /// nil when neither has a quote and a compose to compare.
+    var modelNodesBootedTheirCompose: Bool? {
+        func binds(_ qv: TDXVerificationResult?, _ manifest: String?, _ digest: ComposeDigest) -> Bool? {
+            guard let qv, let manifest, !manifest.isEmpty else { return nil }
+            return QuoteChecks.mrConfigCommits(qv.measurements.mrConfigID, toComposeSHA256: digest.hex(of: manifest))
+        }
+        let legs = [binds(modelQuoteVerification, modelComposeManifest, modelComposeDigest),
+                    binds(gpuQuoteVerification, gpuNodeComposeManifest, gpuNodeComposeDigest)].compactMap { $0 }
+        return legs.isEmpty ? nil : legs.allSatisfy { $0 }
     }
 
     /// Whether every fetched quote echoes the nonce teemoon sent with its

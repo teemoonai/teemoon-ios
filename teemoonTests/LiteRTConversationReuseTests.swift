@@ -110,4 +110,14 @@ struct LiteRTConversationReuseTests {
         let bare = Self.history + [Turn(role: "user", text: "how are you?"), Turn(role: "assistant", text: "Well.")]
         #expect(!LiteRTConversationReuse.canReuse(Self.kept(), systemMessage: Self.persona, toolNames: ["web_search"], history: bare))
     }
+
+    /// LiteRT's time to first token is one value per conversation (no per-turn index in the
+    /// binding), so under reuse it stays at turn 1's; Android saw 1.29 s / 0.24 s on all 5 reused
+    /// turns (69ac421). The rates are read at the last turn's index and do move.
+    @Test func theBenchLineCarriesOnlyPerTurnFigures() {
+        let line = LiteRTTransport.benchNote(EngineTimings(prefillTokens: 19, prefillRate: 610, decodeRate: 52.4),
+                                             decodeTokens: 120)
+        #expect(line == "[litert] bench prefill=19tok (610tok/s) decode=120tok (52tok/s)")
+        #expect(!line.contains("ttft"))
+    }
 }

@@ -83,7 +83,7 @@ final class ActivityChipUITests: XCTestCase {
         app.launchEnvironment[seed.key] = seed.value
         app.launch()
 
-        let composer = app.textFields["chat.composer"].firstMatch
+        let composer = app.textViews["chat.composer"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30), "composer never appeared")
         if !composer.isHittable { app.swipeUp() }
         composer.tap()

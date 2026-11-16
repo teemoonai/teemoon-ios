@@ -87,6 +87,8 @@ actor EndpointDirectory {
         guard let (data, response) = try? await session.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let parsed = Self.parseDirectory(data), !parsed.isEmpty else {
+            // A refresh cancelled by a model switch is not a failure: the next one must still ask.
+            if Task.isCancelled { return }
             logger.warning("[endpoints] directory unavailable — using \(self.cache.isEmpty ? "no" : "cached/persisted", privacy: .public) hosts")
             lastFailure = Date()
             return

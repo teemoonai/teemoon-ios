@@ -68,7 +68,7 @@ struct NodeEgressSection: View {
                 // Outlined, not filled: the filled register belongs to the
                 // verdict badge — one card never shouts twice.
                 Text(f.severity == "medium" ? "med" : f.severity)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .scaledFont(size: 9, weight: .bold, design: .monospaced)
                     .textCase(.uppercase)
                     .padding(.horizontal, 4).padding(.vertical, 1.5)
                     .overlay(RoundedRectangle(cornerRadius: 4)

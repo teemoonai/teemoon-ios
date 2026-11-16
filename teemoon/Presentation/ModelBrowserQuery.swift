@@ -126,13 +126,14 @@ extension ModelBrowserListing {
 
     /// `tiered` marks a catalogue whose models carry a trust tier (near.ai).
     /// `allowsCustomID` offers the typed text as a model id when nothing
-    /// matches — never for near.ai, where an unknown id is treated as own-fleet
-    /// and would claim an encryption teemoon cannot check.
+    /// matches — never for near.ai, where a typed id is a model teemoon cannot
+    /// check: near.ai's catalogue, not the user, decides its tier.
     init(models: [KnownModel],
          query: ModelBrowserQuery,
          tiered: Bool,
          selectedID: String = "",
          allowsCustomID: Bool = false,
+         carried: ModelBrowserQuery.Filter = [],
          tier: @escaping (String) -> NearAIModelCatalog.Confidentiality? = {
              NearAIModelCatalog.confidentiality(forID: $0)
          }) {
@@ -141,7 +142,8 @@ extension ModelBrowserListing {
         let offeredSorts = Self.sorts(for: models)
         let offeredFilters = Self.filters(for: models, tiered: tiered, tier: tierOf)
         let sort = offeredSorts.contains(query.sort) ? query.sort : .recommended
-        let filters = query.filters.intersection(offeredFilters.reduce(into: ModelBrowserQuery.Filter()) {
+        // A filter carried in from the where sheet stays on (and in the menu) even where this list wouldn't offer it.
+        let filters = query.filters.intersection(offeredFilters.reduce(into: carried) {
             $0.insert($1)
         })
 
@@ -162,7 +164,7 @@ extension ModelBrowserListing {
             // Trust is the resting structure for near.ai: what teemoon can seal,
             // then what near.ai attests elsewhere, then plain proxies. The tag
             // is left off the rows because the header above them says it.
-            sections = [NearAIModelCatalog.Confidentiality.teeOwn, .teeThirdParty, .proxied]
+            sections = NearAIModelCatalog.Confidentiality.displayOrder
                 .compactMap { want in
                     let rows = ordered.filter { tierOf($0) == want }
                     guard !rows.isEmpty else { return nil }
@@ -181,7 +183,7 @@ extension ModelBrowserListing {
         shown = ordered.count
         total = models.count
         sorts = offeredSorts
-        self.filters = offeredFilters
+        self.filters = ModelBrowserQuery.Filter.all.filter { offeredFilters.contains($0) || carried.contains($0) }
         effectiveSort = sort
         activeSummary = filters.isEmpty ? nil
             : ModelBrowserQuery.Filter.all.filter { filters.contains($0) }

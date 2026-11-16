@@ -45,9 +45,13 @@ extension View {
             ),
             presenting: request.wrappedValue
         ) { pending in
-            Button("download now") { start(pending.model, .any) }
-            Button("wait for wi-fi") { start(pending.model, .wifiOnly) }
-            Button("cancel", role: .cancel) {}
+            ForEach(CellularDownloadChoice.allCases, id: \.label) { choice in
+                switch choice {
+                case .downloadNow: Button(choice.label) { start(pending.model, .any) }
+                case .waitForWiFi: Button(choice.label) { start(pending.model, .wifiOnly) }
+                case .notNow: Button(choice.label, role: .cancel) {}
+                }
+            }
         } message: { pending in
             Text(CellularDownloadGate.message(for: pending.reason, model: pending.model))
         }

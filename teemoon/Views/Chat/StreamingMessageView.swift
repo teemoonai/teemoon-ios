@@ -27,6 +27,7 @@ struct StreamingMessageView: View {
     @State private var isStillThinking = false
     @State private var stallTimer: Task<Void, Never>?
     @State private var isStalled = false
+    @State private var stall = StallIndicator(at: .now)
     #if DEBUG
     /// `-scrollTrace` only: samples the pipeline flags every 250ms so a stall
     /// window has state inside it, not just a gap. See `StreamTrace.record`.
@@ -34,19 +35,13 @@ struct StreamingMessageView: View {
     #endif
 
     @ViewBuilder
-    private func renderedText(_ content: String) -> some View {
+    private func renderedText(_ content: String, fading: String? = nil) -> some View {
         // Split rather than one StructuredText: blocks that are already finished
         // keep their SwiftUI identity and stop re-parsing and re-laying-out on
         // every pacer tick. See StreamingMarkdownView.
-        StreamingMarkdownView(content: content)
+        StreamingMarkdownView(content: content, fadingText: fading)
     }
 
-    private var thinkingTimeLabel: String {
-        if isStillThinking {
-            return llm.elapsedTime.map { "(\($0.formatted))" } ?? ""
-        }
-        return llm.thinkingTime?.formatted ?? "0s"
-    }
 
     private func updateThinkingParse() {
         let output = pacer.text
@@ -58,14 +53,15 @@ struct StreamingMessageView: View {
         let (t, a) = ThinkingContentParser.parse(output)
         parsedThinking = t
         parsedAfterThink = a
-        let stillThinking = t != nil && a == nil
+        let stillThinking = ThinkingClock.isStillThinking(output)
         if stillThinking != isStillThinking {
             isStillThinking = stillThinking
             llm.isThinking = stillThinking
-            if !stillThinking, llm.thinkingTime == nil {
-                llm.thinkingTime = llm.elapsedTime
-            }
         }
+    }
+
+    private var fadingText: String? {
+        pacer.fadeFrom.map { String(pacer.text.dropFirst($0)).trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
     private func chipState(at now: Date) -> GenerationActivityChipView.ActivityState {
@@ -78,6 +74,7 @@ struct StreamingMessageView: View {
         if let wait = llm.providerWait, wait.shownSeconds(at: now) != nil {
             return .waitingForProvider(wait.providerName)
         }
+        if let line = llm.engineLoadLine(at: now) { return .loadingModel(line) }
         return llm.superseding.isActive ? .thinkingHarder : .thinking
     }
 
@@ -129,13 +126,15 @@ struct StreamingMessageView: View {
         hasText && (stalled || executingTools || awaitingModel)
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if pacer.text.isEmpty {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     chip(at: context.date)
                 }
-                .transition(.opacity.combined(with: .scale(0.95, anchor: .leading)))
+                .transition(Motion.grow(from: 0.95, anchor: .leading, reduceMotion: reduceMotion))
             }
 
             if !pacer.text.isEmpty {
@@ -145,11 +144,16 @@ struct StreamingMessageView: View {
                             HStack {
                                 Button { collapsed.toggle() } label: {
                                     Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                                        .font(.system(size: 12))
+                                        .scaledFont(size: 12)
                                         .fontWeight(.medium)
                                 }
-                                Text("\(isStillThinking ? "thinking..." : "thought for") \(thinkingTimeLabel)")
-                                    .italic()
+                                if isStillThinking {
+                                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                                        Text(ThinkingClock.liveLabel(elapsed: llm.elapsedTime)).italic()
+                                    }
+                                } else {
+                                    Text("thought for \((llm.thinkingTime ?? llm.elapsedTime ?? 0).formatted)").italic()
+                                }
                             }
                             .buttonStyle(.borderless)
                             .foregroundStyle(.secondary)
@@ -164,6 +168,8 @@ struct StreamingMessageView: View {
                                         .textual.textSelection(.enabled)
                                         .foregroundStyle(.secondary)
                                 }
+                                // The Capsule takes any height offered; without this the text centres in it.
+                                .fixedSize(horizontal: false, vertical: true)
                                 .padding(.leading, 5)
                             }
                         }
@@ -175,10 +181,10 @@ struct StreamingMessageView: View {
                     }
 
                     if let afterThink = parsedAfterThink {
-                        renderedText(afterThink)
+                        renderedText(afterThink, fading: fadingText)
                             .textual.textSelection(.enabled)
                     } else if parsedThinking == nil {
-                        renderedText(pacer.text)
+                        renderedText(pacer.text, fading: fadingText)
                             .textual.textSelection(.enabled)
                     }
                 }
@@ -215,7 +221,7 @@ struct StreamingMessageView: View {
                     chip(at: context.date)
                 }
                 .padding(.top, 4)
-                .transition(.opacity.combined(with: .scale(0.95, anchor: .leading)))
+                .transition(Motion.grow(from: 0.95, anchor: .leading, reduceMotion: reduceMotion))
             }
         }
         // The streaming view is hosted in a full-width box (UIKit trailing
@@ -260,24 +266,22 @@ struct StreamingMessageView: View {
         // that the chip's arrival no longer springs the layout open.
         .transaction(value: showTrailingChip) { $0.animation = nil }
         .transaction(value: pacer.text.isEmpty) { $0.animation = nil }
-        .onChange(of: pacer.text) { _, _ in
-            updateThinkingParse()
-            isStalled = false
-            restartStallTimer()
-        }
+        .onChange(of: pacer.text) { _, _ in updateThinkingParse() }
+        // The stall rule measures from the last arrival, not from what the reveal has drawn.
+        .onChange(of: pacer.arrivals) { _, _ in driveStall(textArrived: true) }
         .onChange(of: llm.isExecutingTools) { _, executing in
             if executing {
                 stallTimer?.cancel()
             } else {
-                restartStallTimer()
+                driveStall(textArrived: false)
             }
         }
         .onChange(of: llm.searchQueries) { _, _ in
         }
         .onAppear {
-            pacer.attach { llm.output }
+            pacer.attach(onDevice: { llm.turnIsOnDevice }) { llm.output }
             updateThinkingParse()
-            restartStallTimer()
+            driveStall(textArrived: false)
             #if DEBUG
             startTraceHeartbeat()
             #endif
@@ -312,36 +316,21 @@ struct StreamingMessageView: View {
     }
     #endif
 
-    /// How long the transcript may sit still before the chip says teemoon is
-    /// still working.
-    ///
-    /// WAS 3 SECONDS, and that was the last hole. `isAwaitingModel` covers a
-    /// turn that has produced nothing yet, and is cleared by its first
-    /// character — so a model that PAUSES MID-TURN, after text has already
-    /// arrived, is covered by nothing but this timer. Caught on device: a 93s
-    /// DeepSeek generation went completely static at 72.36s and the chip did
-    /// not return until 75.43s, 3.07s later, which is this delay exactly.
-    ///
-    /// 1 second because the two populations are nowhere near each other.
-    /// Sampled 507 times across that run, the screen's static periods were:
-    ///
-    ///     median 0.18s · p90 0.19s · p99 0.20s · max 0.37s · then 2.91s
-    ///
-    /// Everything below 0.4s is ordinary token cadence (0.18s is the sampler's
-    /// own interval); the next value up is the pause being fixed. 1s sits ~2.7x
-    /// above the highest normal reading with room for a slower model or link,
-    /// and well inside the 2s the UI test allows.
-    ///
-    /// A false positive here is benign: the chip says "thinking...", which is
-    /// true — the model IS working. That is why this can be tightened at all.
-    private static let stallDelay: Duration = .seconds(1)
-
-    private func restartStallTimer() {
+    /// Feeds the stall rule and sleeps until it can next change without new text.
+    private func driveStall(textArrived: Bool) {
         stallTimer?.cancel()
+        if textArrived { stall.textArrived(at: .now) } else { stall.reset(at: .now) }
+        settleStall()
+    }
+
+    private func settleStall() {
+        let shown = stall.settle(at: .now)
+        if isStalled != shown { isStalled = shown }
+        guard let deadline = stall.nextDeadline else { return }
         stallTimer = Task {
-            try? await Task.sleep(for: Self.stallDelay)
+            try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
             guard !Task.isCancelled else { return }
-            isStalled = true
+            settleStall()
         }
     }
 }

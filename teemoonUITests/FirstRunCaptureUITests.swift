@@ -22,6 +22,8 @@ import XCTest
 
 final class FirstRunCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     /// Writes into the APP's container rather than the test runner's, so one
     /// `get_app_container` call finds everything.
     private func save(_ shot: XCUIScreenshot, as name: String, app: XCUIApplication) {

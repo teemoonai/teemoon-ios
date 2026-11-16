@@ -45,6 +45,7 @@ struct RequestDebugView: View {
         if let prefill = info.prefillSummary { parts.append(prefill) }
         if let phases = info.phases?.line { parts.append(phases) }
         if let effort = info.effortLine { parts.append(effort) }
+        parts.append(contentsOf: info.imageLines)
         if let url = info.url {
             parts.append("\n--- URL ---\n\(DebugHeaderRedaction.copyURLString(url.absoluteString))")
         }
@@ -64,63 +65,98 @@ struct RequestDebugView: View {
             parts.append("\n--- Tool: \(label) · Response for LLM ---\n\(tc.result)")
         }
         if let response = info.responseBody, !response.isEmpty { parts.append("\n--- Response ---\n\(response)") }
-        return parts.joined(separator: "\n")
+        return DebugHeaderRedaction.scrubStoredSecrets(parts.joined(separator: "\n"))
+    }
+
+    private var headerGlyph: some View {
+        Image(systemName: "hammer.fill")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+    }
+
+    private var headerProvider: some View {
+        Text(info.providerName)
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(.secondary)
+    }
+
+        // The model as SENT, in the id's own spelling — `deepseek-v4-flash`,
+        // not the catalogue's `DeepSeek V4 Flash`. A debug card should print
+        // what went on the wire, and that difference is one of the things you
+        // open this card to check.
+        //
+        // Container prefix dropped (`accounts/fireworks/models/…`), because it
+        // names the hosting account and the url row above already says which
+        // host answered; kept whole it would eat the header.
+        //
+        // This row exists because the header named the provider RECORD's
+        // label, which is auto-generated as "<provider> <model>" when a key is
+        // saved and never refreshed — so it kept naming the model the key was
+        // added with, on the one surface whose job is to say what was sent.
+        // NOT on-device, where the header would print the model twice.
+        // `Provider.local` names the record after the model it wraps
+        // (`Provider.local` → `name: model.displayName`), so the first token
+        // is already "gemma 4 e2b" — and the second copy was the useless
+        // half: the repo id's tail is `-it-litert-lm`, a tuning marker plus
+        // a file format plus a runtime, middle-truncated into
+        // "gemma-4…tert-lm". `compactName` can't rescue that either; it
+        // peels build words from cloud ids and has never heard of litert.
+        //
+        // Nothing is lost — an on-device provider IS one model (they all
+        // share the literal endpoint "on-device"), the `on-device` token
+        // right after says where it ran, and the full repo id is in the
+        // request body below and in the copied text.
+    /// `idealWidth` lets the one-line layout count the id as short when choosing; laid out, it takes what is left.
+    @ViewBuilder
+    private func headerModelID(idealWidth: CGFloat?) -> some View {
+        if !info.modelID.isEmpty, info.url != nil {
+            Text(ModelCatalog.displayName(forID: info.modelID))
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(minWidth: 0, idealWidth: idealWidth, maxWidth: idealWidth == nil ? nil : .infinity,
+                       alignment: .leading)
+        }
+    }
+
+    /// "HTTP 200" (or "on-device": nothing was sent anywhere, `url == nil` is exactly the local case) and the seal.
+    private var headerStatus: some View {
+        HStack(spacing: 6) {
+            Text(info.url == nil ? "on-device" : "HTTP 200")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            if info.isE2EEActive {
+                Text("E2EE")
+                    .font(.system(.caption2, design: .monospaced, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .accessibilityIdentifier("chat.debugCard.e2ee")
+            }
+        }
+        .fixedSize()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header row
-            HStack(spacing: 6) {
-                Image(systemName: "hammer.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(info.providerName)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                // The model as SENT, in the id's own spelling — `deepseek-v4-flash`,
-                // not the catalogue's `DeepSeek V4 Flash`. A debug card should print
-                // what went on the wire, and that difference is one of the things you
-                // open this card to check.
-                //
-                // Container prefix dropped (`accounts/fireworks/models/…`), because it
-                // names the hosting account and the url row above already says which
-                // host answered; kept whole it would eat the header.
-                //
-                // This row exists because the header named the provider RECORD's
-                // label, which is auto-generated as "<provider> <model>" when a key is
-                // saved and never refreshed — so it kept naming the model the key was
-                // added with, on the one surface whose job is to say what was sent.
-                // NOT on-device, where the header would print the model twice.
-                // `Provider.local` names the record after the model it wraps
-                // (`Provider.local` → `name: model.displayName`), so the first token
-                // is already "gemma 4 e2b" — and the second copy was the useless
-                // half: the repo id's tail is `-it-litert-lm`, a tuning marker plus
-                // a file format plus a runtime, middle-truncated into
-                // "gemma-4…tert-lm". `compactName` can't rescue that either; it
-                // peels build words from cloud ids and has never heard of litert.
-                //
-                // Nothing is lost — an on-device provider IS one model (they all
-                // share the literal endpoint "on-device"), the `on-device` token
-                // right after says where it ran, and the full repo id is in the
-                // request body below and in the copied text.
-                if !info.modelID.isEmpty, info.url != nil {
-                    Text(ModelCatalog.displayName(forID: info.modelID))
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+            // Header row. Its short tokens never break; the model id gives way, truncated in the middle, and only when
+            // the tokens themselves don't fit (the largest sizes) does the row stack (Android broke "HTTP 200" a letter
+            // per line on a long near.ai id, 2026-11-13; RequestCardHeaderUITests).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    headerGlyph
+                    headerProvider.fixedSize()
+                    headerModelID(idealWidth: 60)
+                    headerStatus
                 }
-                // "HTTP 200" is a lie for on-device inference: nothing was
-                // sent anywhere. `url == nil` is exactly the local case.
-                Text(info.url == nil ? "on-device" : "HTTP 200")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                if info.isE2EEActive {
-                    Text("E2EE")
-                        .font(.system(.caption2, design: .monospaced, weight: .semibold))
-                        .foregroundStyle(.green)
-                        .accessibilityIdentifier("chat.debugCard.e2ee")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) { headerGlyph; headerProvider.fixedSize(); headerStatus }
+                    headerModelID(idealWidth: nil)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) { headerGlyph; headerProvider.lineLimit(1) }
+                    HStack(spacing: 6) { headerStatus }
+                    headerModelID(idealWidth: nil)
                 }
             }
             .padding(.horizontal, 12)
@@ -130,7 +166,7 @@ struct RequestDebugView: View {
                 InlineDebugRow(label: "url", value: url.absoluteString, scrollable: true)
             }
             if let timing = info.cardTimingLine {
-                Divider().padding(.leading, 12)
+                Divider().padding(.horizontal, 12)
                 // Timing chain, then effort and cache (the maintainer). It wraps to a second line
                 // rather than truncating. ON-DEVICE the speed row leads in the SAME Text,
                 // so both rows share one scale.
@@ -155,11 +191,26 @@ struct RequestDebugView: View {
                         .padding(.bottom, 6)
                 }
             }
+            if !info.imageLines.isEmpty {
+                Divider().padding(.horizontal, 12)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(info.imageLines, id: \.self) { line in
+                        Label(line, systemImage: "photo.badge.exclamationmark")
+                            .font(.system(.caption2, design: .monospaced))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .accessibilityIdentifier("chat.debugCard.images")
+            }
             // Loud, and above the request: the answer above this card may be a
             // reply to a question the server threw away, and nothing else on
             // screen would say so.
             if let budget = info.promptBudget, budget.looksTruncated {
-                Divider().padding(.leading, 12)
+                Divider().padding(.horizontal, 12)
                 VStack(alignment: .leading, spacing: 2) {
                     Label("context truncated", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(.caption2, design: .monospaced, weight: .semibold))
@@ -223,7 +274,7 @@ struct RequestDebugView: View {
                 NSPasteboard.general.setString(debugText, forType: .string)
                 #endif
             } label: {
-                Label("Copy Debug Info", systemImage: "square.on.square")
+                Label("copy debug info", systemImage: "square.on.square")
             }
         }
     }

@@ -98,9 +98,8 @@ extension AttestationSummary {
 
     private func rollup(_ steps: [RunStep]) -> SectionResult {
         if steps.contains(where: { $0.status == .fail }) { return .failed }
-        if steps.contains(where: { $0.status == .running }) { return .running }
+        if steps.contains(where: { $0.status == .running || $0.status == .pending }) { return .running }
         if steps.contains(where: { $0.status == .flag }) { return .flagged }
-        if steps.allSatisfy({ $0.status == .pending }) { return .running }
         return .passed
     }
 
@@ -133,6 +132,7 @@ extension AttestationSummary {
             // dcapVerification.hasHardFailure, a separate path).
             case .verified(let tcb, _, _):   steps.append(RunStep(label: "hardware quote", detail: "dcap-qvl → `\(tcb.rawValue)` (genuine hardware, behind on Intel platform updates)", status: .pass))
             case .failed(let why):           steps.append(RunStep(label: "hardware quote", detail: why, status: .fail))
+            case .unchecked(let why):        steps.append(RunStep(label: "hardware quote", detail: why, status: .flag))
             case .none: break
             }
         } else {
@@ -164,6 +164,7 @@ extension AttestationSummary {
             case .verified(.upToDate, _, _): steps.append(RunStep(label: "hardware quote", detail: "dcap-qvl → `UpToDate`", status: .pass))
             case .verified(let tcb, _, _):   steps.append(RunStep(label: "hardware quote", detail: "dcap-qvl → `\(tcb.rawValue)` (genuine, behind on patches)", status: .pass))
             case .failed(let why):           steps.append(RunStep(label: "hardware quote", detail: why, status: .fail))
+            case .unchecked(let why):        steps.append(RunStep(label: "hardware quote", detail: why, status: .flag))
             }
         } else {
             steps.append(RunStep(label: "hardware quote", detail: "verifying with Intel dcap-qvl…", status: .pending))
@@ -185,7 +186,7 @@ extension AttestationSummary {
             // pending
             return VerificationSection(id: "tls", command: "verify tls attestation", isExtra: false,
                 why: tlsWhy, docURL: "\(Self.docBase)/tls", result: .running,
-                steps: [RunStep(label: "checking", detail: "verifying the connection terminates in the enclave…", status: .pending)])
+                steps: [RunStep(label: "checking", detail: "checking the model node's certificate…", status: .pending)])
         }
         switch tls {
         case .notPerformed:
@@ -200,17 +201,17 @@ extension AttestationSummary {
         case .failed(let why):
             return VerificationSection(id: "tls", command: "verify tls attestation", isExtra: false,
                 why: tlsWhy, docURL: "\(Self.docBase)/tls", result: .failed,
-                steps: [RunStep(label: "connection binding", detail: why, status: .fail)])
+                steps: [RunStep(label: "model node certificate", detail: why, status: .fail)])
         case .inconclusive(let why):
             // Couldn't complete (unreachable/unparseable) — advisory, not a
             // MITM verdict. Fail-closed elsewhere, but shown orange here.
             return VerificationSection(id: "tls", command: "verify tls attestation", isExtra: false,
                 why: tlsWhy, docURL: "\(Self.docBase)/tls", result: .flagged,
-                steps: [RunStep(label: "connection binding", detail: "\(why) — could not complete", status: .flag)])
+                steps: [RunStep(label: "model node certificate", detail: "\(why) — could not complete", status: .flag)])
         }
     }
     private var tlsWhy: String {
-        "proves your encrypted connection ends inside the sealed hardware — so nothing in between (network, load balancers, near.ai’s own infra) can read it."
+        "checks that the model node's own tls certificate is the one its attestation binds. teemoon checks this on a separate connection; your chat goes through near.ai's gateway, sealed end-to-end to the model's key."
     }
 
     private var chatSection: VerificationSection? {
@@ -224,7 +225,7 @@ extension AttestationSummary {
             ]
         case .stuck:
             steps = [RunStep(label: "signature", detail: responseSigDetail, status: .fail)]
-        case .live, .pending:
+        case .live, .pending, .unchecked:
             steps = [RunStep(label: "signature", detail: "waiting for a signed response…", status: .pending)]
         }
         return VerificationSection(
@@ -256,6 +257,8 @@ extension AttestationSummary {
             steps = built
         case .stuck:
             steps = [RunStep(label: "image provenance", detail: provenanceDetail, status: .fail)]
+        case .unchecked:
+            steps = [RunStep(label: "image provenance", detail: ProvenanceUncheckedText.step, status: .flag)]
         case .live, .pending:
             steps = [RunStep(label: "image provenance", detail: "checking Sigstore / Rekor…", status: .pending)]
         }

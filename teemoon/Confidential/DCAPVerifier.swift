@@ -23,9 +23,14 @@ private let logger = Logger(subsystem: "ai.teemoon", category: "dcap")
 enum DCAPVerification: Sendable, Equatable {
     /// Quote verified; `tcbStatus` is Intel's TCB verdict ("UpToDate", "OutOfDate", …).
     case verified(tcbStatus: DCAPTcbStatus, mrConfigIdHex: String, reportDataHex: String)
+    /// Evidence against the quote: it is malformed, unsigned, chained wrong, or rejected by dcap-qvl.
     case failed(String)
+    /// Couldn't check: Intel's collateral didn't arrive or couldn't be read. Not evidence; soft
+    /// (near-send-gate-rule, the maintainer 2026-11-06).
+    case unchecked(String)
 
     var isVerified: Bool { if case .verified = self { return true }; return false }
+    var isUnchecked: Bool { if case .unchecked = self { return true }; return false }
 }
 
 /// Intel TCB status, mapped from dcap-qvl. Only `upToDate` and `outOfDate` are
@@ -79,9 +84,8 @@ struct DCAPVerifier {
         do {
             collateralJSON = try await collateral.collateralJSON(forQuote: rawQuote)
         } catch {
-            // Fail-closed, but keep the specific reason for the UI/logs.
             logger.error("[dcap] collateral unavailable: \(error)")
-            return .failed("collateral: \(error)")
+            return Self.couldntCheck(error) ? .unchecked("collateral: \(error)") : .failed("collateral: \(error)")
         }
         do {
             let report: VerifiedReport = try DcapQvl.verify(
@@ -94,6 +98,20 @@ struct DCAPVerifier {
             logger.error("[dcap] verification failed: \(error)")
             return .failed("\(error)")
         }
+    }
+
+    /// Only an outage or an unreadable PCS answer is "couldn't check". A quote dcap-qvl can't parse, or one
+    /// missing its PCK chain, is evidence and stays hard; so does anything unrecognised.
+    static func couldntCheck(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if let e = error as? CollateralHTTPError { return !e.isEvidence }
+        if let e = error as? IntelPCSCollateralProvider.CollateralError {
+            switch e {
+            case .quoteMissingPCKChain, .quoteFieldsInvalid: return false
+            case .missingHeader, .malformedResponse: return true
+            }
+        }
+        return false
     }
 
     /// Extracts mrConfigId + reportData hex from either TD report variant.

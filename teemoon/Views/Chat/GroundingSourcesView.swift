@@ -55,14 +55,15 @@ private struct SourceRowView: View {
             HStack(spacing: 8) {
                 FaviconView(domain: source.domain)
                 Text(source.domain)
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(size: 12, weight: .semibold)
                     .foregroundStyle(.primary.opacity(0.9))
+                    .layoutPriority(1)
                 if let path = pathCrumb {
                     Text("›")
-                        .font(.system(size: 12))
+                        .scaledFont(size: 12)
                         .foregroundStyle(.secondary.opacity(0.6))
                     Text(path)
-                        .font(.system(size: 12, weight: .medium))
+                        .scaledFont(size: 12, weight: .medium)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -70,15 +71,15 @@ private struct SourceRowView: View {
             }
 
             Text(source.title.isEmpty ? source.domain : source.title)
-                .font(.system(size: 15.5, weight: .semibold))
+                .scaledFont(size: 15.5, weight: .semibold)
                 .foregroundStyle(.primary)
-                .lineLimit(2)
+                .lineLimitGrowing(2)
 
             if !source.displaySnippet.isEmpty {
                 Text(source.displaySnippet)
-                    .font(.system(size: 13.5))
+                    .scaledFont(size: 13.5)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimitGrowing(2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

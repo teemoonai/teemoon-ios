@@ -65,28 +65,41 @@ struct WebSearchChip: View {
     // Explicit because `pointing` is private, which would otherwise make the
     // synthesized memberwise initializer private too and lock out every call
     // site including the previews.
-    init(state: State, pointHereToken: Int = 0, action: @escaping () -> Void) {
+    /// The composer panel's row: the glyph alone when the where chip needs the room (docs/COMPOSER_PANEL.md).
+    var iconOnly = false
+
+    init(state: State, pointHereToken: Int = 0, iconOnly: Bool = false, action: @escaping () -> Void) {
         self.state = state
         self.pointHereToken = pointHereToken
+        self.iconOnly = iconOnly
         self.action = action
     }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(size: 12, weight: .semibold)
                     .foregroundStyle(glyphColor)
-                Text(label)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(labelColor)
+                if !iconOnly {
+                    Text(label)
+                        .scaledFont(size: 14, weight: .semibold)
+                        .lineLimit(1)
+                        .foregroundStyle(labelColor)
+                }
             }
             .textCase(.lowercase)
             .padding(.horizontal, ControlMetrics.pillHorizontalPadding)
             // Matches WhereChip exactly. Two capsules of different heights on
             // one row reads as two kinds of control rather than a pair.
+            #if os(iOS)
+            // One row height at every size: the panel's items are all 34 (docs/COMPOSER_PANEL.md).
+            .frame(height: ControlMetrics.pillHeight)
+            #else
             .frame(minHeight: ControlMetrics.pillHeight)
+            #endif
             .background(
                 Capsule(style: .continuous)
                     // Scale alone was not enough twice. A tinted wash is the
@@ -105,13 +118,19 @@ struct WebSearchChip: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .dynamicTypeSize(...ControlMetrics.pillLargestTextSize)
+        // Capped above, so at the accessibility sizes a long press shows the label large instead.
+        .accessibilityShowsLargeContentViewer {
+            Image(systemName: "magnifyingglass")
+            Text(label).textCase(.lowercase)
+        }
         // 1.12, up from 1.08 — and the scale is now the SMALLER half of the
         // signal. Two rounds of tuning motion alone (0.7s then 1.6s, 1.08 both
         // times) both read as too subtle, which is the answer: a 4pt-tall chip
         // in the corner of a full screen cannot be found by size change. The
         // accent wash above is what actually catches the eye; this just keeps
         // it feeling like one gesture.
-        .scaleEffect(pointing ? 1.12 : 1)
+        .scaleEffect(pointing ? Motion.scale(1.12, reduceMotion: reduceMotion) : 1)
         .animation(.easeInOut(duration: 0.38), value: pointing)
         .onChange(of: pointHereToken) { _, newValue in
             // Ignore the initial value so a chip that appears in a thread

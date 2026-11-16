@@ -10,6 +10,8 @@
 import XCTest
 
 final class SheetDumpCaptureUITests: XCTestCase {
+
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
     func testDumpExpertSheet() throws {
         let model = ProcessInfo.processInfo.environment["SHEET_MODEL"] ?? "Qwen/Qwen3.8-27B"
         let app = XCUIApplication()

@@ -15,7 +15,7 @@ struct CloudKeyProviderPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var addingPreset: Provider?
     @State private var addingCustom = false
-    @State private var idsBeforeAdd: Set<UUID> = []
+    @State private var addWatch = AddedSetupWatch()
 
     var body: some View {
         let offered = providerStore.presetsWithoutKey()
@@ -27,14 +27,14 @@ struct CloudKeyProviderPickerView: View {
                 }
                 ForEach(offered) { preset in
                     Button {
-                        idsBeforeAdd = Set(providerStore.providers.map(\.id))
+                        addWatch.leaving(with: providerStore.providers.map(\.id))
                         addingPreset = preset
                     } label: {
                         WhereRow(
                             glyph: WhereLocality.cloud.systemImage,
                             glyphTint: Color.accentColor,
                             title: preset.name.lowercased(),
-                            showsE2EETag: preset.capabilities.contains(.endToEndEncryption),
+                            showsE2EETag: preset.claimsEndToEndEncryption,
                             caption: WhereProviderPresentation.presetCaption(for: preset),
                             captionLineLimit: 2
                         )
@@ -48,7 +48,7 @@ struct CloudKeyProviderPickerView: View {
 
             Section {
                 Button {
-                    idsBeforeAdd = Set(providerStore.providers.map(\.id))
+                    addWatch.leaving(with: providerStore.providers.map(\.id))
                     addingCustom = true
                 } label: {
                     WhereRow(
@@ -86,15 +86,9 @@ struct CloudKeyProviderPickerView: View {
         .onAppear(perform: popIfAdded)
     }
 
-    /// The form pops back here on save AND on cancel. A saved setup is the end
-    /// of this screen's job: back to the list, where the new row is. A cancel
-    /// leaves the picker up. `idsBeforeAdd` is empty on first appearance, so
-    /// nothing counts as added then.
+    /// The form pops back here on save AND on cancel; a saved setup ends this screen.
     private func popIfAdded() {
-        guard !idsBeforeAdd.isEmpty else { return }
-        let added = providerStore.providers.contains { !idsBeforeAdd.contains($0.id) }
-        idsBeforeAdd = []
-        if added { dismiss() }
+        if addWatch.returned(with: providerStore.providers.map(\.id)) { dismiss() }
     }
 }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TDXQuoteVerifier
 @testable import teemoon
 
 @Suite("EnclaveGrouping")
@@ -155,5 +156,44 @@ struct EnclaveGroupingTests {
         let both = ref("x", hosts: ["model", "gateway"])
         #expect(EnclaveGrouping.belongs(both, host: "model", primary: true))
         #expect(EnclaveGrouping.belongs(both, host: "gateway", primary: false))
+    }
+}
+
+/// Android's pending expert view showed green seals while DCAP ran: a quote signature
+/// is not the seal until DCAP (and the other hardware verdicts) settle.
+@Suite("EnclaveGrouping — seal")
+@MainActor
+struct EnclaveGroupingSealTests {
+    private func groups(pending: Bool, dcap: RecordDCAPVerification? = nil) -> [EnclaveGroup] {
+        EnclaveGrouping(
+            attestation: .preview,
+            imageProvenance: .allVerified(
+                verified: [.init(image: "nearaidev/engine", digest: String(repeating: "ab", count: 32), hosts: ["model"])],
+                thirdParty: []),
+            modelLayerManifest: nil,
+            modelLayerVerification: nil,
+            hardwarePending: pending,
+            dcapVerification: dcap
+        ).groups()
+    }
+
+    @Test func sealStaysPendingWhileHardwareVerdictsRun() {
+        let model = groups(pending: true).first { $0.primary }
+        #expect(AttestationRecord.preview.modelQuoteVerification?.isVerified == true)
+        #expect(model != nil)
+        #expect(model?.quoteVerified == nil)
+    }
+
+    @Test func sealGoesGreenOnceDCAPSettlesClean() {
+        let ok = DCAPVerification.verified(tcbStatus: .upToDate, mrConfigIdHex: "", reportDataHex: "")
+        let model = groups(pending: false, dcap: RecordDCAPVerification(gateway: ok, model: ok)).first { $0.primary }
+        #expect(model?.quoteVerified == true)
+    }
+
+    @Test func sealIsRedWhenDCAPRejectsThatEnclavesQuote() {
+        let ok = DCAPVerification.verified(tcbStatus: .upToDate, mrConfigIdHex: "", reportDataHex: "")
+        let all = groups(pending: false, dcap: RecordDCAPVerification(gateway: ok, model: .failed("bad chain")))
+        #expect(all.first { $0.primary }?.quoteVerified == false)
+        #expect(all.first { !$0.primary }?.quoteVerified != false)
     }
 }

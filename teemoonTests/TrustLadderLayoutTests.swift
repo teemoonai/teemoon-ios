@@ -88,6 +88,19 @@ final class TrustLadderLayoutTests: XCTestCase {
                        "content height depends on viewport (\(shortHeight) vs "
                        + "\(tallHeight)) — the section stack is estimating again")
     }
+
+    /// At the largest text size the whole sheet once laid out wider than the phone and was centred, cutting
+    /// every line off on the left (1.0.6 too): a one-line piece that refuses to wrap widens the column. The
+    /// sheet's scroll view still reports the window's width then, so the pieces are measured, at a 402 pt
+    /// phone's 361 pt column. MEASURED before the fix: script card 528 pt.
+    func testTheExpertSheetsOneLinePiecesFitThePhoneAtTheLargestTextSize() {
+        func width<V: View>(_ v: V) -> CGFloat {
+            UIHostingController(rootView: v.dynamicTypeSize(.accessibility5))
+                .sizeThatFits(in: CGSize(width: 361, height: 10_000)).width
+        }
+        XCTAssertLessThanOrEqual(width(TrustSeamDivider(binding: .bound)), 361, "the seam caption")
+        XCTAssertLessThanOrEqual(width(SelfVerifyScriptCard(script: "print(1)\n")), 361, "the script card's header")
+    }
 }
 
 #endif

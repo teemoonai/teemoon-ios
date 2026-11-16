@@ -58,6 +58,11 @@ struct CollateralHTTPError: Error, CustomStringConvertible {
     let status: Int
     let host: String
     let path: String
+    /// Intel refusing a request built from the quote's own fields (FMSPC, CA) is an answer about the quote: hard.
+    /// Do not widen this to other endpoints or statuses; those are outages (sendgate.json pcsStatus).
+    var isEvidence: Bool {
+        (path.hasSuffix("/tcb") || path.hasSuffix("/pckcrl")) && [400, 404, 422].contains(status)
+    }
     var description: String {
         let resource = path.split(separator: "/").last.map(String.init) ?? path
         return status < 0 ? "no response from \(host)" : "HTTP \(status) from \(host) (\(resource))"
@@ -105,6 +110,8 @@ actor IntelPCSCollateralProvider: CollateralProvider {
 
     enum CollateralError: Error, CustomStringConvertible {
         case quoteMissingPCKChain
+        /// The quote's own FMSPC or CA can't form a collateral URL: a fault in the quote, not in Intel.
+        case quoteFieldsInvalid(String)
         case missingHeader(String)
         case malformedResponse(String)
 
@@ -112,6 +119,7 @@ actor IntelPCSCollateralProvider: CollateralProvider {
             switch self {
             case .quoteMissingPCKChain:
                 return "quote does not embed a PCK certificate chain (cert_type != 5)"
+            case .quoteFieldsInvalid(let what): return "quote fields can't name collateral: \(what)"
             case .missingHeader(let name): return "PCS response missing header \(name)"
             case .malformedResponse(let what): return "malformed PCS response: \(what)"
             }
@@ -180,7 +188,7 @@ actor IntelPCSCollateralProvider: CollateralProvider {
 
     private func get(_ url: String) async throws -> (body: Data, headers: [String: String]) {
         guard let url = URL(string: url) else {
-            throw CollateralError.malformedResponse("bad URL \(url)")
+            throw CollateralError.quoteFieldsInvalid("bad URL \(url)")
         }
         return try await http.get(url)
     }

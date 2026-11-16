@@ -446,6 +446,100 @@ extension AttestationSummary {
                 except Exception:
                     return None
 
+            # The launcher's compose names its linux/amd64 CHILD; near.ai attests the OCI
+            # INDEX that lists it. The app's lookup (LauncherIndex): Docker Hub,
+            # anonymous, this one repository only; prod, latest, then newest tags.
+            LAUNCHER_REPOSITORY = "nearaidev/compose-manager-launcher"
+            LAUNCHER_FIRST_TAGS = ["prod", "latest"]
+            LAUNCHER_SCAN_CAP = 200
+            LAUNCHER_INDEX_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json"
+            # The app checks the certificate names exactly this workflow; this script
+            # reads status codes only, so it checks the builder's repository answered.
+            LAUNCHER_BUILDER = "https://github.com/nearai/compose-manager/.github/workflows/build.yml@refs/heads/master"
+            LAUNCHER_BUILDER_REPO = LAUNCHER_BUILDER.split("/.github/workflows/")[0].removeprefix("https://github.com/")
+
+            def index_lists(child, body, digest):
+                """the bytes are the index named by digest, and it lists child for linux/amd64"""
+                if hashlib.sha256(body).hexdigest() != digest:
+                    return False
+                try:
+                    index = json.loads(body)
+                except ValueError:
+                    return False
+                if not isinstance(index, dict) or index.get("mediaType") != LAUNCHER_INDEX_MEDIA_TYPE:
+                    return False
+                for m in index.get("manifests") or []:
+                    if not isinstance(m, dict):
+                        continue
+                    if (m.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
+                        continue
+                    platform = m.get("platform") or {}
+                    if (m.get("digest") == "sha256:" + child.lower() and platform.get("os") == "linux"
+                            and platform.get("architecture") == "amd64"):
+                        return True
+                return False
+
+            def launcher_index(child):
+                """(index digest, False) when a published index lists child; (None, False)
+                when none does; (None, True) when Docker Hub could not be read."""
+                registry = f"https://registry-1.docker.io/v2/{LAUNCHER_REPOSITORY}"
+                try:
+                    q = urllib.parse.urlencode({"service": "registry.docker.io",
+                                                "scope": f"repository:{LAUNCHER_REPOSITORY}:pull"})
+                    with urllib.request.urlopen(urllib.request.Request(
+                            f"https://auth.docker.io/token?{q}"), timeout=30) as resp:
+                        token = json.loads(resp.read())["token"]
+                except Exception:
+                    return None, True
+                headers = {"authorization": f"Bearer {token}", "accept": LAUNCHER_INDEX_MEDIA_TYPE}
+                tried, trouble = set(), False
+
+                def check(tag):
+                    nonlocal trouble
+                    try:
+                        req = urllib.request.Request(f"{registry}/manifests/{tag}", headers=headers, method="HEAD")
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            digest = resp.headers.get("Docker-Content-Digest") or ""
+                    except urllib.error.HTTPError as e:
+                        trouble = trouble or e.code != 404
+                        return None
+                    except Exception:
+                        trouble = True
+                        return None
+                    if not digest.startswith("sha256:"):
+                        trouble = True
+                        return None
+                    digest = digest[len("sha256:"):].lower()
+                    if digest in tried:
+                        return None
+                    tried.add(digest)
+                    try:
+                        # by digest, never by tag: the bytes must hash to what is named
+                        req = urllib.request.Request(f"{registry}/manifests/sha256:{digest}", headers=headers)
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            body = resp.read()
+                    except Exception:
+                        trouble = True
+                        return None
+                    return digest if index_lists(child, body, digest) else None
+
+                for tag in LAUNCHER_FIRST_TAGS:
+                    found = check(tag)
+                    if found:
+                        return found, False
+                try:
+                    req = urllib.request.Request(f"{registry}/tags/list", headers=headers)
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        tags = json.loads(resp.read()).get("tags") or []
+                except Exception:
+                    return None, True
+                newest = [t for t in sorted(tags, reverse=True) if t not in LAUNCHER_FIRST_TAGS]
+                for tag in newest[:LAUNCHER_SCAN_CAP]:
+                    found = check(tag)
+                    if found:
+                        return found, False
+                return None, trouble
+
             for image, d in refs:
                 repos = nearai_repos(image)
                 name = image.split("/")[-1].split(":")[0]
@@ -459,6 +553,24 @@ extension AttestationSummary {
                     status = attestation_status(repo, d)
                     if status != 404:
                         break
+                if status == 404 and name == "compose-manager-launcher":
+                    child = d
+                    index, unreachable = launcher_index(child)
+                    if unreachable:
+                        skip(f"compose-manager-launcher@{child[:12]}…: Docker Hub unavailable — no evidence either way", remedy="re-run later")
+                        continue
+                    if index:
+                        for repo in repos:
+                            status = attestation_status(repo, index)
+                            if status != 404:
+                                break
+                        if status == 200 and repo == LAUNCHER_BUILDER_REPO:
+                            checked += 1
+                            ok(f"compose-manager-launcher@{child[:12]}… is the linux/amd64 image in index {index[:12]}…, which has a build attestation on nearai/compose-manager (build.yml on master)")
+                            continue
+                    if not index or status in (200, 404):
+                        bad(f"compose-manager-launcher@{child[:12]}… has NO build attestation, and no index near.ai published lists it")
+                        continue
                 if status == 200:
                     checked += 1
                     ok(f"{name}@{d[:12]}… has a build attestation on {repo}")
@@ -476,7 +588,7 @@ extension AttestationSummary {
                     "pin provenance to")
 
             # ---- 5. tls binding ------------------------------------------------------
-            section("5. TLS binding — your HTTPS connection ends inside the enclave")
+            section("5. TLS binding — the model node's certificate is in its attestation")
             if not SESSION["direct_base"]:
                 skip("session used the gateway path; TLS attestation applies to direct "
                      "completions hosts")

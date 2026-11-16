@@ -14,6 +14,7 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(ProviderStore.self) private var providerStore
     @Environment(\.dismiss) var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var currentThread: Thread?
     /// Deep link from older call sites / UI tests — opens places & keys hub.
     @Binding var openToProviders: Bool
@@ -30,13 +31,25 @@ struct SettingsView: View {
         return n == 1 ? "1 setup" : "\(n) setups"
     }
 
+    private var placesSummaryText: some View {
+        Text(placesSummary)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .textCase(.lowercase)
+    }
+
     var body: some View {
         @Bindable var settings = settings
         NavigationStack {
             Form {
                 Section {
                     NavigationLink(destination: AppearanceSettingsView()) {
-                        Label("appearance", systemImage: "paintpalette")
+                        // one long word: at accessibility sizes it shrinks to fit rather than hyphenating
+                        Label {
+                            Text("appearance").lineLimit(1).minimumScaleFactor(0.6)
+                        } icon: {
+                            Image(systemName: "paintpalette")
+                        }
                     }
 
                     NavigationLink(destination: ChatsSettingsView(currentThread: $currentThread)) {
@@ -53,13 +66,23 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink(destination: PlacesKeysHubView()) {
-                        HStack {
-                            Label("places & keys", systemImage: "key")
-                            Spacer()
-                            Text(placesSummary)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .textCase(.lowercase)
+                        // Stacked only at accessibility sizes, where side by side breaks the words. Not
+                        // ViewThatFits: in a Form row it chose the stacked layout at default size and lost the label.
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Label {
+                                VStack(alignment: .leading) {
+                                    Text("places & keys")
+                                    placesSummaryText
+                                }
+                            } icon: {
+                                Image(systemName: "key")
+                            }
+                        } else {
+                            HStack {
+                                Label("places & keys", systemImage: "key")
+                                Spacer()
+                                placesSummaryText
+                            }
                         }
                     }
                     .accessibilityIdentifier("settings.providers")
@@ -67,7 +90,7 @@ struct SettingsView: View {
                     Text("places & keys")
                         .textCase(.lowercase)
                 } footer: {
-                    Text("manage hosts and keys here. to switch model mid-chat, use the chip above the message field.")
+                    Text(ModelChipCopy.settingsFooter)
                         .textCase(.lowercase)
                 }
 
@@ -132,7 +155,7 @@ struct SettingsView: View {
         #if !os(visionOS)
         .tint(settings.appTintColor.getColor())
         #endif
-        .environment(\.dynamicTypeSize, settings.appFontSize.getFontSize())
+        .appTextSize(settings.appFontSize)
     }
 }
 

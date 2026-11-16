@@ -176,6 +176,8 @@ final class AddEditProviderModel {
 
     var conn: ConnState = .idle
     var fetchedModels: [KnownModel] = []
+    /// The where sheet's "show only" filters, carried into this form's model rows and browser (§4e).
+    var browseFilters: ModelBrowserQuery.Filter = []
     /// Where a saved setup's list is recorded. Injected so a test can watch it.
     var catalogStore: LiveCatalogStore = .shared
     var showModelBrowser = false
@@ -420,6 +422,17 @@ final class AddEditProviderModel {
     /// the rule-chosen default — the rest live behind "all N models". Otherwise show
     /// the first few (installed ollama models, etc.).
     var recommendedModels: [KnownModel] {
+        if !browseFilters.isEmpty {
+            let tiered = browsablePreset?.id == Provider.nearAI.id
+            let matching = fetchedModels.filter {
+                ModelBrowserListing.satisfies($0, filters: browseFilters,
+                                              tier: { tiered ? NearAIModelCatalog.confidentiality(forID: $0.id) : nil })
+            }
+            if browsablePreset?.defaultModelRule != nil, let chosen = matching.first(where: { $0.id == model }) {
+                return [chosen]
+            }
+            return Array(matching.prefix(3))
+        }
         if browsablePreset?.defaultModelRule != nil {
             // Only the resolved default — no fallback, so a not-yet-resolved preset id
             // doesn't flash a different model before the rule sets it.
@@ -464,7 +477,7 @@ final class AddEditProviderModel {
 
     func probe(select preferred: String? = nil, userInitiated: Bool = false) async {
         guard let base = probeBaseURL else { return }
-        defer { hasProbed = true }
+        let endpoint = fullEndpoint
         let preset = Provider.presets.first(where: { Provider.presetMatchKey($0.endpoint) == Provider.presetMatchKey(fullEndpoint) })
         let request = EndpointProbe.Request(
             baseURL: base,
@@ -484,6 +497,9 @@ final class AddEditProviderModel {
             onAnimatedChange { self.conn = .testing }
         }
         let result = await EndpointProbe.run(request, catalog: probeCatalog)
+        // The endpoint is the run token: an answer from a server the field no longer names writes nothing.
+        guard fullEndpoint == endpoint else { return }
+        hasProbed = true
         onAnimatedChange { self.applyProbe(result) }
     }
 

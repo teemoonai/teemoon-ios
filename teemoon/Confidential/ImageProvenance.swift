@@ -82,6 +82,8 @@ enum ImageProvenance: Sendable, Equatable {
         case signatureInvalid
         case certificateChainInvalid(String)
         case identityNotTrusted(got: String)
+        /// Inside near.ai's org but not the image's own build (wrong repo, workflow or branch). Definitive, like identityNotTrusted.
+        case identityNotThisBuild(got: String)
         case digestMismatch(expected: String, got: String)
         /// Definitive: the attestation was fetched and is absent/wrong (e.g.
         /// HTTP 404 — no attestation exists for this digest). Fail-closed.
@@ -89,8 +91,11 @@ enum ImageProvenance: Sendable, Equatable {
         /// Transient: rate limit, network error, server error — no evidence
         /// either way. Callers should treat the check as inconclusive rather
         /// than failed.
-        case fetchTransient(String)
+        case fetchTransient(String, from: TransientSource = .gitHub)
     }
+
+    /// Only the wording follows the source; every source is equally inconclusive (T2b).
+    enum TransientSource: Sendable, Equatable { case gitHub, dockerHub }
 
     var isVerified: Bool { if case .verified = self { return true }; return false }
 
@@ -102,14 +107,18 @@ enum ImageProvenance: Sendable, Equatable {
         switch reason {
         case .fetchFailed:
             return "no published attestation (GitHub 404)"
-        case .fetchTransient:
+        case .fetchTransient(_, .gitHub):
             return "couldn\u{2019}t reach GitHub (rate-limited or offline)"
+        case .fetchTransient(_, .dockerHub):
+            return "couldn\u{2019}t reach Docker Hub (rate-limited or offline)"
         case .signatureInvalid:
             return "signature didn\u{2019}t verify"
         case .certificateChainInvalid:
             return "certificate didn\u{2019}t chain to Sigstore\u{2019}s roots"
         case .identityNotTrusted:
             return "signed by an identity outside near.ai\u{2019}s org"
+        case .identityNotThisBuild:
+            return "signed inside near.ai, but not by this image\u{2019}s build"
         case .digestMismatch:
             return "signed digest doesn\u{2019}t match the running image"
         case .malformedBundle:

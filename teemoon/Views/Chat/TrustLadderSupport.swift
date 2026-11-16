@@ -10,6 +10,27 @@ import SwiftUI
 
 // MARK: - Evidence card + row
 
+/// A status glyph's column. It grows with Dynamic Type; a fixed width lets the glyph run into its label.
+struct GlyphColumn: ViewModifier {
+    @ScaledMetric private var width: CGFloat
+    private let square: Bool
+
+    init(_ width: CGFloat, relativeTo style: Font.TextStyle, square: Bool) {
+        _width = ScaledMetric(wrappedValue: width, relativeTo: style)
+        self.square = square
+    }
+
+    func body(content: Content) -> some View {
+        content.frame(width: width, height: square ? width : nil)
+    }
+}
+
+extension View {
+    func glyphColumn(_ width: CGFloat, relativeTo style: Font.TextStyle, square: Bool = false) -> some View {
+        modifier(GlyphColumn(width, relativeTo: style, square: square))
+    }
+}
+
 /// One disclosed-limit row. File-scope (not a view method) so the component
 /// previews render the exact same rows the live card uses.
 func limitRow(_ title: String, _ detail: String) -> some View {
@@ -18,7 +39,7 @@ func limitRow(_ title: String, _ detail: String) -> some View {
         // of the guarantee, not problems — an alarm here would misread as
         // "something's wrong" on an otherwise-verified screen.
         Image(systemName: "minus.circle")
-            .font(.body).foregroundStyle(.secondary).frame(width: 18)
+            .font(.body).foregroundStyle(.secondary).glyphColumn(18, relativeTo: .body)
         VStack(alignment: .leading, spacing: 3) {
             Text(title).font(.callout).fontWeight(.medium)
             Text(detail).font(.footnote).foregroundStyle(.secondary)
@@ -54,7 +75,7 @@ struct EvidenceRow: View {
     var value: String? = nil
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            icon.frame(width: 18)
+            icon.glyphColumn(18, relativeTo: .body)
             VStack(alignment: .leading, spacing: 4) {
                 Text(label).font(.callout).fontWeight(.medium)
                 proofText(detail).font(.footnote).fixedSize(horizontal: false, vertical: true)
@@ -68,6 +89,7 @@ struct EvidenceRow: View {
         switch state {
         case .some(.done):  Image(systemName: "checkmark.circle.fill").foregroundStyle(teeVerified)
         case .some(.stuck): Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .some(.unchecked): Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         case .some(.live), .some(.pending), .none: ProgressView().controlSize(.small)
         }
     }
@@ -211,7 +233,7 @@ struct NodeFinding: Identifiable, Equatable {
 /// Severity order for the rollup (critical first). Unknown severities rank
 /// after info — visible at the bottom, never silently dropped.
 func severityRank(_ severity: String) -> Int {
-    switch severity {
+    switch severity.lowercased() {
     case "critical": return 0
     case "high":     return 1
     case "medium":   return 2
@@ -232,9 +254,11 @@ func splitNodeFindings(_ findings: [NodeFinding])
         .sorted { (severityRank($0.element.severity), $0.offset)
                 < (severityRank($1.element.severity), $1.offset) }
         .map(\.element)
-    let live   = sorted.filter { $0.deployed == "on" && $0.severity != "info" }
-    let latent = sorted.filter { $0.deployed != "on" && $0.severity != "info" }
-    let info   = sorted.filter { $0.severity == "info" }
+    func isOn(_ f: NodeFinding) -> Bool { f.deployed?.lowercased() == "on" }
+    func isInfo(_ f: NodeFinding) -> Bool { f.severity.lowercased() == "info" }
+    let live   = sorted.filter { isOn($0) && !isInfo($0) }
+    let latent = sorted.filter { !isOn($0) && !isInfo($0) }
+    let info   = sorted.filter(isInfo)
     return (live, latent, info)
 }
 
@@ -259,6 +283,8 @@ struct ImageEntry: Identifiable {
     }
     let id: String
     let name: String
+    /// `name` with a break opportunity after each "/", so a long name wraps at a path boundary, never mid-word.
+    var wrappingName: String { name.replacingOccurrences(of: "/", with: "/\u{200B}") }
     let kind: Kind
     var digest: String? = nil
     /// Full sha256 for the copy affordance (display stays truncated).

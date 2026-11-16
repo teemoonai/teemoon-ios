@@ -14,6 +14,8 @@ import XCTest
 
 final class ReadmeHeroCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     /// `TEST_RUNNER_README_CAPTURE_MODEL=…` on xcodebuild picks the model.
     private static var model: String {
         ProcessInfo.processInfo.environment["README_CAPTURE_MODEL"] ?? "z-ai/glm-5.3-flash"

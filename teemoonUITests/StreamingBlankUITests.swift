@@ -57,7 +57,7 @@ final class StreamingBlankUITests: XCTestCase {
         let app = try launched(turns: 200)
         let transcript = openLongThread(app)
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 30))
         composer.tap()
         composer.typeText("go")

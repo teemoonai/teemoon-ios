@@ -96,7 +96,9 @@ extension AttestationService {
                 signingAddress:    resolvedAddr,
                 quoteVerification: gpuQuoteVerification,
                 intelQuote:        report.intelQuote,
-                nonce:             nonce
+                nonce:             nonce,
+                reportJSON:        data,
+                advertisedReportData: report.reportData
             )
         }
         return nil

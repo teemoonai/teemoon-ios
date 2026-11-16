@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CryptoKit
+import os
 import TDXQuoteVerifier
 @testable import teemoon
 
@@ -137,7 +138,9 @@ struct E2EEFaultTests {
         #expect(msgs[0]["content"] == nil)
     }
 
-    @Test func encryptRequestBody_numericContent_notEncrypted() throws {
+    /// A numeric content has no sealed form: the request is refused, never passed through
+    /// in the clear (0b9df2c; it used to be left as is).
+    @Test func encryptRequestBody_numericContent_refused() throws {
         let edKey = Curve25519.Signing.PrivateKey()
         let session = try E2EEPeer(modelEd25519PubKey: edKey.publicKey.rawRepresentation)
         let body: [String: Any] = [
@@ -146,13 +149,8 @@ struct E2EEFaultTests {
             ]
         ]
         let data = try JSONSerialization.data(withJSONObject: body)
-        let result = try session.encryptRequestBody(data)
-        let parsed = try JSONSerialization.jsonObject(with: result) as! [String: Any]
-        let msgs = parsed["messages"] as! [[String: Any]]
-        #expect(msgs[0]["content"] as? Int == 42)
+        #expect(throws: E2EEError.unsealableContent) { try session.encryptRequestBody(data) }
     }
-
-    // MARK: Hex edge cases
 
     @Test func hexString_singleByte() throws {
         let data = try Data(hexString: "ff")
@@ -303,6 +301,40 @@ struct AttestationRecordFaultTests {
         #expect(record.codeIdentityVerified == nil)
     }
 
+    /// attestationState reads codeIdentityVerified several times per ChatView body: the manifest is hashed
+    /// once per record, and a copy of the record shares that one hash.
+    @Test func codeIdentity_hashesTheManifestOncePerRecord() {
+        let f = codeIdentityFixture()
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let digest = ComposeDigest(hash: { manifest in
+            calls.withLock { $0 += 1 }
+            return ComposeDigest.sha256Hex(manifest)
+        })
+        let record = makeRecord(
+            quoteVerification: makeMockVerification(reportData: Data(count: 64), mrConfigID: f.mrConfigID),
+            composeHash: f.composeHash, composeManifest: f.manifest, composeDigest: digest)
+        for _ in 0..<5 { #expect(record.codeIdentityVerified == true) }
+        let copy = record
+        #expect(copy.codeIdentityVerified == true)
+        #expect(calls.withLock { $0 } == 1)
+        #expect(record.composeManifestSHA256 == f.composeHash)
+    }
+
+    @Test func codeIdentity_cachedHashGivesTodaysAnswers() {
+        let f = codeIdentityFixture()
+        let quote = makeMockVerification(reportData: Data(count: 64), mrConfigID: f.mrConfigID)
+        let matching = makeRecord(quoteVerification: quote, composeHash: f.composeHash, composeManifest: f.manifest)
+        let tampered = makeRecord(quoteVerification: quote, composeHash: f.composeHash,
+                                  composeManifest: f.manifest + "\n  evil:\n    image: x@sha256:bbbb")
+        #expect(ComposeDigest.sha256Hex(f.manifest)
+                == SHA256.hash(data: Data(f.manifest.utf8)).map { String(format: "%02x", $0) }.joined())
+        for _ in 0..<3 {
+            #expect(matching.codeIdentityVerified == true)
+            #expect(tampered.codeIdentityVerified == false)
+        }
+        #expect(tampered.composeManifestSHA256 != f.composeHash)
+    }
+
     @Test func codeIdentity_noGatewayQuote_returnsNil() {
         let f = codeIdentityFixture()
         let record = makeRecord(quoteVerification: nil, composeHash: f.composeHash, composeManifest: f.manifest)
@@ -394,7 +426,8 @@ struct AttestationRecordFaultTests {
         modelQuoteVerification: TDXVerificationResult? = nil,
         gpuArch: String? = nil,
         composeHash: String = "",
-        composeManifest: String? = nil
+        composeManifest: String? = nil,
+        composeDigest: ComposeDigest = ComposeDigest()
     ) -> AttestationRecord {
         AttestationRecord(
             composeHash: composeHash, mrtd: "", osImageHash: "", intelQuote: "",
@@ -404,7 +437,7 @@ struct AttestationRecordFaultTests {
             quoteVerification: quoteVerification,
             gpuQuoteVerification: nil,
             modelQuoteVerification: modelQuoteVerification,
-            fetchedAt: Date(), providerID: UUID()
+            fetchedAt: Date(), providerID: UUID(), composeDigest: composeDigest
         )
     }
 
@@ -631,6 +664,9 @@ struct BraveGroundingFaultTests {
 
 @Suite("Provider Faults")
 struct ProviderFaultTests {
+    /// Models near.ai set up with its list loaded: see `NearAIModelCatalog.tierListSeen`.
+    init() { NearAIModelCatalog.seeTierListForTests() }
+
 
     @Test func openAIBaseURL_validEndpoint_stripsCompletions() {
         let provider = Provider(name: "Test", endpoint: "https://api.example.com/v1/chat/completions", model: "gpt-4")
@@ -688,8 +724,13 @@ struct ProviderFaultTests {
     }
 
     @Test func capabilities_nearAI_includesAttestationAndE2EE() {
-        let provider = Provider(name: "near.ai", endpoint: "https://cloud-api.near.ai/v1/chat/completions", model: "test")
+        let provider = Provider(name: "near.ai", endpoint: "https://cloud-api.near.ai/v1/chat/completions", model: "z-ai/glm-5.3-flash")
         #expect(provider.capabilities.contains([.attestation, .endToEndEncryption]))
+        // An id no rule names claims no e2ee until the catalogue says own-fleet (gardener #7), but its send still
+        // goes through the attested gate, never plain without asking (2026-10-31, pm's option A).
+        let unlisted = Provider(name: "near.ai", endpoint: "https://cloud-api.near.ai/v1/chat/completions", model: "test")
+        #expect(!unlisted.claimsEndToEndEncryption)
+        #expect(unlisted.capabilities.contains(.attestation))
     }
 
     @Test func capabilities_otherProvider_excludesAttestation() {

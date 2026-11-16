@@ -7,15 +7,24 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5A4E0000000000000000000A /* teemoonShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000002 /* teemoonShare.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		4B17E70300000000000000E3 /* LiteRTLM in Frameworks */ = {isa = PBXBuildFile; productRef = 4B17E70200000000000000E2 /* LiteRTLM */; };
 		4B1FFD272F7C650900681DD1 /* ModelBackend in Frameworks */ = {isa = PBXBuildFile; productRef = 4B1FFD262F7C650900681DD1 /* ModelBackend */; };
 		4B5955FF3002FE0400E4C510 /* DcapQvl in Frameworks */ = {isa = PBXBuildFile; productRef = DCA9000000000000000000A2 /* DcapQvl */; };
 		4BC03B682FA0EDD70050EE21 /* TDXQuoteVerifier in Frameworks */ = {isa = PBXBuildFile; productRef = 4BC03B672FA0EDD70050EE21 /* TDXQuoteVerifier */; };
+		4BFA11D02FB0000000000003 /* WuffsDecode in Frameworks */ = {isa = PBXBuildFile; productRef = 4BFA11D02FB0000000000002 /* WuffsDecode */; };
 		4BC69B572F848AFC001ABA10 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 4BC69B562F848AFC001ABA10 /* Textual */; };
 		5EC2561000000000000000B3 /* libsecp256k1 in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC2561000000000000000B2 /* libsecp256k1 */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		5A4E0000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 860E9CC62CB055B000C5BB52 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A4E00000000000000000001;
+			remoteInfo = teemoonShare;
+		};
 		4B019B6B2FA7A6AE00579381 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 860E9CC62CB055B000C5BB52 /* Project object */;
@@ -32,13 +41,43 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		5A4E00000000000000000009 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5A4E0000000000000000000A /* teemoonShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		5A4E00000000000000000002 /* teemoonShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = teemoonShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4B019B652FA7A6AE00579381 /* teemoonUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = teemoonUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4B1FFD182F7C5B7400681DD1 /* teemoonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = teemoonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		860E9CCE2CB055B000C5BB52 /* teemoon.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = teemoon.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5A4E00000000000000000004 /* Exceptions for "teemoonShare" folder in "teemoonShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5A4E00000000000000000001 /* teemoonShare */;
+		};
+		5A4E00000000000000000005 /* Exceptions for "teemoon" folder in "teemoonShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Support/ShareInbox.swift,
+				Support/ShareJump.swift,
+			);
+			target = 5A4E00000000000000000001 /* teemoonShare */;
+		};
 		258729302D0785A700BB7B6F /* Exceptions for "teemoon" folder in "teemoon" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -50,6 +89,14 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		5A4E00000000000000000003 /* teemoonShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5A4E00000000000000000004 /* Exceptions for "teemoonShare" folder in "teemoonShare" target */,
+			);
+			path = teemoonShare;
+			sourceTree = "<group>";
+		};
 		4B019B662FA7A6AE00579381 /* teemoonUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = teemoonUITests;
@@ -64,6 +111,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				258729302D0785A700BB7B6F /* Exceptions for "teemoon" folder in "teemoon" target */,
+				5A4E00000000000000000005 /* Exceptions for "teemoon" folder in "teemoonShare" target */,
 			);
 			path = teemoon;
 			sourceTree = "<group>";
@@ -71,6 +119,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5A4E00000000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		4B019B622FA7A6AE00579381 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -92,6 +147,7 @@
 				4B5955FF3002FE0400E4C510 /* DcapQvl in Frameworks */,
 				5EC2561000000000000000B3 /* libsecp256k1 in Frameworks */,
 				4BC03B682FA0EDD70050EE21 /* TDXQuoteVerifier in Frameworks */,
+				4BFA11D02FB0000000000003 /* WuffsDecode in Frameworks */,
 				4BC69B572F848AFC001ABA10 /* Textual in Frameworks */,
 				4B1FFD272F7C650900681DD1 /* ModelBackend in Frameworks */,
 				4B17E70300000000000000E3 /* LiteRTLM in Frameworks */,
@@ -105,6 +161,7 @@
 			isa = PBXGroup;
 			children = (
 				860E9CD02CB055B000C5BB52 /* teemoon */,
+				5A4E00000000000000000003 /* teemoonShare */,
 				4B1FFD192F7C5B7400681DD1 /* teemoonTests */,
 				4B019B662FA7A6AE00579381 /* teemoonUITests */,
 				869B975E2D0DD3EC0078DF5A /* Frameworks */,
@@ -118,6 +175,7 @@
 				860E9CCE2CB055B000C5BB52 /* teemoon.app */,
 				4B1FFD182F7C5B7400681DD1 /* teemoonTests.xctest */,
 				4B019B652FA7A6AE00579381 /* teemoonUITests.xctest */,
+				5A4E00000000000000000002 /* teemoonShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -132,6 +190,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5A4E00000000000000000001 /* teemoonShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A4E0000000000000000000F /* Build configuration list for PBXNativeTarget "teemoonShare" */;
+			buildPhases = (
+				5A4E00000000000000000006 /* Sources */,
+				5A4E00000000000000000007 /* Frameworks */,
+				5A4E00000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5A4E00000000000000000003 /* teemoonShare */,
+			);
+			name = teemoonShare;
+			packageProductDependencies = (
+			);
+			productName = teemoonShare;
+			productReference = 5A4E00000000000000000002 /* teemoonShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		4B019B642FA7A6AE00579381 /* teemoonUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4B019B6D2FA7A6AE00579381 /* Build configuration list for PBXNativeTarget "teemoonUITests" */;
@@ -185,10 +265,12 @@
 				860E9CCA2CB055B000C5BB52 /* Sources */,
 				860E9CCB2CB055B000C5BB52 /* Frameworks */,
 				860E9CCC2CB055B000C5BB52 /* Resources */,
+				5A4E00000000000000000009 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5A4E0000000000000000000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				860E9CD02CB055B000C5BB52 /* teemoon */,
@@ -198,6 +280,7 @@
 				4B1FFD262F7C650900681DD1 /* ModelBackend */,
 				4BC69B562F848AFC001ABA10 /* Textual */,
 				4BC03B672FA0EDD70050EE21 /* TDXQuoteVerifier */,
+				4BFA11D02FB0000000000002 /* WuffsDecode */,
 				DCA9000000000000000000A2 /* DcapQvl */,
 				5EC2561000000000000000B2 /* libsecp256k1 */,
 				4B17E70200000000000000E2 /* LiteRTLM */,
@@ -227,6 +310,9 @@
 					860E9CCD2CB055B000C5BB52 = {
 						CreatedOnToolsVersion = 16.0;
 					};
+					5A4E00000000000000000001 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = 860E9CC92CB055B000C5BB52 /* Build configuration list for PBXProject "teemoon" */;
@@ -242,6 +328,7 @@
 				4B1FFD252F7C650900681DD1 /* XCLocalSwiftPackageReference "Packages/ModelBackend" */,
 				4BC69B552F848AFC001ABA10 /* XCLocalSwiftPackageReference "Vendor/textual" */,
 				4BC03B662FA0EDD70050EE21 /* XCLocalSwiftPackageReference "Packages/TDXQuoteVerifier" */,
+				4BFA11D02FB0000000000001 /* XCLocalSwiftPackageReference "Packages/WuffsDecode" */,
 				DCA9000000000000000000A1 /* XCRemoteSwiftPackageReference "dcap-qvl-swift" */,
 				5EC2561000000000000000B1 /* XCRemoteSwiftPackageReference "swift-secp256k1" */,
 				4B17E70100000000000000E1 /* XCLocalSwiftPackageReference "Packages/LiteRTLM" */,
@@ -254,11 +341,19 @@
 				860E9CCD2CB055B000C5BB52 /* teemoon */,
 				4B1FFD172F7C5B7400681DD1 /* teemoonTests */,
 				4B019B642FA7A6AE00579381 /* teemoonUITests */,
+				5A4E00000000000000000001 /* teemoonShare */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5A4E00000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		4B019B632FA7A6AE00579381 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -283,6 +378,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5A4E00000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		4B019B612FA7A6AE00579381 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -307,6 +409,12 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		5A4E0000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = 5A4E00000000000000000001 /* teemoonShare */;
+			targetProxy = 5A4E0000000000000000000B /* PBXContainerItemProxy */;
+		};
 		4B019B6C2FA7A6AE00579381 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 860E9CCD2CB055B000C5BB52 /* teemoon */;
@@ -320,6 +428,78 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		5A4E0000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = teemoonShare/teemoonShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 62;
+				DEVELOPMENT_TEAM = 4786V39YGH;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = teemoonShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(SHARE_APP_BUNDLE_ID).share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = NO;
+				SDKROOT = iphoneos;
+				SHARE_APP_BUNDLE_ID = "ai.teemoon.app$(BUNDLE_ID_SUFFIX)";
+				"SHARE_APP_BUNDLE_ID[sdk=iphoneos*]" = ai.teemoon.app;
+				SHARE_OPENS_APP = YES;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		5A4E0000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = teemoonShare/teemoonShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 62;
+				DEVELOPMENT_TEAM = 4786V39YGH;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = teemoonShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(SHARE_APP_BUNDLE_ID).share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = NO;
+				SDKROOT = iphoneos;
+				SHARE_APP_BUNDLE_ID = "ai.teemoon.app$(BUNDLE_ID_SUFFIX)";
+				"SHARE_APP_BUNDLE_ID[sdk=iphoneos*]" = ai.teemoon.app;
+				SHARE_OPENS_APP = YES;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		4B019B6E2FA7A6AE00579381 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -329,7 +509,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.6;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.teemoon.app.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -353,7 +533,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.6;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.teemoon.app.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -379,7 +559,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.6;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.teemoon.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -404,7 +584,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.6;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.teemoon.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -541,8 +721,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = teemoon/teemoon.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "teemoon/teemoon-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 60;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_ASSET_PATHS = "\"teemoon/Preview Content\"";
 				DEVELOPMENT_TEAM = 4786V39YGH;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -566,7 +747,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.0.6;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.teemoon.app$(BUNDLE_ID_SUFFIX)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = ai.teemoon.app;
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = ai.teemoon.app;
@@ -591,8 +772,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = teemoon/teemoon.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "teemoon/teemoon-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 60;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_ASSET_PATHS = "\"teemoon/Preview Content\"";
 				DEVELOPMENT_TEAM = 4786V39YGH;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -616,7 +798,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.0.6;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.teemoon.app$(BUNDLE_ID_SUFFIX)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = ai.teemoon.app;
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = ai.teemoon.app;
@@ -638,6 +820,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5A4E0000000000000000000F /* Build configuration list for PBXNativeTarget "teemoonShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A4E0000000000000000000D /* Debug */,
+				5A4E0000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		4B019B6D2FA7A6AE00579381 /* Build configuration list for PBXNativeTarget "teemoonUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -689,6 +880,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/TDXQuoteVerifier;
 		};
+		4BFA11D02FB0000000000001 /* XCLocalSwiftPackageReference "Packages/WuffsDecode" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/WuffsDecode;
+		};
 		4BC69B552F848AFC001ABA10 /* XCLocalSwiftPackageReference "Vendor/textual" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Vendor/textual;
@@ -727,6 +922,10 @@
 		4BC03B672FA0EDD70050EE21 /* TDXQuoteVerifier */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TDXQuoteVerifier;
+		};
+		4BFA11D02FB0000000000002 /* WuffsDecode */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WuffsDecode;
 		};
 		4BC69B562F848AFC001ABA10 /* Textual */ = {
 			isa = XCSwiftPackageProductDependency;

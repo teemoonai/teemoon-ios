@@ -86,6 +86,63 @@ struct LiteRTToolBridgeTests {
         #expect(reported.value.first?.0 == "web_search")
     }
 
+    /// reply-machine.json G7: once a turn is stopped or abandoned, a tool round its decode still asks for runs
+    /// nothing and reports nothing; the next turn's bridging opens the tools again.
+    @Test @MainActor func aStoppedTurnsToolCallRunsNothing() async throws {
+        let ran = LockedBox<Bool>(false)
+        let started = LockedBox<Int>(0)
+        let tool = PlantedTool(planted: "ZX9", ran: ran)
+        _ = await LiteRTToolBridge.bridged(tools: [tool], onStarted: { _, _ in started.value += 1 }) { _, _, _ in }
+        await LiteRTToolRegistry.shared.close()
+
+        let refused = await LiteRTToolBridge.execute(name: "web_search", arguments: ["query": "after stop", "count": 1])
+        #expect(!ran.value, "a stopped turn's decode ran a search")
+        #expect(started.value == 0, "a stopped turn's decode showed the searching chip")
+        #expect(!refused.contains("ZX9"))
+
+        _ = await LiteRTToolBridge.bridged(tools: [tool]) { _, _, _ in }
+        _ = await LiteRTToolBridge.execute(name: "web_search", arguments: ["query": "next turn", "count": 1])
+        #expect(ran.value, "the next turn's tools stayed closed")
+    }
+
+    /// reply-machine.json G7, privacy edge: an abandoned decode keeps its own conversation, and that conversation's
+    /// ToolManager can still fire a web_search after the NEXT turn has bridged its tools. It must not run a search
+    /// (or show a chip) under the next turn's registration: the user never asked for it in that turn.
+    @Test @MainActor func anAbandonedDecodesLateToolCallDoesNotSearchUnderTheNextTurn() async throws {
+        let ranOld = LockedBox<Bool>(false), ranNew = LockedBox<Bool>(false)
+        let startedNew = LockedBox<Int>(0)
+        _ = await LiteRTToolBridge.bridged(tools: [PlantedTool(planted: "OLD", ran: ranOld)]) { _, _, _ in }
+        // Turn 1's conversation, exactly as LiteRT holds it: a ToolManager over the shim type.
+        let abandoned = LiteRTLM.ToolManager(tools: [LiteRTWebSearchTool()])
+
+        // Turn 2 bridges its own tools (the abandoned turn never closed anything after this point).
+        _ = await LiteRTToolBridge.bridged(tools: [PlantedTool(planted: "NEW", ran: ranNew)],
+                                           onStarted: { _, _ in startedNew.value += 1 }) { _, _, _ in }
+
+        let late = try await abandoned.execute(name: "web_search", arguments: ["query": "unasked", "count": 1])
+        #expect(!ranNew.value, "the abandoned decode ran a search under the next turn's registration")
+        #expect(!ranOld.value)
+        #expect(startedNew.value == 0, "the next turn showed a searching chip for a search it never asked for")
+        #expect(!"\(late)".contains("NEW"))
+    }
+
+    /// The live turn's own conversation still runs its tools, a kept (reused) conversation included; the call
+    /// carries its ToolManager's id, and nothing runs once the turn has ended.
+    @Test @MainActor func theLiveConversationsToolCallRuns() async throws {
+        let ran = LockedBox<Bool>(false)
+        _ = await LiteRTToolBridge.bridged(tools: [PlantedTool(planted: "LIVE", ran: ran)]) { _, _, _ in }
+        let live = LiteRTLM.ToolManager(tools: [LiteRTWebSearchTool()])
+        await LiteRTToolRegistry.shared.setLive(live.id)
+        let result = try await live.execute(name: "web_search", arguments: ["query": "asked", "count": 1])
+        #expect(ran.value, "the live turn's own search did not run")
+        #expect("\(result)".contains("LIVE"))
+
+        ran.value = false
+        await LiteRTToolRegistry.shared.close()   // the turn ended
+        _ = try await live.execute(name: "web_search", arguments: ["query": "after the end", "count": 1])
+        #expect(!ran.value, "a search ran after its turn ended")
+    }
+
     /// A stringified scalar must decode, exactly as it does on the MLX path.
     ///
     /// Small models emit `"count": "5"` constantly. If the bridge skipped

@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-/// Shown when the model enclave carries NO signed action-log pin — an ABSENCE,
+/// Shown when the model enclave carries NO action-log pin — an ABSENCE,
 /// surfaced (orange) rather than collapsing to a benign flat list. The seam's
 /// load-bearing check has nothing to check, and that fact must be visible.
 struct NoActionLogNotice: View {
@@ -15,7 +15,7 @@ struct NoActionLogNotice: View {
                 .font(.caption).foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 3) {
                 Text("recipe not verifiable").font(.footnote).fontWeight(.semibold)
-                Text("this enclave exposed no signed action log, so the running engine + proxy recipe can’t be hash-checked on this device — it isn’t pinned by anything you can verify here.")
+                Text(TrustScopeText.noActionLogDetail)
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

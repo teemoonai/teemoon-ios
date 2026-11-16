@@ -21,6 +21,29 @@ private let logger = Logger(subsystem: "ai.teemoon", category: "inference")
 struct WireMessage: Sendable {
     let role: String
     let content: String
+    /// teemoon's own re-encoded images (ImageAttachment), sent as image parts after the text.
+    var images: [WireImage] = []
+}
+
+/// An image as it goes on the wire: always an ImageAttachment's re-encoded bytes, never received bytes.
+struct WireImage: Sendable, Equatable {
+    let mimeType: String
+    let data: Data
+    let width: Int
+    let height: Int
+
+    init(mimeType: String, data: Data, width: Int, height: Int) {
+        self.mimeType = mimeType
+        self.data = data
+        self.width = width
+        self.height = height
+    }
+
+    init(_ attachment: ImageAttachment) {
+        self.init(mimeType: attachment.mimeType, data: attachment.data, width: attachment.width, height: attachment.height)
+    }
+
+    var dataURL: String { "data:\(mimeType);base64,\(data.base64EncodedString())" }
 }
 
 /// Everything a TEE-attested request needs beyond the plain provider config.
@@ -38,7 +61,8 @@ struct TEEContext: Sendable {
     /// Derives the context for one attested request. The only place this
     /// derivation lives — production reaches it via
     /// `ConfidentialSession.currentTEEContext()`.
-    init?(provider: Provider, apiKey: String, attestation: AttestationRecord) {
+    init?(provider: Provider, apiKey: String, attestation: AttestationRecord,
+          makePeer: (Data) throws -> E2EEPeer = { try E2EEPeer(modelEd25519PubKey: $0) }) {
         // Completions are routed through the gateway (cloud-api.near.ai), which
         // generates and stores ECDSA signatures. Fetching signatures from the
         // gateway is reliable because it has routing-fix logic to find the
@@ -51,7 +75,7 @@ struct TEEContext: Sendable {
         self.gpuNodeURL = provider.directGPUNodeURL
         self.e2eePeer = attestation.modelEd25519PubKey.flatMap { key in
             do {
-                let peer = try E2EEPeer(modelEd25519PubKey: key)
+                let peer = try makePeer(key)
                 logger.debug("[E2EE] peer created — client pub: \(peer.clientPubKeyHex.prefix(16))...")
                 return peer
             } catch {
@@ -59,6 +83,12 @@ struct TEEContext: Sendable {
                 return nil
             }
         }
+    }
+
+    /// Whether `init?` would build a peer for this record, without making a keypair (verdict reads use this).
+    static func seals(provider: Provider, attestation: AttestationRecord) -> Bool {
+        guard provider.openAIBaseURL != nil, let key = attestation.modelEd25519PubKey else { return false }
+        return (try? Ed25519ToX25519.publicKey(edPub: key)) != nil
     }
 
     /// TEST SEAM (internal): a context with an explicitly supplied peer,
@@ -110,6 +140,8 @@ struct ConfidentialLanguageModel: LanguageModel {
     let urlSession: URLSession
     let effort: ReasoningEffort?
     let affinityID: String?
+    /// The images of the message being sent (its text is the prompt).
+    let promptImages: [WireImage]
 
     init(
         provider: Provider,
@@ -119,8 +151,10 @@ struct ConfidentialLanguageModel: LanguageModel {
         events: StreamCallbacks,
         urlSession: URLSession? = nil,
         effort: ReasoningEffort? = nil,
-        affinityID: String? = nil
+        affinityID: String? = nil,
+        promptImages: [WireImage] = []
     ) {
+        self.promptImages = promptImages
         self.effort = effort
         self.affinityID = affinityID
         self.provider = provider
@@ -138,7 +172,7 @@ struct ConfidentialLanguageModel: LanguageModel {
             provider: provider, apiKey: apiKey, teeContext: teeContext,
             events: events, tools: session.tools,
             initialMessages: priorMessages, prompt: prompt.description,
-            urlSession: urlSession, effort: effort, affinityID: affinityID
+            urlSession: urlSession, effort: effort, affinityID: affinityID, promptImages: promptImages
         )
     }
 

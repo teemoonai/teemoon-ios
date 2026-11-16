@@ -30,6 +30,21 @@ enum WhereProviderPresentation {
         }
     }
     /// Short model label for the chip and list (not the raw API id).
+    /// The model chip's words: the saved catalogue's name for the model (UI audit #5), else `modelLabel`.
+    @MainActor
+    static func chipLabel(for provider: Provider) -> String {
+        let saved = LiveCatalogStore.shared.allModels(forEndpoint: provider.endpoint)
+            .first { $0.id.lowercased() == provider.model.lowercased() }?.displayName
+        return modelLabel(for: provider, catalogName: saved)
+    }
+
+    static func modelLabel(for provider: Provider, catalogName: String?) -> String {
+        if provider.localModelID == nil, let name = catalogName?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
+            return name.lowercased()
+        }
+        return modelLabel(for: provider)
+    }
+
     static func modelLabel(for provider: Provider) -> String {
         // On-device models carry a HuggingFace repo id, and the generic path
         // renders it whole: "gemma-4-e2b-it-litert-lm". Two of those three
@@ -153,7 +168,7 @@ enum WhereProviderPresentation {
             // model names in one row, one of them wrong for the row it's in.
             // Matching the endpoint to a preset gets the service's actual name.
             let name = canonicalName(for: provider)
-            if provider.capabilities.contains(.endToEndEncryption) {
+            if provider.claimsEndToEndEncryption {
                 return "\(name) · end-to-end encrypted"
             }
             // Only stated where it's a real distinction the user can act on:

@@ -108,7 +108,8 @@ struct AddEditProviderView: View {
          startsPullingModel: Bool = false,
          initialPreset: Provider? = nil,
          embedInNavigationStack: Bool = true,
-         focusesEndpointOnAppear: Bool = true) {
+         focusesEndpointOnAppear: Bool = true,
+         browseFilters: ModelBrowserQuery.Filter = []) {
         self.scope = scope
         self.focusesEndpointOnAppear = focusesEndpointOnAppear
         self.mode = mode
@@ -119,13 +120,15 @@ struct AddEditProviderView: View {
         self.startsPullingModel = startsPullingModel
         self.initialPreset = initialPreset
         self.embedInNavigationStack = embedInNavigationStack
-        _form = State(initialValue: AddEditProviderModel(
+        let model = AddEditProviderModel(
             mode: mode,
             scope: scope,
             keyOverride: keyOverride,
             startsCustom: startsCustom,
             customStart: customStart,
-            initialPreset: initialPreset))
+            initialPreset: initialPreset)
+        model.browseFilters = browseFilters
+        _form = State(initialValue: model)
     }
 
     /// In-flight pulls for THIS endpoint. Lives on the view (not the model)
@@ -162,6 +165,7 @@ struct AddEditProviderView: View {
                 models: form.fetchedModels,
                 showsConfidentialityTags: form.browsablePreset?.id == Provider.nearAI.id,
                 downloadBaseURL: form.probeBaseURL,
+                browseFilters: form.browseFilters,
                 onSelectModel: { form.autofillLabel(from: $0) },
                 onDownloadCompleted: { pulled in Task { await form.probe(select: pulled) } },
                 // SELECTED THE MOMENT IT STARTS, which is how the phone tier and the

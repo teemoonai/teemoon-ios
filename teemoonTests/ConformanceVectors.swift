@@ -2,7 +2,7 @@
 //  ConformanceVectors.swift
 //  teemoonTests
 //
-//  Phase 0 of the Android port: the conformance kit.
+//  Phase 0 of the Android port (docs/ANDROID_PORT.md §7): the conformance kit.
 //  Golden vectors are generated HERE, in Swift, from the production code paths,
 //  and vendored by teemoon-android. Acceptance for every ported module is its
 //  fixture suite green on the JVM — "correct" is bytes, not prose.
@@ -164,7 +164,10 @@ enum ConformanceInputs {
 
 enum ConformanceVectors {
 
-    static let kitVersion = "0.5.0"
+    static let kitVersion = "0.5.5"
+    /// A file whose bytes change gets its own bump, so a vendored copy can't drift under an unchanged number.
+    static let kitVersionByClass: [String: String] = ["loading": "0.5.6", "catalogs": "0.5.7"]
+    static func kitVersion(for fixtureClass: String) -> String { kitVersionByClass[fixtureClass] ?? kitVersion }
 
     static func crypto(file: String = #filePath) throws -> CryptoVectors {
         CryptoVectors(

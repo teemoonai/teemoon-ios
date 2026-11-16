@@ -5,15 +5,22 @@
 
 import SwiftUI
 
+/// What the block says with no recorded verdict: never the "source reviewed … · this exact build" subtitle,
+/// which reads as an all-clear (trust-audit-links-gated d, the maintainer 2026-11-06).
+enum FableAuditCopy {
+    static let unrecorded = "verdict not recorded — open the review"
+    static func unrecordedLine(verdict: String?) -> String? { verdict == nil ? unrecorded : nil }
+}
+
 /// The per-image "fable miniaudit" affordance — a point-in-time source review
 /// of this exact build, in a distinct orange register (not a green attestation
 /// check: it's a reproducible human privacy review, not a
 /// per-session hardware proof). Rendered only when `AuditIndex` has a published
 /// assessment for the running digest/manifest, so the link is never fabricated.
 struct FableAuditBlock: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let url: URL
     var title: String = "fable miniaudit"
-    let subtitle: String
 
     /// What the review actually CONCLUDED, in the reviewer's own words, from
     /// `index.json`'s `verdicts` map. Without it the block said the same thing
@@ -52,13 +59,24 @@ struct FableAuditBlock: View {
         }
     }
 
+    private var glyph: some View {
+        Image(systemName: "doc.text.magnifyingglass").font(.callout).foregroundStyle(.orange)
+    }
+
+    private var arrow: some View {
+        Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(.orange)
+    }
+
     var body: some View {
         Link(destination: url) {
+            // At the accessibility sizes the glyphs join the header, so the verdict gets the block's whole width.
+            let inline = typeSize.isAccessibilitySize
             HStack(spacing: 9) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.callout).foregroundStyle(.orange)
+                if !inline { glyph }
                 VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
+                    // Wraps whole pieces: an HStack hyphenated "au-dit" and the badge at accessibility sizes.
+                    FlowLayout(spacing: 6) {
+                        if inline { glyph }
                         Text(title).font(.caption).fontWeight(.semibold)
                             .foregroundStyle(.primary)
                         if let cls = verdictClass {
@@ -69,6 +87,7 @@ struct FableAuditBlock: View {
                                 .background(badgeColor.opacity(0.16), in: Capsule())
                                 .foregroundStyle(badgeColor)
                         }
+                        if inline { arrow }
                     }
                     if let attr = verdictAttr {
                         // The reviewer's conclusion replaces the fixed subtitle
@@ -80,13 +99,10 @@ struct FableAuditBlock: View {
                         Text(attr)
                             .font(.caption2)
                             .foregroundStyle(.primary)
-                            .lineLimit(3).truncationMode(.tail)
+                            .lineLimitGrowing(3).truncationMode(.tail)
                             .padding(.top, 2)
-                    } else {
-                        Text(subtitle)
-                            .font(.caption2).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("verdict not recorded — open the review")
+                    } else if let line = FableAuditCopy.unrecordedLine(verdict: verdict) {
+                        Text(line)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -94,7 +110,7 @@ struct FableAuditBlock: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(.orange)
+                if !inline { arrow }
             }
             .padding(.horizontal, 11).padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)

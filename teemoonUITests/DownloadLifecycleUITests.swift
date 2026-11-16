@@ -422,7 +422,7 @@ final class DownloadLifecycleUITests: XCTestCase {
     }
 
     /// G1: a phone model downloaded from Where finishes, and is the chat's model — the row leaves "downloading", the
-    /// chip names it and no longer says "not downloaded". The Hub is a local fake_hub.py serving the real
+    /// chip names it and no longer says "not downloaded". The Hub is ~/teemoon-backups/fake_hub.py serving the real
     /// E2B file (its checksum IS the pin) unthrottled from this Mac: `TEST_RUNNER_UITEST_FAKE_HUB=http://127.0.0.1:8765`.
     func testAPhoneModelDownloadFinishesAndIsTheChatsModel() throws {
         guard let hub = ProcessInfo.processInfo.environment["UITEST_FAKE_HUB"] else { throw XCTSkip("needs fake_hub.py serving the real E2B file (UITEST_FAKE_HUB)") }

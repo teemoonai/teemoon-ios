@@ -8,17 +8,31 @@ import SwiftUI
 struct EnclaveGroupView: View {
     let group: EnclaveGroup
     let rung: TrustRung
+    /// Trust scope for the model enclave's record; the gateway has none.
+    var scope: TrustScope? = nil
+
+    private func row(_ image: ImageEntry) -> ImageRowView {
+        let isManager = image.name.hasSuffix("compose-manager")
+        let page: (String) -> URL? = { AuditIndex.shared.imageAuditURL(image: "nearaidev/compose-manager", digest: "sha256:\($0)") }
+        let shown = !isManager ? image : TrustScope.managerRow(image, seat: scope?.composeManager, pageFor: page)
+        return ImageRowView(image: shown, rung: rung,
+                            valueSuffix: image.kind == .guestOS ? TrustScopeText.osImageSuffix(scope?.boot) : "",
+                            scopeLines: isManager ? TrustScopeText.composeManagerLines(scope?.composeManager, pageFor: page) : [])
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Text(group.role).font(.footnote).fontWeight(.semibold)
-                if group.primary {
-                    Text("primary · own quote")
-                        .font(.caption2).fontWeight(.medium)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(teeVerified.opacity(0.15), in: Capsule())
-                        .foregroundStyle(teeVerified)
+            HStack(alignment: .top, spacing: 6) {
+                // Wraps whole pieces: an HStack hyphenated "en-clave" and "prima-ry" at accessibility sizes.
+                FlowLayout(spacing: 6) {
+                    Text(group.role).font(.footnote).fontWeight(.semibold)
+                    if group.primary {
+                        Text("primary · own quote")
+                            .font(.caption2).fontWeight(.medium)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(teeVerified.opacity(0.15), in: Capsule())
+                            .foregroundStyle(teeVerified)
+                    }
                 }
                 Spacer(minLength: 0)
                 // Tri-state: a FAILED quote must show a red counter-signal, not
@@ -38,8 +52,11 @@ struct EnclaveGroupView: View {
                 }
             }
             Text(group.binding).font(.caption).foregroundStyle(.secondary)
+            if group.primary, let line = TrustScopeText.bootLogLine(scope?.boot) {
+                TrustScopeLineView(line: line)
+            }
             if let deployment = group.deployment {
-                Text(deployment)
+                Text(deployment + TrustScopeText.deploymentSuffix(scope?.binding))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -58,7 +75,7 @@ struct EnclaveGroupView: View {
                 let measured = group.images.filter { !$0.isRecipe }
                 let recipeImages = group.images.filter { $0.isRecipe }
                 ForEach(measured) { image in
-                    ImageRowView(image: image, rung: rung)
+                    row(image)
                 }
                 // The seam + recipe are load-bearing — NEVER silently drop them
                 // (that's this screen's "silence reads as safe" anti-pattern). The
@@ -67,15 +84,15 @@ struct EnclaveGroupView: View {
                 // but the red header must still show). Only a genuine ABSENCE of
                 // any action-log pin gets the explicit "not verifiable" notice.
                 let hasPinOrVerdict = !recipeImages.isEmpty || recipe.fileSHA != nil || recipe.verification != nil
-                if !measured.isEmpty { TrustSeamDivider() }
+                if !measured.isEmpty { TrustSeamDivider(binding: scope?.binding) }
                 if hasPinOrVerdict {
-                    RecipeCardView(recipe: recipe, images: recipeImages, rung: rung)
+                    RecipeCardView(recipe: recipe, images: recipeImages, rung: rung, scope: scope)
                 } else {
                     NoActionLogNotice()
                 }
             } else {
                 ForEach(group.images) { image in
-                    ImageRowView(image: image, rung: rung)
+                    row(image)
                 }
             }
             // The one caption stating the counterpart of the role tags. It
@@ -91,7 +108,7 @@ struct EnclaveGroupView: View {
             // How the measured-config panels above are bound — deliberately
             // NOT "hardware-measured" (that covers the outer harness only).
             if group.images.contains(where: { !$0.configLines.isEmpty }) {
-                Text(MeasuredConfig.bindingNote)
+                Text(TrustScopeText.measuredBindingNote(scope?.binding))
                     .font(.caption2).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -116,7 +133,6 @@ struct EnclaveGroupView: View {
             if rung.showsLinks, let url = group.configAuditURL {
                 FableAuditBlock(url: url,
                                 title: "fable miniaudit · deployment config",
-                                subtitle: "allowed_envs, egress & telemetry reviewed · this measurement",
                                 verdict: AuditIndex.shared.verdict(for: url),
                                 verdictClass: AuditIndex.shared.verdictClass(for: url))
             }

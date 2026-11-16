@@ -45,7 +45,10 @@ struct ModelDetailView: View {
     /// Fetched when the page opens, beside `liveLoader`. nil otherwise — an
     /// empty section would imply the list exists.
     var offersLoader: (() async -> [ModelOffer])? = nil
+    /// The setup this model runs on, for developer mode's read-only reasoning line.
+    var reasoning: ReasoningLevel.Setup? = nil
 
+    @AppStorage(UserDefaultsKey.developerModeEnabled) private var developerMode = false
     @State private var copiedID = false
     @State private var live: KnownModel? = nil
     @State private var offers: [ModelOffer] = []
@@ -153,20 +156,22 @@ struct ModelDetailView: View {
                 }
             }
 
-            if !shown.features.isEmpty || !shown.inputModalities.isEmpty {
-                Section("what it can do") {
-                    if !shown.features.isEmpty {
-                        chips(shown.features)
+            if !features.isEmpty || !shown.inputModalities.isEmpty || reasoningLine != nil {
+                Section {
+                    if !features.isEmpty {
+                        chips(features)
                     }
                     if !shown.inputModalities.isEmpty {
                         row("accepts", shown.inputModalities.joined(separator: ", "))
                     }
-                    if !shown.reasoningEfforts.isEmpty {
-                        row("reasoning", shown.reasoningEfforts.joined(separator: ", "))
+                    if let reasoningLine {
+                        row("reasoning", reasoningLine)
                     }
                     if let cutoff = shown.knowledgeCutoff {
                         row("knows up to", cutoff)
                     }
+                } header: {
+                    Text("what it can do").textCase(.lowercase)
                 }
             }
 
@@ -225,6 +230,14 @@ struct ModelDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+
+    private var features: [String] { ReasoningLevel.visibleFeatures(shown.features, developerMode: developerMode) }
+
+    /// Read-only (the maintainer: "model info is typically read only"): the levels in developer mode, nothing without it.
+    private var reasoningLine: String? {
+        ReasoningLevel.infoLine(setup: reasoning?.provider, control: reasoning?.control, developerMode: developerMode,
+                                offered: shown.reasoningEfforts)
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -293,7 +306,7 @@ struct ModelDetailView: View {
     }
 
     private func chips(_ items: [String]) -> some View {
-        FlowLayout(spacing: 6) {
+        FlowLayout(spacing: 6, lineSpacing: 6) {
             ForEach(items, id: \.self) { item in
                 Text(item)
                     .font(.caption.monospaced())
@@ -304,39 +317,6 @@ struct ModelDetailView: View {
             }
         }
         .padding(.vertical, 2)
-    }
-}
-
-/// Minimal wrapping stack — chips run on as many lines as they need.
-private struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x + size.width > width, x > 0 {
-                x = 0; y += lineHeight + spacing; lineHeight = 0
-            }
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-        return CGSize(width: width == .infinity ? x : width, height: y + lineHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
-                       subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX, y = bounds.minY, lineHeight: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX, x > bounds.minX {
-                x = bounds.minX; y += lineHeight + spacing; lineHeight = 0
-            }
-            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
     }
 }
 

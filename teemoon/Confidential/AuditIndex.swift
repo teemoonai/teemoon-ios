@@ -97,6 +97,16 @@ final class AuditIndex {
         /// finding headings, machine-read by the repo's indexer (never
         /// synthesized). Powers the per-node plaintext-egress rollup. Optional.
         var findings: [String: [Finding]]? = nil
+        /// page path → what a LEAKS review found leaves the enclave, in the reviewer's words. Optional.
+        var exposure: [String: Exposure]? = nil
+    }
+
+    struct Exposure: Decodable, Equatable {
+        let summary: String
+        /// "recipe" or "image". A recipe page's `services` are the compose names whose request path carries
+        /// the leak; an image page has none (it leaks wherever that digest runs).
+        var scope_kind: String? = nil
+        var services: [String]? = nil
     }
 
     /// One machine-read finding heading from a published review page. All
@@ -148,6 +158,15 @@ final class AuditIndex {
     /// what it's rendering. nil = unknown (treated as stale, never as fresh).
     private(set) var loadedAt: Date?
 
+    /// Older than this, the everyday claim treats the index as absent until it refreshes (the maintainer 2026-11-06).
+    static let everydayMaxAge: TimeInterval = 7 * 24 * 3600
+
+    func isFresh(now: Date = Date()) -> Bool {
+        guard index != nil, let loadedAt else { return false }
+        return now.timeIntervalSince(loadedAt) < Self.everydayMaxAge
+    }
+    var isFreshForEveryday: Bool { isFresh() }
+
     @ObservationIgnored private var lastLoad: Date?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     private static let persistKey = "ai.teemoon.auditIndex.json"
@@ -161,6 +180,21 @@ final class AuditIndex {
     /// keys — so an unknown key is fine, but a different schema NUMBER means
     /// the layout changed in a way this code predates. Fail closed to "no
     /// index" (no links) rather than render links from a layout we can't read.
+    nonisolated static func declaresOtherSchema(_ data: Data) -> Bool {
+        struct Probe: Decodable { let schema: Int? }
+        guard let schema = (try? JSONDecoder().decode(Probe.self, from: data))?.schema else { return false }
+        return schema != 1
+    }
+
+    func clearCache() {
+        index = nil
+        loadedAt = nil
+        lastLoad = nil
+        defaults.removeObject(forKey: Self.persistKey)
+        defaults.removeObject(forKey: Self.persistDateKey)
+        defaults.removeObject(forKey: Self.persistETagKey)
+    }
+
     nonisolated static func decodeIndex(_ data: Data) -> Index? {
         guard let idx = try? JSONDecoder().decode(Index.self, from: data),
               idx.schema == 1 else { return nil }
@@ -169,10 +203,11 @@ final class AuditIndex {
 
     /// Test seam: inject a fixed index (skips network + persistence), or a
     /// private `UserDefaults` so a test's snapshot and ETag stay its own.
-    init(fixedIndex: Index? = nil, defaults: UserDefaults = .standard) {
+    init(fixedIndex: Index? = nil, loadedAt: Date? = nil, defaults: UserDefaults = .standard) {
         self.defaults = defaults
         if let fixedIndex {
             index = fixedIndex
+            self.loadedAt = loadedAt
             lastLoad = .distantFuture
         }
     }
@@ -218,6 +253,12 @@ final class AuditIndex {
             loadedAt = now
             defaults.set(now, forKey: Self.persistDateKey)
             logger.info("[audits] index unchanged (304)")
+            return
+        }
+        if http.statusCode == 200, Self.declaresOtherSchema(data) {
+            // A layout this reader predates: drop the old one instead of rendering it forever.
+            clearCache()
+            logger.info("[audits] index schema changed — cached index dropped")
             return
         }
         guard http.statusCode == 200, let parsed = Self.decodeIndex(data) else {
@@ -300,18 +341,6 @@ final class AuditIndex {
         return (p.name, p.repo, p.status, url)
     }
 
-    /// Audit page for a TAG-pinned image, which has no digest to key on. An
-    /// additive sibling to the frozen digest path spec: `images/<ref>/tag-<tag>.md`,
-    /// gated by `tagAudits` so it only ever resolves for an assessed tag. The
-    /// review it lands on is config-level and says so — the running bytes under
-    /// a tag can still drift. nil when not recorded → no link.
-    func tagAuditURL(image: String, tag: String) -> URL? {
-        guard let index else { return nil }
-        let ref = Self.normalizedRef(image)
-        guard index.tagAudits?[ref]?.contains(tag) == true else { return nil }
-        return URL(string: "\(Self.webBase)/images/\(ref)/tag-\(tag).md")
-    }
-
     /// Audit page for an inner-stack manifest version, keyed by the action
     /// log's repo-relative path and file_sha256.
     func manifestAuditURL(path: String, fileSHA256: String) -> URL? {
@@ -349,6 +378,17 @@ final class AuditIndex {
     func verdict(for url: URL) -> String? {
         guard let path = Self.pagePath(for: url) else { return nil }
         return index?.verdicts?[path]
+    }
+
+    func exposure(for url: URL) -> Exposure? {
+        guard let path = Self.pagePath(for: url) else { return nil }
+        return index?.exposure?[path]
+    }
+
+    /// The reviewer's exposure summary for a page, verbatim; nil when the index records none.
+    func exposureSummary(for url: URL) -> String? {
+        guard let path = Self.pagePath(for: url) else { return nil }
+        return index?.exposure?[path]?.summary
     }
 
     /// The verdict CLASS for the page an audit URL points at — the

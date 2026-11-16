@@ -58,7 +58,7 @@ final class ToolRoundFollowUITests: XCTestCase {
         let transcript = app.transcript
         XCTAssertTrue(transcript.waitForExistence(timeout: 20))
 
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
         composer.typeText("go")

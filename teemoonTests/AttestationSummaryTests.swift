@@ -312,6 +312,35 @@ struct AttestationSummaryProvenanceTests {
         #expect(text.contains("+2 more"))
     }
 
+    /// Android's screen check caught "1 image(s)": every provenance count reads as a proper singular or plural.
+    @Test func provenanceCounts_areSingularForOneAndPluralForTwo() {
+        let other = ProvenanceService.ImageRef(image: "nearaidev/mesh", digest: String(repeating: "b", count: 64))
+        let sidecar = ProvenanceService.ImageRef(image: "datadog/agent", digest: String(repeating: "1", count: 64))
+        let sidecar2 = ProvenanceService.ImageRef(image: "datadog/agent2", digest: String(repeating: "2", count: 64))
+        let failure = ProvenanceService.Failure(ref: ref, reason: .unverified(.fetchFailed("HTTP 404")))
+
+        let one = makeSummary(imageProvenance: .allVerified(verified: [ref], thirdParty: [sidecar]))
+        let two = makeSummary(imageProvenance: .allVerified(verified: [ref, other], thirdParty: [sidecar, sidecar2]))
+        let oneOfOne = makeSummary(imageProvenance: .incomplete(verified: [], failures: [failure], thirdParty: []))
+        let oneOfTwo = makeSummary(imageProvenance: .incomplete(verified: [other], failures: [failure], thirdParty: []))
+        let texts = [one, two, oneOfOne, oneOfTwo].flatMap {
+            [$0.provenanceDetail, $0.provenanceEvidence ?? "",
+             $0.shareText(e2eeMessageCount: 0, verifiedResponseCount: 0, mismatchedResponseCount: 0)]
+        }
+        #expect(!texts.contains { $0.contains("(s)") })
+
+        #expect(one.provenanceDetail.hasPrefix("1 near.ai image signed"))
+        #expect(one.provenanceDetail.contains("1 third-party sidecar pinned"))
+        #expect(two.provenanceDetail.hasPrefix("2 near.ai images signed"))
+        #expect(two.provenanceDetail.contains("2 third-party sidecars pinned"))
+        #expect(one.provenanceEvidence?.hasPrefix("1 image →") == true)
+        #expect(two.provenanceEvidence?.hasPrefix("2 images →") == true)
+        #expect(oneOfOne.provenanceDetail.hasPrefix("1 of 1 near.ai image unverified"))
+        #expect(oneOfTwo.provenanceDetail.hasPrefix("1 of 2 near.ai images unverified"))
+        let report = one.shareText(e2eeMessageCount: 0, verifiedResponseCount: 0, mismatchedResponseCount: 0)
+        #expect(report.contains("Verified (1 near.ai image, 1 third-party sidecar digest-pinned)"))
+    }
+
     @Test func thirdPartySidecars_doNotFailProvenance_andAreDisclosed() {
         let sidecar = ProvenanceService.ImageRef(image: "datadog/agent", digest: String(repeating: "1", count: 64))
         let s = makeSummary(imageProvenance: .allVerified(verified: [ref], thirdParty: [sidecar]))

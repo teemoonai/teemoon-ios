@@ -64,9 +64,9 @@ enum CellularDownloadGate {
     static func message(for reason: Reason, model: LocalModel) -> String {
         switch reason {
         case .mobileData:
-            return "\(model.displayName) is a \(model.sizeLabel) download. It can wait until you're on wi-fi."
+            return "\(model.displayName) is a \(model.sizeLabel) download. it can wait until you're on wi-fi."
         case .lowDataMode:
-            return "\(model.displayName) is a \(model.sizeLabel) download. It can wait until you're on an unrestricted connection."
+            return "\(model.displayName) is a \(model.sizeLabel) download. it can wait until you're on an unrestricted connection."
         }
     }
 }

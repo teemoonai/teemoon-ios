@@ -41,6 +41,28 @@ extension WhereSheetView {
     ///
     /// Recency didn't need a home in this list — it has its own section.
     var equippedRows: [Equipped] {
+        let show = getPolicy.show
+        return tabRows.filter { show.passes(readsImages: readsImages($0), endToEnd: $0.asActive.claimsEndToEndEncryption) }
+    }
+
+    /// Phone models that can never read images here: under "reads images" alone, with the caption, not counted (§4b).
+    var refusedRows: [Equipped] {
+        tabRows.filter { row in
+            guard let id = row.provider.localModelID else { return false }
+            return getPolicy.show.listsRefused(imagesRefused: PhoneImageMemory.refused(modelID: id))
+        }
+    }
+
+    /// Ready and refused rows together, each in its normal place (§4b).
+    var listedRows: [(row: Equipped, refused: Bool)] {
+        let shown = Set(equippedRows.map(\.id)), refused = Set(refusedRows.map(\.id))
+        return tabRows.compactMap { row in
+            shown.contains(row.id) ? (row, false) : refused.contains(row.id) ? (row, true) : nil
+        }
+    }
+
+    /// The tab's rows before "show only": what its count is out of.
+    var tabRows: [Equipped] {
         let rows = filteredProviders.flatMap { provider in
             provider.equipped.map { Equipped(provider: provider, modelID: $0) }
         }

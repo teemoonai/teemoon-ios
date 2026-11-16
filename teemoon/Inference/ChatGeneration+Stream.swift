@@ -21,9 +21,11 @@ extension ChatGeneration {
         resultBag: LockedBox<RequestResult?>
     ) -> StreamCallbacks {
         let origin = turnOrigin
+        let token = turnToken
         return StreamCallbacks(
             onSourcesFound: { [weak self] sources in
                 Task { @MainActor [weak self] in
+                    guard self?.turnToken == token else { return }   // a stopped turn's late callback
                     self?.groundingSources.append(contentsOf: sources)
                     #if DEBUG
                     StreamTrace.event("sourcesFound count=\(sources.count) total=\(self?.groundingSources.count ?? 0)")
@@ -32,6 +34,7 @@ extension ChatGeneration {
             },
             onQueriesFound: { [weak self] queries in
                 Task { @MainActor [weak self] in
+                    guard self?.turnToken == token else { return }   // a stopped turn's late callback
                     self?.searchQueries.append(contentsOf: queries)
                     self?.isExecutingTools = true
                     #if DEBUG
@@ -41,6 +44,7 @@ extension ChatGeneration {
             },
             onToolExecutionEnded: { [weak self] in
                 Task { @MainActor [weak self] in
+                    guard self?.turnToken == token else { return }   // a stopped turn's late callback
                     self?.isExecutingTools = false
                     #if DEBUG
                     StreamTrace.event("toolExecEnd")
@@ -51,6 +55,7 @@ extension ChatGeneration {
                 toolCallsBag.value = result.toolCalls
                 resultBag.value = result
                 Task { @MainActor [weak self] in
+                    guard self?.turnToken == token else { return }   // a stopped turn's late callback
                     guard let self else { return }
                     let preservedResponse = result.responseBody ?? self.lastRequestDebugInfo?.responseBody
                     // Thinking = first delta → first visible character, both stamped by
@@ -83,10 +88,13 @@ extension ChatGeneration {
                         effortLevels: result.effortLevels.isEmpty
                             ? (self.lastRequestDebugInfo?.effortLevels ?? []) : result.effortLevels
                     )
+                    self.lastRequestDebugInfo?.imagesLeftOutForModel = self.imagesLeftOut.forModel
+                    self.lastRequestDebugInfo?.imagesLeftOutForSize = self.imagesLeftOut.forSize
                 }
             },
             onAwaitingModel: { [weak self] turn, awaiting in
                 Task { @MainActor [weak self] in
+                    guard self?.turnToken == token else { return }   // a stopped turn's late callback
                     guard let self else { return }
                     if awaiting {
                         // Never step backwards onto an older turn.
@@ -101,6 +109,7 @@ extension ChatGeneration {
             },
             onAwaitingResponse: { [weak self] turn, sentAt in
                 Task { @MainActor [weak self] in
+                    guard self?.turnToken == token else { return }   // a stopped turn's late callback
                     guard let self else { return }
                     if let sentAt {
                         if (self.providerWait?.turn ?? Int.min) < turn {
@@ -139,7 +148,8 @@ extension ChatGeneration {
         teeContext: TEEContext?,
         callbacks: StreamCallbacks,
         threadID: UUID,
-        effort: ReasoningEffort? = nil
+        effort: ReasoningEffort? = nil,
+        promptImages: [WireImage] = []
     ) -> (any LanguageModel)? {
         if let makeLanguageModel {
             return makeLanguageModel(provider, apiKey, priorMessages, teeContext, callbacks)
@@ -148,7 +158,7 @@ extension ChatGeneration {
             guard let ref = LocalModelStorage.ref(for: localModelID) else {
                 lastError = LLMError(
                     source: .provider(name: provider.name),
-                    userMessage: "\(provider.name) isn't downloaded on this device. Open Settings → Providers to download it.",
+                    userMessage: "\(provider.name) isn't downloaded on this phone. download it from where.",
                     httpStatus: nil, url: nil, requestHeaders: nil, requestBodyJSON: nil,
                     messageHistory: nil, responseBody: nil, underlyingError: nil
                 )
@@ -157,13 +167,14 @@ extension ChatGeneration {
             }
             return LocalLanguageModel(
                 model: ref, priorMessages: priorMessages, events: callbacks,
-                enableThinking: effort == .thinkHarder
+                enableThinking: effort.map { ReasoningLevel.thinksOnDevice($0, chosen: ReasoningLevel.chosen(for: provider)) } ?? false,
+                promptImages: promptImages
             )
         }
         return ConfidentialLanguageModel(
             provider: provider, apiKey: apiKey, priorMessages: priorMessages,
             context: teeContext, events: callbacks, effort: effort,
-            affinityID: SessionAffinity.id(for: threadID)
+            affinityID: SessionAffinity.id(for: threadID), promptImages: promptImages
         )
     }
 
@@ -190,6 +201,8 @@ extension ChatGeneration {
             isE2EEActive: expectingE2EE,
             teeVerification: nil
         )
+        lastRequestDebugInfo?.imagesLeftOutForModel = imagesLeftOut.forModel
+        lastRequestDebugInfo?.imagesLeftOutForSize = imagesLeftOut.forSize
     }
 
     /// Timings, tool records, and the empty-reply error. An empty reply
@@ -240,6 +253,8 @@ extension ChatGeneration {
                 teeVerification: landed?.teeVerification ?? existing.teeVerification,
                 effortLevels: existing.effortLevels
             )
+            lastRequestDebugInfo?.imagesLeftOutForModel = imagesLeftOut.forModel
+            lastRequestDebugInfo?.imagesLeftOutForSize = imagesLeftOut.forSize
         }
         // NEVER FAIL SILENTLY.
         //
@@ -255,8 +270,8 @@ extension ChatGeneration {
             lastError = LLMError(
                 source: .provider(name: provider.name),
                 userMessage: searches > 0
-                    ? "\(provider.name) ran \(searches) search\(searches == 1 ? "" : "es") but didn't write an answer. Ask again to retry."
-                    : "\(provider.name) returned an empty response. Ask again to retry.",
+                    ? "\(provider.name) ran \(searches) search\(searches == 1 ? "" : "es") but didn't write an answer. ask again to retry."
+                    : "\(provider.name) sent an empty answer. ask again to retry.",
                 httpStatus: nil, url: baseURL, requestHeaders: nil,
                 requestBodyJSON: nil, messageHistory: nil, responseBody: nil,
                 underlyingError: nil

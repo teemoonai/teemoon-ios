@@ -38,6 +38,39 @@ struct LiveCatalogStoreTests {
         #expect(reopened.model(id: "a/two", for: openRouter, apiKey: "")?.price == "$1.00/$2.00")
     }
 
+    /// Rewrites every saved list as 1.0.6 wrote it (version 1).
+    private func markSavedAsVersionOne(_ dir: URL) throws {
+        for file in try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+            var json = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            json["version"] = 1
+            try JSONSerialization.data(withJSONObject: json).write(to: file)
+        }
+    }
+
+    /// 2026-10-28: 1.0.6 saved Fireworks' no-capability fallback list over the real one (the deprecationDate
+    /// decode break), and the Where sheet trusts a saved list for 24 h. A version-1 Fireworks list is dropped
+    /// once, so the next look refetches.
+    @Test func aFireworksListSavedByOneZeroSixIsNotServed() throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        store.record(rows(["accounts/fireworks/models/glm-5p3-flash"]), for: fireworks, apiKey: "fw-key")
+        try markSavedAsVersionOne(dir)
+
+        let reopened = LiveCatalogStore(directory: dir)
+        #expect(reopened.count(for: fireworks, apiKey: "fw-key") == nil)
+    }
+
+    /// Only Fireworks: near.ai's saved tiers are what keep an unseen third-party id from reading as own fleet.
+    @Test func otherListsSavedByOneZeroSixAreKept() throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        store.record(rows(["a/one", "a/two"]), for: openRouter, apiKey: "")
+        try markSavedAsVersionOne(dir)
+
+        let reopened = LiveCatalogStore(directory: dir)
+        #expect(reopened.count(for: openRouter, apiKey: "") == 2)
+    }
+
     /// No answer yet is nil, never 0: a row prints nothing rather than a number
     /// that reads as "this server has no models".
     @Test func anUnaskedServerHasNoCount() {
@@ -172,8 +205,8 @@ struct LiveCatalogStoreTests {
         NearAIModelCatalog.recordTiers(["moonshotai/kimi-k9": .teeThirdParty])
         store.record(rows(["moonshotai/kimi-k9"]), for: .nearAI, apiKey: "")
         NearAIModelCatalog.resetTierCache()
-        #expect(NearAIModelCatalog.confidentiality(forID: "moonshotai/kimi-k9") == .teeOwn,
-                "without the saved tier the guess answers own-fleet")
+        #expect(NearAIModelCatalog.confidentiality(forID: "moonshotai/kimi-k9") == .unknown,
+                "without the saved tier the guess answers unknown, never own-fleet")
 
         LiveCatalogStore(directory: dir).seedNearAITiers()
         #expect(NearAIModelCatalog.confidentiality(forID: "moonshotai/kimi-k9") == .teeThirdParty)

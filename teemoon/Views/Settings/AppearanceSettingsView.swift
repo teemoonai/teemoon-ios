@@ -35,8 +35,11 @@ struct AppearanceSettingsView: View {
                             .tag(option)
                     }
                 } label: {
-                    Label("design", systemImage: "textformat")
+                    Label { Text("design") } icon: {
+                        Image(systemName: "textformat").foregroundStyle(SettingsMenuPicker.glyphTint(settings.appTintColor))
+                    }
                 }
+                .tint(SettingsMenuPicker.valueTint)
 
                 Picker(selection: $settings.appFontWidth) {
                     ForEach(AppFontWidth.allCases.sorted(by: { $0.rawValue < $1.rawValue }), id: \.rawValue) { option in
@@ -44,13 +47,16 @@ struct AppearanceSettingsView: View {
                             .tag(option)
                     }
                 } label: {
-                    Label("width", systemImage: "arrow.left.and.line.vertical.and.arrow.right")
+                    Label { Text("width") } icon: {
+                        Image(systemName: "arrow.left.and.line.vertical.and.arrow.right").foregroundStyle(SettingsMenuPicker.glyphTint(settings.appTintColor))
+                    }
                 }
+                .tint(SettingsMenuPicker.valueTint)
                 .disabled(settings.appFontDesign != .standard)
 
                 #if !os(macOS)
                 Picker(selection: $settings.appFontSize) {
-                    ForEach(AppFontSize.allCases.sorted(by: { $0.rawValue < $1.rawValue }), id: \.rawValue) { option in
+                    ForEach(AppFontSize.allCases, id: \.rawValue) { option in
                         Text(String(describing: option).lowercased())
                             .tag(option)
                     }

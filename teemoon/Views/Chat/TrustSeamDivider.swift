@@ -17,15 +17,20 @@ struct DashedRule: Shape {
 }
 
 /// The trust seam: a dashed divider with a centered caption marking that
-/// everything below it is pinned by the signed action log (vs the measured
-/// items above, which the hardware measures at boot).
+/// everything below it is pinned by the action log (vs the measured items
+/// above, which the hardware measures at boot).
 struct TrustSeamDivider: View {
+    var binding: ActionLogBinding.Result? = nil
+
     var body: some View {
         HStack(spacing: 8) {
             rule
-            Text("pinned by the signed action log")
+            Text(TrustScopeText.seamCaption(binding))
                 .font(.caption2).foregroundStyle(.tertiary)
-                .fixedSize()
+                // Wraps, never .fixedSize(): one line is wider than the phone at the largest text sizes.
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
             rule
         }
         .padding(.vertical, 3)

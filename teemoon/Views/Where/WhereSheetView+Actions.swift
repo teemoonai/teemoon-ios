@@ -30,12 +30,17 @@ extension WhereSheetView {
     /// Selecting before the download completes is the whole point. Downloading
     /// first and selecting after would leave the user watching a bar with
     /// nothing decided at the end of it.
+    /// "use <smaller model>": switch to it when it's on the phone, else start its download.
+    func useSmaller(_ model: LocalModel) {
+        if let row = tabRows.first(where: { $0.provider.localModelID == model.id }) { select(row) }
+        else { startAndSelect(model) }
+    }
+
     func startAndSelect(_ model: LocalModel) {
-        // On mobile data the sheet asks first and stays open; the answer comes
-        // back through `PendingAlert.cellularDownload`.
+        // On mobile data the sheet asks first and stays open; the answer comes back through `cellularRequest`.
         if let request = CellularDownloadRequest.resolve(model, path: pathObserver,
                                                          start: startAndSelect) {
-            pendingAlert = .cellularDownload(request)
+            cellularRequest = request
         }
     }
 
@@ -165,13 +170,16 @@ extension WhereSheetView {
         dismiss()
     }
 
-    func openBrowse(_ provider: Provider) {
+    func openBrowse(_ provider: Provider) { openBrowse(provider, filters: []) }
+
+    /// The filters travel in the sheet's item: a separate @State read by the sheet's content is stale there.
+    func openBrowse(_ provider: Provider, filters: ModelBrowserQuery.Filter) {
         browseSelectedModel = provider.model
-        browseProvider = provider
+        browseTarget = BrowseTarget(provider: provider, filters: filters)
     }
 
     @ViewBuilder
-    func browseSheet(for provider: Provider) -> some View {
+    func browseSheet(for provider: Provider, filters: ModelBrowserQuery.Filter) -> some View {
         // ONE browser for every catalogue, however large. OpenRouter used to
         // get a second, search-only one that fetched through the generic probe,
         // so its rows arrived with no price while the same models priced fine
@@ -181,7 +189,9 @@ extension WhereSheetView {
             door: .browsing(provider, apiKey: browseKey(for: provider), homeKind: nil),
             onSelect: { known in
                 applyBrowseSelection(provider: provider, model: known)
-            }
+            },
+            initialFilters: filters,
+            embedsNavigationStack: false
         )
     }
 
@@ -214,7 +224,7 @@ extension WhereSheetView {
         // No recent recorded here either — equipping a model is the strongest
         // possible statement of intent and still isn't use.
         Haptics.play()
-        browseProvider = nil
+        browseTarget = nil
         dismiss()
     }
 

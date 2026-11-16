@@ -13,6 +13,8 @@ struct ProviderConnectionSection: View {
     var endpointFocused: FocusState<Bool>.Binding
     @FocusState private var keyFocused: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         Section {
             TextField("label", text: $form.name)
@@ -103,7 +105,8 @@ struct ProviderConnectionSection: View {
                 // The refusal lands ON this row — red prompt, mark, one shake,
                 // focus — and its sentence in the section footer. Nothing is
                 // inserted into the list, so the form does not jump.
-                .modifier(ShakeEffect(animatableData: CGFloat(form.keyFocusRequest)))
+                // Reduce Motion: no shake; the red prompt and the mark say it.
+                .modifier(ShakeEffect(animatableData: reduceMotion ? 0 : CGFloat(form.keyFocusRequest)))
                 .animation(.linear(duration: 0.4), value: form.keyFocusRequest)
                 .onChange(of: form.keyFocusRequest) { _, _ in keyFocused = true }
 
@@ -218,13 +221,13 @@ struct SchemeChipView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: scheme.isSecure ? "lock.fill" : "lock.open")
-                    .font(.system(size: 10))
+                    .scaledFont(size: 10)
                     .foregroundStyle(scheme.isSecure ? .green : .secondary)
                 Text("\(scheme.rawValue)://")
-                    .font(.system(size: 14, design: .monospaced))
+                    .scaledFont(size: 14, design: .monospaced)
                     .foregroundStyle(.primary.opacity(0.85))
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .scaledFont(size: 9, weight: .semibold)
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)

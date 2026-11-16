@@ -50,6 +50,16 @@ struct CatalogVectors: Encodable {
     let xai: XAI
     let fireworks: Fireworks
     let lmstudio: LMStudio
+    /// near.ai's tier for an id, before the catalogue answers (`ownedBy` nil) and after.
+    /// An id no rule names is `unknown`, never own-fleet (gardener #7). `listSeen` false: near.ai's tier list has
+    /// not been seen since launch (fresh install, first setup), and no guess is own fleet (2026-10-28).
+    /// `attested`: a send goes through attestation and the E2EE gate (teeOwn AND unknown, 2026-10-31: an unseen
+    /// tier must never send plain without asking). `claimsE2EE`: a screen may say "end-to-end encrypted" (teeOwn only).
+    struct NearTier: Encodable {
+        let id: String; let ownedBy: String?; let listSeen: Bool; let tier: String
+        let attested: Bool; let claimsE2EE: Bool
+    }
+    let nearTiers: [NearTier]
 }
 
 // MARK: - §7 item 8 — Brave bodies
@@ -153,6 +163,47 @@ enum ConformanceFixtureVectors {
 
     // MARK: catalogs
 
+    static let nearTierInputs: [(id: String, ownedBy: String?)] = [
+        ("z-ai/glm-5.3-flash", nil), ("deepseek-ai/DeepSeek-V4-Flash", nil), ("Qwen/Qwen3.6-27B-FP8", nil),
+        ("openai/gpt-oss-120b", nil), ("x-ai/grok-4.6", nil), ("anthropic/claude-sonnet-5", "nearai"),
+        ("acme/brand-new-model-1", nil), ("brand-new-model-2", nil),
+        ("acme/brand-new-model-1", "nearai"), ("acme/brand-new-model-3", "attested 3p"), ("acme/brand-new-model-4", "acme"),
+    ]
+
+    /// Ids alone with near.ai's tier list never seen.
+    static let unseenTierInputs = ["z-ai/glm-5.3-flash", "deepseek-ai/DeepSeek-V4-Flash", "Qwen/Qwen3.6-27B-FP8",
+                                   "openai/gpt-oss-120b", "x-ai/grok-4.6", "acme/brand-new-model-1"]
+
+    /// Each row on a fresh cache: the id alone, or the id after the catalogue's owned_by; with the tier list seen
+    /// (the id not in it) or never seen.
+    static func nearTiers() -> [CatalogVectors.NearTier] {
+        func row(_ id: String, ownedBy: String?, listSeen: Bool) -> CatalogVectors.NearTier {
+            var provider = Provider.nearAI
+            provider.model = id
+            return CatalogVectors.NearTier(id: id, ownedBy: ownedBy, listSeen: listSeen,
+                                           tier: NearAIModelCatalog.confidentiality(forID: id).rawValue,
+                                           attested: provider.capabilities.contains(.attestation),
+                                           claimsE2EE: provider.claimsEndToEndEncryption)
+        }
+        defer { NearAIModelCatalog.resetTierCache() }
+        let seen = NearAIModelCatalog.$tierListSeenOverride.withValue(true) {
+            nearTierInputs.map { input in
+                NearAIModelCatalog.resetTierCache()
+                if let owner = input.ownedBy, let tier = NearAIModelCatalog.tierFromOwnedBy(owner) {
+                    NearAIModelCatalog.recordTiers([input.id: tier])
+                }
+                return row(input.id, ownedBy: input.ownedBy, listSeen: true)
+            }
+        }
+        let unseen = NearAIModelCatalog.$tierListSeenOverride.withValue(false) {
+            unseenTierInputs.map { id in
+                NearAIModelCatalog.resetTierCache()
+                return row(id, ownedBy: nil, listSeen: false)
+            }
+        }
+        return seen + unseen
+    }
+
     static func catalogs(file: String = #filePath) throws -> CatalogVectors {
         let xaiLanguage = try TestFixture.string("xai_language_models.json", file: file)
         let xaiModels = try TestFixture.string("xai_models.json", file: file)
@@ -168,7 +219,8 @@ enum ConformanceFixtureVectors {
         return CatalogVectors(pinnedNow: ISO8601DateFormatter().string(from: pinnedNow),
                               xai: .init(languageModels: xaiLanguage, models: xaiModels, rows: xaiRows.map(row)),
                               fireworks: .init(models: fw, rows: fwRows.map(row)),
-                              lmstudio: .init(models: lm, rows: lmRows.map(row)))
+                              lmstudio: .init(models: lm, rows: lmRows.map(row)),
+                              nearTiers: nearTiers())
     }
 
     // MARK: brave

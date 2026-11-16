@@ -49,6 +49,20 @@ struct WhereChip: View {
     /// correct again if the user later deletes their last setup.
     private var unconfigured: Bool { provider == nil }
 
+    /// In the composer panel's row (docs/COMPOSER_PANEL.md): the name only, no place text; with a status the place
+    /// glyph goes too and the status is never cut; at accessibility sizes the name goes and the status stays.
+    var inPanel = false
+    /// Developer mode's reasoning level, drawn after the name in the panel (nil: none).
+    var reasoningLevel: String? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var hasStatus: Bool { progress != nil || needsDownload }
+    /// Beside a status or a level the place glyph drops, so the name keeps the room (docs/COMPOSER_PANEL.md).
+    private var showsGlyph: Bool { !(inPanel && (hasStatus || showsLevel)) }
+    private var showsName: Bool { !(inPanel && dynamicTypeSize.isAccessibilitySize) }
+    /// Not beside a status, and not at accessibility sizes, where the chip has no name to follow (VoiceOver says it).
+    private var showsLevel: Bool { inPanel && reasoningLevel != nil && !hasStatus && showsName }
+
     /// Label colour on the accent fill. White, because the fill is `ML.accent`
     /// — a fixed orange, not a colour that inverts with appearance. White on
     /// #FF7A1A clears contrast, and unlike `systemBackground` it cannot flip to
@@ -66,72 +80,20 @@ struct WhereChip: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: glyph)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(glyphColor)
-                if let provider {
-                    Text(WhereProviderPresentation.modelLabel(for: provider))
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(1)
-                    if let progress {
-                        Text("·")
-                            .foregroundStyle(.tertiary)
-                        // "downloading" plus a number, not a bar: a 2pt bar
-                        // inside a 44pt capsule is decoration, and the percentage
-                        // is the part that tells you whether to wait.
-                        Text(progressLabel ?? "downloading \(Int(progress * 100))%")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                    }
-                    // The place is dropped when the title bar is already saying
-                    // it. For an on-device model the trust caption up there IS
-                    // "on this device", so printing it again 60pt lower put the
-                    // same three words on screen twice — the exact duplication
-                    // `showsModel: false` was added to remove, arriving from the
-                    // other direction.
-                    if needsDownload {
-                        Text("·")
-                            .foregroundStyle(.tertiary)
-                        // RED, not orange. `ML.accent` (#FF7A1A) became the app
-                        // tint and now means "actionable" — this same chip fills
-                        // with it for `choose where`. SwiftUI's `.orange`
-                        // (#FF9F0A) is 8% away, so an invitation and a blocked
-                        // state were rendering as the same colour in one control.
-                        //
-                        // Red because this state BLOCKS: the model is selected,
-                        // named, and cannot answer, and send is gated on it. Not
-                        // a caution — a failure.
-                        Text("not downloaded")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.red)
-                            .lineLimit(1)
-                    }
-                    // Place only when there's no progress to report — a chip
-                    // saying model · place · downloading 5% is three facts in a
-                    // capsule that has room for two.
-                    if progress == nil, !needsDownload, let place = chipPlace(for: provider) {
-                        Text("·")
-                            .foregroundStyle(.tertiary)
-                        Text(place)
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                } else {
-                    Text("choose where")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(onAccent)
-                }
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(chevronStyle)
-            }
+            // No ViewThatFits here: its candidate copies inside the Menu sent SwiftUI's responder lookup round a graph
+            // cycle when the transcript resigned first responder (a hang; ThinkHarderUITests, 2026-11-13).
+            labelRow(withGlyph: showsGlyph)
+                // The whole chip, so its capsule resizes with a new name instead of cutting it for a frame.
+                .animation(Motion.swap, value: provider.map { WhereProviderPresentation.chipLabel(for: $0) })
+                .animation(Motion.swap, value: reasoningLevel)
             .textCase(.lowercase)
             .padding(.horizontal, ControlMetrics.pillHorizontalPadding)
+            #if os(iOS)
+            // One row height at every size: the panel's items are all 34 (docs/COMPOSER_PANEL.md).
+            .frame(height: ControlMetrics.pillHeight)
+            #else
             .frame(minHeight: ControlMetrics.pillHeight)
+            #endif
             // Two layers, and the order is the point.
             //
             // `secondarySystemFill` is a TRANSLUCENT fill. The chip floats in a
@@ -201,11 +163,12 @@ struct WhereChip: View {
             // Damping 1.0, so the spring cannot ring past its target no matter
             // what response is set — a spring that could overshoot is the same
             // bug waiting for a tuning change.
-            .scaleEffect(settled || !unconfigured ? 1 : 0.94)
+            .scaleEffect(settled || !unconfigured ? 1 : Motion.scale(0.94, reduceMotion: reduceMotion))
             .opacity(settled || !unconfigured ? 1 : 0.6)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .dynamicTypeSize(...ControlMetrics.pillLargestTextSize)
         // `.task`, and DELAYED — not `.onAppear`.
         //
         // onAppear fires while the launch image is still up, so the settle ran
@@ -223,6 +186,97 @@ struct WhereChip: View {
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("opens where the model runs")
         .accessibilityIdentifier("chat.whereChip")
+    }
+
+    /// The chip's content; `withGlyph` false is the step the row takes before the name truncates.
+    @ViewBuilder
+    private func labelRow(withGlyph: Bool) -> some View {
+        HStack(spacing: 6) {
+            if withGlyph {
+                Image(systemName: glyph)
+                    .scaledFont(size: 12, weight: .semibold)
+                    .foregroundStyle(glyphColor)
+            }
+            if let provider {
+                if showsName {
+                    Text(WhereProviderPresentation.chipLabel(for: provider))
+                        .scaledFont(size: 14, weight: .semibold)
+                        .lineLimit(1)
+                        // The name's floor: about 4 characters before the status or the level takes the rest.
+                        .frame(minWidth: inPanel && (hasStatus || showsLevel) ? 40 : nil, alignment: .leading)
+                        // A model switch crossfades the name in place (motion audit #8); the chip resizes with it.
+                        .contentTransition(.opacity)
+                    // Developer mode's reasoning level, as the Claude app's "Opus 5.5 Medium"; never cut.
+                    if showsLevel, let reasoningLevel {
+                        Text(reasoningLevel)
+                            .scaledFont(size: 14)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .contentTransition(.opacity)
+                    }
+                }
+                if let progress {
+                    if showsName {
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                    }
+                    // "downloading" plus a number, not a bar: a 2pt bar
+                    // inside a 44pt capsule is decoration, and the percentage
+                    // is the part that tells you whether to wait.
+                    Text(progressLabel ?? "downloading \(Int(progress * 100))%")
+                        .scaledFont(size: 14)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                // The place is dropped when the title bar is already saying
+                // it. For an on-device model the trust caption up there IS
+                // "on this device", so printing it again 60pt lower put the
+                // same three words on screen twice — the exact duplication
+                // `showsModel: false` was added to remove, arriving from the
+                // other direction.
+                if needsDownload {
+                    if showsName {
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                    }
+                    // RED, not orange. `ML.accent` (#FF7A1A) became the app
+                    // tint and now means "actionable" — this same chip fills
+                    // with it for `choose where`. SwiftUI's `.orange`
+                    // (#FF9F0A) is 8% away, so an invitation and a blocked
+                    // state were rendering as the same colour in one control.
+                    //
+                    // Red because this state BLOCKS: the model is selected,
+                    // named, and cannot answer, and send is gated on it. Not
+                    // a caution — a failure.
+                    Text("not downloaded")
+                        .scaledFont(size: 14)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                // Place only when there's no progress to report — a chip
+                // saying model · place · downloading 5% is three facts in a
+                // capsule that has room for two.
+                if !inPanel, progress == nil, !needsDownload, let place = chipPlace(for: provider) {
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Text(place)
+                        .scaledFont(size: 14)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } else if showsName {
+                Text("choose where")
+                    .scaledFont(size: 14, weight: .semibold)
+                    .foregroundStyle(onAccent)
+            }
+            Image(systemName: "chevron.up.chevron.down")
+                .scaledFont(size: 10, weight: .semibold)
+                .foregroundStyle(chevronStyle)
+        }
     }
 
     /// The place, unless the title bar is already stating it.
@@ -260,7 +314,7 @@ struct WhereChip: View {
             // Everything else `placeCaption` returns for cloud stays: Brave
             // Answers' "fast built-in search, single turn q&a" is a capability
             // warning rather than a guarantee, and nothing above repeats it.
-            if provider.capabilities.contains(.endToEndEncryption)
+            if provider.claimsEndToEndEncryption
                 || provider.isNearAI {
                 return WhereProviderPresentation.canonicalName(for: provider)
             }
@@ -293,9 +347,11 @@ struct WhereChip: View {
     /// chip in can say it too: the Menu is the element VoiceOver lands on, and a
     /// label set on its content label does not travel up to it — the system audit
     /// found the chip announced as an unnamed button (Android's I7 port, 2026-10-04).
-    static func accessibilityLabel(for provider: Provider?) -> String {
+    @MainActor
+    static func accessibilityLabel(for provider: Provider?, reasoningLevel: String? = nil) -> String {
         guard let provider else { return "choose where" }
-        return "\(WhereProviderPresentation.modelLabel(for: provider)), \(WhereProviderPresentation.placeCaption(for: provider))"
+        let label = "\(WhereProviderPresentation.chipLabel(for: provider)), \(WhereProviderPresentation.placeCaption(for: provider))"
+        return reasoningLevel.map { "\(label), reasoning \($0)" } ?? label
     }
 }
 

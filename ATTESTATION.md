@@ -101,6 +101,17 @@ check blocks the send:
   The gateway's compose is the measured one (bound by MRCONFIGID). The model node's
   compose, its hashes and its OS image hash come from the node's report as served and are
   not yet bound to its quote, so they say what near.ai reports it runs, not what the quote proves.
+  The measured compose names compose-manager through an overridable default
+  (`${COMPOSE_MANAGER_IMAGE:-…}`), so the phone also reads the manager the attested action log
+  says was last started (`compose_manager_started`), once that log is bound to the quote
+  (`ActionLogReading`). When the two differ the proof view says so and shows the running
+  digest. The running manager's own provenance is not checked: it gets an audit page only if
+  the audits repo has one for that digest, and is marked unreviewed if not. "Published code"
+  therefore means every image the measured launch config names traces to near.ai's source, not
+  that the running manager does. The launcher is named by its linux/amd64 digest but near.ai
+  attests the multi-platform index that lists it, so the phone finds that index on Docker Hub
+  and checks its attestation names near.ai's `compose-manager` build workflow
+  (`LauncherIndex`); a launcher that neither route finds is left unverified.
 - **Per-response signatures** — the signer is *recovered* from each secp256k1 signature
   (EIP-191 ecrecover), or checked against the attested key for Ed25519, and must be a key the
   model node's quote binds in its report_data. The signed text is compared whole against what
@@ -136,6 +147,11 @@ compares the live service against what your session saw.
 
 Every check above is a real check, and none of them add up to a proof that nobody can read
 your conversation. The gaps below are structural, not bugs:
+
+- **The measured env list does not bound the proxy's environment.** The compose project and
+  the per-deploy env overlay compose-manager applies are not in the attested action log, so
+  the measured `allowed_envs` says which variables the outer compose admits, not what the
+  proxy actually runs with.
 
 - **Metadata is not sealed, by protocol design.** `encryptRequestBody` seals message content,
   `name`, `refusal`, `tool_calls`, the tool schemas and `tool_choice`, and passes the rest of

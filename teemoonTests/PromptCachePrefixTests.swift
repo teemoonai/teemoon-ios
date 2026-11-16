@@ -171,7 +171,7 @@ private final class RawBodyProtocol: URLProtocol {
 
         init(_ script: [Data], provider: Provider = Provider(name: "Fireworks", endpoint: "https://api.fireworks.ai/inference/v1",
                                                                model: "accounts/fireworks/models/glm-5p3-flash", requiresAPIKey: false)) throws {
-            container = try ModelContainer(for: ChatThread.self, Message.self,
+            container = try ModelContainer(for: ChatThread.self, Message.self, ImageAttachment.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
             ScriptedServer.reset(script)
             grounding = settings.braveGroundingEnabled

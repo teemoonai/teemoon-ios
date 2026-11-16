@@ -40,7 +40,7 @@ final class SendHangProbeUITests: XCTestCase {
 
         t = Date()
         row.tap()
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 180), "composer never appeared after opening thread")
         print("[sendhang] thread open -> composer visible took \(Date().timeIntervalSince(t))s")
 

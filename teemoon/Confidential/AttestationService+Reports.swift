@@ -25,11 +25,23 @@ extension AttestationService {
             let info: Info?
             /// Ethereum-style address of the TEE ECDSA signing key.
             let signingAddress: String?
+            /// The report_data the gateway advertises beside its quote.
+            let reportData: String?
 
             enum CodingKeys: String, CodingKey {
                 case intelQuote    = "intel_quote"
                 case info
                 case signingAddress = "signing_address"
+                case reportData     = "report_data"
+            }
+
+            // An unexpected type in one field must not cost the gateway leg.
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                intelQuote = try c.decodeIfPresent(String.self, forKey: .intelQuote)
+                info = try c.decodeIfPresent(Info.self, forKey: .info)
+                signingAddress = try c.decodeIfPresent(String.self, forKey: .signingAddress)
+                reportData = try? c.decode(String.self, forKey: .reportData)
             }
         }
 
@@ -73,8 +85,11 @@ extension AttestationService {
         /// this must be verified against the requested model before any of
         /// the report's data is trusted.
         let modelName: String?
+        /// The report_data the node advertises beside its quote.
+        let reportData: String?
 
         enum CodingKeys: String, CodingKey {
+            case reportData                = "report_data"
             case nvidiaPayload             = "nvidia_payload"
             case info
             case composeManagerAttestation = "compose_manager_attestation"
@@ -98,6 +113,7 @@ extension AttestationService {
             signingAddress = try? c.decode(String.self, forKey: .signingAddress)
             intelQuote = try? c.decode(String.self, forKey: .intelQuote)
             modelName = try? c.decode(String.self, forKey: .modelName)
+            reportData = try? c.decode(String.self, forKey: .reportData)
         }
 
         struct NvidiaPayload: Decodable {
@@ -179,6 +195,9 @@ extension AttestationService {
         let quoteVerification: TDXVerificationResult?
         let intelQuote: String?
         let nonce: String?
+        /// The report's own bytes: trust scope (a)(b) read the parsed JSON, never a typed struct.
+        var reportJSON: Data? = nil
+        var advertisedReportData: String? = nil
     }
 
     /// Response from `/v1/attestation/report?signing_algo=ed25519&model=...`.
@@ -230,6 +249,15 @@ extension AttestationService {
         /// flat direct-host report (`info.os_image_hash`) or the gateway-with-
         /// model envelope (`model_attestations[0].info.os_image_hash`).
         var resolvedOSImageHash: String? { info?.osImageHash ?? allAttestations?.first?.info?.osImageHash ?? modelAttestations?.first?.info?.osImageHash }
+
+        /// A string field of the attestation `resolvedQuote` came from, never a sibling's; read untyped so an
+        /// unexpected shape costs only this field, never the model leg.
+        static func quoteLegString(_ path: [String], in data: Data) -> String? {
+            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            let legs = [root] + ["all_attestations", "model_attestations"].compactMap { (root[$0] as? [[String: Any]])?.first }
+            guard let leg = legs.first(where: { $0["intel_quote"] is String }) else { return nil }
+            return path.reduce(leg as Any?) { ($0 as? [String: Any])?[$1] } as? String
+        }
     }
 
     /// Result of fetching the model's Ed25519 attestation data.
@@ -245,5 +273,7 @@ extension AttestationService {
         /// image the plaintext-facing enclave boots on. nil if the response
         /// didn't carry it.
         var osImageHash: String? = nil
+        var advertisedReportData: String? = nil
+        var appCompose: String? = nil
     }
 }

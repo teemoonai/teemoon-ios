@@ -24,10 +24,39 @@ final class ChatGeneration {
     var collapsed: Bool = false
     var lastError: LLMError? = nil
     var lastErrorThreadID: UUID? = nil
+    /// The last request's earlier images that were not sent: (model can't see images, over the budget).
+    var imagesLeftOut: (forModel: Int, forSize: Int) = (0, 0)
+    /// Refusal for a message with images to a model that can't see them (the maintainer's approved string).
+    static let cantSeeImagesMessage = "this model can't see images. remove them or choose another model."
+    /// Images one request may carry, current and earlier together: a phone model's measured number, else the cloud's.
+    static func requestImageBudget(localModelID: String?) -> Int {
+        localModelID.map(PhoneImageMemory.maxImages(modelID:)) ?? maxImagesPerRequest
+    }
+
+    /// DRAFT wording.
+    static func tooManyOnDeviceMessage(max: Int, model: String) -> String {
+        "\(model) takes up to \(max) images per message. remove the others."
+    }
+
+    /// Why the message being sent can't go as it is, or nil. Never sent without its images.
+    static func imageRefusal(count: Int, seesImages: Bool, onDeviceMax: Int?, memoryLine: String? = nil,
+                             model: String = "this model") -> String? {
+        guard count > 0 else { return nil }
+        if !seesImages { return cantSeeImagesMessage }
+        if let memoryLine { return memoryLine }
+        if let onDeviceMax, count > onDeviceMax { return tooManyOnDeviceMessage(max: onDeviceMax, model: model) }
+        return nil
+    }
     /// The thread whose last turn was cut off by the app leaving the
     /// foreground — not by the user. Consumed by `ChatViewModel.
     /// interruptedUserMessage` when the app returns, which re-asks it.
     var interruptedThreadID: UUID? = nil
+    /// iOS ended this turn's background time (not the user): the reply is interrupted, not stopped.
+    @ObservationIgnored private(set) var backgroundTimeExpired = false
+    /// How the last turn's stream ended, from its transport (reply-machine.json G4).
+    @ObservationIgnored private(set) var lastTurnEnd: TurnEnd?
+    /// Bumped per turn; a callback carrying an older one belongs to a stopped turn and changes nothing.
+    @ObservationIgnored private(set) var turnToken = 0
     var lastRequestDebugInfo: LastRequestDebugInfo? = nil
     var groundingSources: [GroundingSource] = []
     var searchQueries: [String] = []
@@ -120,6 +149,14 @@ final class ChatGeneration {
     }
 
     var startTime: Date?
+    /// This turn runs on the phone, so an engine load can stand in for "thinking".
+    var turnIsOnDevice = false
+
+    /// The chip's engine-load line for this turn, or nil (EngineLoadLine). Counted from `startTime`.
+    func engineLoadLine(at now: Date) -> String? {
+        guard turnIsOnDevice else { return nil }
+        return EngineLoadObserver.shared.line(sentAt: startTime, now: now)
+    }
     /// The tap, and the moment the attestation gate let the send through.
     /// `startTime` is later: it opens when the request is built.
     var turnOrigin: Date?
@@ -127,6 +164,14 @@ final class ChatGeneration {
     /// Set by a retry or Think Harder for its one turn: the prompt was just sent, so a 0% is a miss.
     var turnIsReask = false
     var gateEndedAt: Date?
+    /// prepareTurn is holding this turn's send. Set only for a provider whose gate waits (`.attestation`).
+    var waitingForVerification = false
+
+    /// The reply placeholder's phase at `now`.
+    func pendingReplyPhase(at now: Date) -> PendingReplyPhase {
+        PendingReplyPhase.of(gateWaiting: waitingForVerification, loadLine: engineLoadLine(at: now),
+                             thinkingHarder: superseding.isActive)
+    }
     /// Where a reply-signature verdict goes once it lands after the turn.
     var onReplyVerified: ((ResponseVerification) -> Void)?
     var firstTokenTime: Date?
@@ -189,6 +234,16 @@ final class ChatGeneration {
         }
     }
 
+    /// The error card's line for a failure that isn't already an `LLMError`.
+    nonisolated static func cardMessage(for error: Error, provider: Provider, answerStarted: Bool) -> String {
+        if let urlError = error as? URLError {
+            return NetworkFailure(urlError.code, answerStarted: answerStarted, selfHosted: provider.isSelfHosted)
+                .message(provider: provider.name)
+        }
+        if let local = error as? LocalInferenceError, let line = local.errorDescription { return line }
+        return NetworkFailure.other.message(provider: provider.name)
+    }
+
     /// Streams a response from an OpenAI-compatible provider.
     ///
     /// Tool calls (e.g. BraveWebSearchTool) are executed by
@@ -199,14 +254,18 @@ final class ChatGeneration {
         thread: Thread,
         systemPrompt: String,
         groundingAPIKey: String?,
+        searchTurnedOff: Bool = false,
         apiKey: String,
         teeContext: TEEContext? = nil,
         effort: ReasoningEffort? = ReasoningEffort.chatDefault
     ) async -> String {
         guard !running else { return "" }
+        turnToken += 1
 
         running = true
         cancelled = false
+        backgroundTimeExpired = false
+        lastTurnEnd = nil
         output = ""
         groundingSources = []
         searchQueries = []
@@ -223,7 +282,9 @@ final class ChatGeneration {
         lastRequestDebugInfo = nil
         interruptedThreadID = nil
         startTime = Date()
+        turnIsOnDevice = false
         firstTokenTime = nil
+        thinkingTime = nil
         // The chip must not outlive the generation that justified it: a cancel
         // or a throw leaves the last `onAwaitingModel(_, true)` unanswered.
         defer {
@@ -234,24 +295,38 @@ final class ChatGeneration {
         }
 
         let bgTask = BackgroundWork.begin("LLM Inference") { [weak self] in
-            Task { @MainActor in self?.stop() }
+            Task { @MainActor in
+                self?.backgroundTimeExpired = true
+                self?.stop()
+            }
         }
         defer { BackgroundWork.end(bgTask) }
 
-        let allMessages = superseding.history(thread.sortedMessages)
+        // An empty reply row (the live one, or a turn that failed before any text) is never history.
+        let allMessages = superseding.history(thread.sortedMessages).filter {
+            !($0.role == .assistant && $0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
         turnIsFirstMessage = allMessages.filter { $0.role == .user }.count == 1 && !turnIsReask
         turnIsReask = false
         guard let lastMessage = allMessages.last, lastMessage.role == .user else { return "" }
 
         guard let baseURL = provider.openAIBaseURL else {
-            output = "Invalid endpoint URL: \(provider.endpoint)"
-            return output
+            // A failed turn, never a reply: the card says why.
+            lastError = LLMError(source: .provider(name: provider.name),
+                                 userMessage: "this server address isn't valid: \(provider.endpoint)",
+                                 httpStatus: nil, url: nil, requestHeaders: nil, requestBodyJSON: nil,
+                                 messageHistory: nil, responseBody: nil, underlyingError: nil)
+            lastErrorThreadID = thread.id
+            return ""
         }
         // A SwiftData model must not be captured in an escaping closure, so the
         // id is lifted out here rather than reaching through `thread`.
         let capturedThreadID = thread.id
+        // What this request may say about the person: decided here, beside the model it goes to (docs/DISCLOSURE.md).
+        let disclosure = DisclosurePolicy(place: WhereLocality.of(provider), sealed: teeContext?.e2eePeer != nil)
         let tools = makeGroundingTools(
-            provider: provider, groundingAPIKey: groundingAPIKey, threadID: capturedThreadID
+            provider: provider, groundingAPIKey: groundingAPIKey, searchTurnedOff: searchTurnedOff,
+            threadID: capturedThreadID, today: disclosure.toolDay(Date())
         )
 
         // CANONICAL, not `provider.name` — see `LastRequestDebugInfo.providerName`.
@@ -273,26 +348,59 @@ final class ChatGeneration {
         // (5 trials each, easy and terse prompts) measured a 5/5 tool-call rate with no
         // system prompt, with the persona, and with persona+guidance alike. The real bugs
         // were elsewhere: the `@Generable` $ref schema and the dropped `reasoning` key.
-        let resolvedPrompt = Self.resolvePromptTemplates(systemPrompt)
+        let resolvedPrompt = Self.resolvePromptTemplates(systemPrompt, disclosure: disclosure)
         // `effective…` rather than the stored fields: the one-message cap and the
         // omitted system prompt are HARD constraints of the endpoint (Brave 422s
         // otherwise), so a provider whose stored config predates them — or was
         // edited — must not be able to send a shape the API will reject.
         let timeNotes = Self.wantsTimeNotes(systemPrompt: systemPrompt,
                                             omitSystemPrompt: provider.effectiveOmitSystemPrompt)
-        let priorMessages = Self.buildWireMessages(
+        // Images go only to a model that takes them: the message being sent is refused (never sent
+        // without its images), earlier ones become a line (IMAGES.md §4).
+        turnIsOnDevice = provider.isLocal
+        let promptImages = ImageAttachment.images(of: lastMessage).map(WireImage.init)
+        let transcript = Self.buildTranscript(
             from: allMessages, systemPrompt: resolvedPrompt,
             maxMessages: provider.effectiveMaxMessages,
             omitSystemPrompt: provider.effectiveOmitSystemPrompt,
-            timeNotes: timeNotes
+            timeNotes: timeNotes,
+            seesImages: provider.modelSeesImages,
+            maxImages: Self.requestImageBudget(localModelID: provider.localModelID), disclosure: disclosure,
+            promptImages: promptImages,
+            images: { ImageAttachment.images(of: $0).map(WireImage.init) }
         )
+        // The memory check covers every image the request carries, earlier ones too (§4b).
+        let requestImages = promptImages.count + transcript.messages.reduce(0) { $0 + $1.images.count }
+        let onDeviceMax = provider.isLocal ? PhoneImageMemory.maxImages(modelID: provider.model) : nil
+        let modelName = WhereProviderPresentation.chipLabel(for: provider).lowercased()
+        let memoryLine = provider.isLocal && requestImages > 0
+            ? PhoneImageMemory.turn(modelID: provider.model).text(model: modelName)
+            : nil
+        if let refusal = Self.imageRefusal(count: promptImages.count, seesImages: provider.modelSeesImages,
+                                           onDeviceMax: onDeviceMax, memoryLine: memoryLine, model: modelName) {
+            lastError = LLMError(
+                source: .provider(name: provider.name),
+                userMessage: refusal,
+                httpStatus: nil, url: nil, requestHeaders: nil, requestBodyJSON: nil,
+                messageHistory: nil, responseBody: nil, underlyingError: nil
+            )
+            lastErrorThreadID = capturedThreadID
+            return ""
+        }
+        // A mark the OS kill leaves behind; the next launch remembers this model can't do images here (§4b).
+        let marksImageTurn = provider.isLocal && requestImages > 0
+        if marksImageTurn { PhoneImageMemory.KillStore.shared.began(provider.model) }
+        defer { if marksImageTurn { PhoneImageMemory.KillStore.shared.ended() } }
+        imagesLeftOut = (transcript.imagesLeftOutForModel, transcript.imagesLeftOutForSize)
+        let priorMessages = transcript.messages
         // The one place local and remote diverge. Both conform to
         // `LanguageModel`, both run the same `GenerationEngine` underneath, so
         // everything past this line — the session, the tool loop, the streaming,
         // the UI — is identical. Tests replace the whole construction.
         guard let model = resolveLanguageModel(
             provider: provider, apiKey: apiKey, priorMessages: priorMessages,
-            teeContext: teeContext, callbacks: callbacks, threadID: capturedThreadID, effort: effort
+            teeContext: teeContext, callbacks: callbacks, threadID: capturedThreadID, effort: effort,
+            promptImages: promptImages
         ) else { return "" }
 
         seedDebugInfo(
@@ -306,7 +414,7 @@ final class ChatGeneration {
         let session = LanguageModelSession(model: model, tools: tools)
         // Think Harder asks again now; its question is restamped only when the new reply lands.
         let askedAt = superseding.isActive ? Date() : lastMessage.timestamp
-        let timeNote = timeNotes ? Self.timeNote(sentAt: askedAt) : ""
+        let timeNote = timeNotes ? disclosure.sentAt(askedAt) : ""
         // The MODEL's stream, not `session.streamResponse`: AnyLanguageModel 0.8 relays that one
         // through a Task it never cancels, so a stop left the request running (Android 3917.7).
         let stream = model.streamResponse(within: session, to: Prompt(lastMessage.content + timeNote),
@@ -337,6 +445,10 @@ final class ChatGeneration {
                 // beginTransaction doing anchor/TextKit work with no visible
                 // text moving).
                 if self.output != snapshot.content { self.output = snapshot.content }
+                if self.thinkingTime == nil,
+                   let thought = ThinkingClock.stamp(nil, output: snapshot.content, elapsed: self.elapsedTime) {
+                    self.thinkingTime = thought
+                }
                 if self.superseding.isActive, !self.superseding.swapped, !snapshot.content.isEmpty {
                     self.superseding.noteText(snapshot.content)
                 }
@@ -372,7 +484,7 @@ final class ChatGeneration {
             logger.error("Stream error: \(error)")
             lastError = LLMError(
                 source: .provider(name: provider.name),
-                userMessage: "An unexpected error occurred with \(provider.name). \(error.localizedDescription)",
+                userMessage: Self.cardMessage(for: error, provider: provider, answerStarted: !output.isEmpty),
                 httpStatus: nil,
                 url: baseURL,
                 requestHeaders: nil,
@@ -384,6 +496,7 @@ final class ChatGeneration {
             lastErrorThreadID = thread.id
             output = ""
         }
+        lastTurnEnd = resultBag.value?.finish
         finishGeneration(
             provider: provider, baseURL: baseURL, threadID: capturedThreadID,
             toolCallsBag: toolCallsBag, resultBag: resultBag

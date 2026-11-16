@@ -76,7 +76,7 @@ final class MacAccessibilityAuditUITests: XCTestCase {
     /// Every button in the main window must announce as something a person can
     /// act on.
     func testEveryButtonHasAnAnnouncableName() throws {
-        XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textViews["chat.composer"].waitForExistence(timeout: 10))
 
         var offenders: [String] = []
         let buttons = app.windows.firstMatch.buttons
@@ -108,7 +108,7 @@ final class MacAccessibilityAuditUITests: XCTestCase {
     /// not be in the tree at all. Either way, an image announcing its SF Symbol
     /// name is wrong — "moonphase.waning.gibbous" is not a sentence.
     func testNoImageAnnouncesItsSymbolName() throws {
-        XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textViews["chat.composer"].waitForExistence(timeout: 10))
 
         var offenders: [String] = []
         let images = app.windows.firstMatch.images
@@ -132,7 +132,7 @@ final class MacAccessibilityAuditUITests: XCTestCase {
     /// The composer is the app's primary control. It must announce as something,
     /// and its placeholder alone is thin but acceptable.
     func testComposerIsAnnouncable() throws {
-        let composer = app.textFields["chat.composer"]
+        let composer = app.textViews["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         XCTAssertFalse(spokenName(composer).isEmpty,
                        "the message field announces as nothing")

@@ -10,6 +10,17 @@
 import XCTest
 
 enum ProductE2E {
+    /// A tap on a freshly presented button can be dropped while its view settles; it is retried until the button
+    /// has acted (gone), never once it has, so a retry cannot fire an action twice.
+    static func tapUntilGone(_ button: XCUIElement, attempts: Int = 3) {
+        for _ in 0..<attempts {
+            guard button.exists else { return }
+            if button.isHittable { button.tap() }
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: button)
+            if XCTWaiter().wait(for: [gone], timeout: 4) == .completed { return }
+        }
+    }
+
 
     /// Mac home as this test process sees it. Not a secret.
     static func runnerHostHome() -> String? {
@@ -97,6 +108,10 @@ enum ProductE2E {
         return staged > 0 ? dest : nil
     }
 
+    /// "+" asks for a review every 5th launch the simulator remembers across runs, and the card covers the toolbar
+    /// until it is dismissed. Pinned off (argument domain) for every launch; do not tap it away instead.
+    static let noReviewAsk = ["-numberOfVisits", "0", "-numberOfVisitsOfLastRequest", "0"]
+
     static func launch(
         arguments: [String] = ["--uitesting"],
         environment: [String: String] = [:]
@@ -117,7 +132,7 @@ enum ProductE2E {
             env["TEEMOON_STAGED_KEYS"] = staged.path
         }
         let app = XCUIApplication()
-        app.launchArguments = arguments
+        app.launchArguments = arguments + noReviewAsk
         app.launchEnvironment = env
         app.launch()
         return app
@@ -138,10 +153,12 @@ enum ProductE2E {
         ])
     }
 
-    static func launchPreset(_ preset: String, model: String? = nil, grounding: Bool = false) -> XCUIApplication {
+    static func launchPreset(_ preset: String, model: String? = nil, grounding: Bool = false,
+                             developerMode: Bool = false) -> XCUIApplication {
         var env = ["UITEST_SEED_PRESET": preset]
         if let model { env["UITEST_SEED_MODEL"] = model }
         if grounding { env["UITEST_SEED_GROUNDING"] = "1" }
+        if developerMode { env["UITEST_DEVELOPER_MODE"] = "1" }
         return launch(environment: env)
     }
 
@@ -238,6 +255,15 @@ enum ProductE2E {
         ]
         extraEnv.forEach { env[$0] = $1 }
         return launch(environment: env)
+    }
+
+    /// The send gate's question, an alert or an action sheet: a bare `app.alerts` check would miss a sheet and
+    /// a "no alert" assertion would then pass whatever is on screen.
+    static func sendGateDialog(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "elementType == %d OR elementType == %d",
+                                  XCUIElement.ElementType.alert.rawValue, XCUIElement.ElementType.sheet.rawValue))
+            .firstMatch
     }
 
     static func composer(_ app: XCUIApplication) -> XCUIElement {
@@ -366,6 +392,10 @@ enum ProductE2E {
     static func openChats(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let chats = app.buttons["list.bullet"].firstMatch
         XCTAssertTrue(chats.waitForExistence(timeout: 10), "chats button missing", file: file, line: line)
+        // A tap on a covered button lands nowhere and reads as "did not open"; name the cover instead.
+        let uncovered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: chats)
+        XCTAssertEqual(XCTWaiter().wait(for: [uncovered], timeout: 5), .completed,
+                       "chats button is covered: \(app.debugDescription)", file: file, line: line)
         chats.tap()
         XCTAssertTrue(app.navigationBars["chats"].waitForExistence(timeout: 5),
                       "chats list did not open", file: file, line: line)

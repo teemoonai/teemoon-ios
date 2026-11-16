@@ -10,7 +10,8 @@
 
 import CoreGraphics
 
-/// Where the transcript's fade sits inside the chat's bottom inset.
+/// Where the SwiftUI transcript's mask (`chatBottomScrollFade`) fades inside the chat's bottom inset. The UIKit
+/// transcript's glass bars are `ChatGlassFade` below, which shows the transcript softly under the panel instead.
 ///
 /// All offsets are measured DOWN FROM THE TOP OF THE INSET, which is the space
 /// the geometry reader in `ChatView` reports in.
@@ -52,10 +53,16 @@ struct ChatFadeBand: Equatable {
     /// Full height of the inset (note + chip + composer + padding).
     let insetHeight: CGFloat
 
-    init(chipTop: CGFloat, chipBottom: CGFloat, insetHeight: CGFloat) {
+    /// The panel's left edge and width in the inset (= overlay) width; nil width: the 16 pt gutters.
+    let chipMinX: CGFloat
+    let chipWidth: CGFloat?
+
+    init(chipTop: CGFloat, chipBottom: CGFloat, insetHeight: CGFloat, chipMinX: CGFloat = 16, chipWidth: CGFloat? = nil) {
         self.chipTop = max(chipTop, 0)
         self.chipBottom = max(chipBottom, self.chipTop)
         self.insetHeight = max(insetHeight, self.chipBottom)
+        self.chipMinX = chipMinX
+        self.chipWidth = chipWidth.flatMap { $0 > 1 ? $0 : nil }
     }
 
     /// Height of the gradient — the chip's own height.
@@ -127,10 +134,8 @@ struct ChatFadeBand: Equatable {
 
 }
 
-/// Liquid-glass edge dissolve. Not an opaque `systemBackground` shelf —
-/// that is the black band that fights the material. Blur + a dim that
-/// never reaches 1 at the *approach*, so the last line dissolves, and
-/// nearly 1 on the chrome, so the title and capsules stay readable.
+/// The UIKit transcript's bars: a dim to the page's black, fully black behind the bar and around the panel (0.97 still
+/// read on OLED black), and blur only for the panel's frost at accessibility sizes. Values are the maintainer's 2026-11-14 picks, tabled in docs/COMPOSER_PANEL.md.
 enum ChatGlassFade {
     struct Stop: Equatable {
         var location: CGFloat
@@ -142,53 +147,62 @@ enum ChatGlassFade {
     }
 
     /// Extra height above the chip where the bottom dissolve starts.
-    static let bottomApproach: CGFloat = 56
+    static let bottomApproach: CGFloat = 14
 
-    /// The dissolve's run-out BELOW the title. Not 64pt — that dimmed
-    /// the first readable lines under the header as a flat band.
-    static let topApproach: CGFloat = 28
+    /// The run-out starts `topLift` above the bar's measured bottom (below the subtitle, inside the circles' lower edge)
+    /// and runs `topApproach`. More lift reaches the subtitle's text; less leaves an empty strip under the buttons.
+    static let topLift: CGFloat = 6
+    static let topApproach: CGFloat = 10
 
-    /// `t = 0` is the top of the screen, `t = 1` is the run-out's end.
-    ///
-    /// THE DIM DOES NOT END ON THE TITLE'S BOTTOM EDGE. It used to
-    /// (0.08 at `titleEnd`), on the rule that the first body line should
-    /// be full brightness — but the anchor now parks the prompt at
-    /// exactly `U.minY - topFade`, so there is always body text sitting
-    /// on that boundary, and it read as the previous reply colliding
-    /// with the header. Measured on the capture fixture: 147/255 at the
-    /// title's edge. The dim now runs out over `topApproach` instead, so
-    /// the first FULL-brightness line starts below the header rather
-    /// than against it.
-    ///
-    /// Two things this must never become, both paid for on device: an
-    /// opaque shelf (dim stays < 1 — "the black band that fights the
-    /// material") and a hard edge (`.hard` sliced glyphs at the bar
-    /// line and was reverted the same day). If the header still loses
-    /// against busy content, the fix is `E2EETitleBlock`'s 11pt/0.45,
-    /// not more band.
+    /// Behind the status row and title the transcript fades to the page's own black: no material and no tint, so no
+    /// grey (the maintainer 2026-11-14), and no word shapes. `t = 0` is the top of the screen, `t = 1` the run-out's end.
     static func topStops(titleHeight: CGFloat) -> [Stop] {
-        let h = max(titleHeight + topApproach, 1)
-        let titleEnd = min(max(titleHeight / h, 0), 1)
+        let start = max(titleHeight - topLift, 0)
+        let h = max(start + topApproach, 1)
+        let held = min(max(start / h, 0), 1)
         return [
-            .init(location: 0,               blur: 1,    dim: 0.80),
-            .init(location: titleEnd * 0.82, blur: 0.95, dim: 0.88),
-            .init(location: titleEnd,        blur: 0.55, dim: 0.45),
-            .init(location: 1,               blur: 0,    dim: 0),
+            .init(location: 0,    blur: 0, dim: 1),
+            .init(location: held, blur: 0, dim: 1),
+            .init(location: 1,    blur: 0, dim: 0),
         ]
     }
 
-    /// Stops for a measured bottom overlay. The approach is a soft
-    /// dissolve; from the chip down, dim is high enough that body text
-    /// is not a second sentence on the capsules.
+    /// How much of the home indicator lies inside the view: none when the view ends above it (the keyboard is up).
+    static func homeIndicatorInView(safeAreaBottom: CGFloat, gapBelowView: CGFloat) -> CGFloat {
+        max(safeAreaBottom - max(gapBelowView, 0), 0)
+    }
+
+    /// The composer panel's tint over its glass (the maintainer 2026-11-14: "85 is fine"); nothing reads through it.
+    static let panelFill: Double = 0.85
+
+    /// The composer panel's corner radius (docs/COMPOSER_PANEL.md spacing table).
+    static let panelCornerRadius: CGFloat = 30
+
+    /// Inside the hole, at accessibility text sizes only: the glass's own blur has a fixed radius and leaves glyphs that
+    /// big readable. Nil: the hole stays clear.
+    static func panelFrost(accessibilityText: Bool) -> Stop? {
+        accessibilityText ? Stop(location: 0, blur: 1, dim: 0.2) : nil
+    }
+
+    /// Where the band opens for the glass: the panel's own rectangle (16 pt in from the sides, from its top edge, its
+    /// height), in the overlay's coordinates. Reduce Transparency: none, the panel is opaque.
+    static func panelHole(overlayWidth: CGFloat, band: ChatFadeBand, reduceTransparency: Bool) -> CGRect? {
+        guard !reduceTransparency else { return nil }
+        return CGRect(x: band.chipMinX, y: bottomApproach, width: band.chipWidth ?? max(overlayWidth - 32, 0), height: band.ramp)
+    }
+
+    /// Stops for a measured bottom overlay (the "chip" band is the composer panel on iOS). Text is full strength until
+    /// `bottomApproach` above the panel, then fades into the page's black beside and below it: no material, no grey
+    /// (the maintainer 2026-11-14, "i want black around the composer"). The panel is a clear hole under its own tinted glass.
     static func bottomStops(ramp: CGFloat, hidden: CGFloat, home: CGFloat) -> [Stop] {
         let h = max(bottomApproach + ramp + hidden + home, 1)
         let chipTop = bottomApproach / h
         let chipBottom = (bottomApproach + ramp) / h
         return [
-            .init(location: 0,          blur: 0,    dim: 0),
-            .init(location: chipTop,    blur: 0.55, dim: 0.28),
-            .init(location: chipBottom, blur: 1,    dim: 0.94),
-            .init(location: 1,          blur: 1,    dim: 0.96),
+            .init(location: 0,          blur: 0, dim: 0),
+            .init(location: chipTop,    blur: 0, dim: 1),
+            .init(location: chipBottom, blur: 0, dim: 1),
+            .init(location: 1,          blur: 0, dim: 1),
         ]
     }
 }
@@ -220,6 +234,6 @@ struct ChatChrome: Equatable {
     /// Never a `statusBar + N` guess.
     func topOverlayHeight(titleMaxYInCanvas y: CGFloat) -> CGFloat {
         let chrome = topChromeHeight(titleMaxYInCanvas: y)
-        return chrome > 1 ? chrome + ChatGlassFade.topApproach : 0
+        return chrome > 1 ? max(chrome - ChatGlassFade.topLift, 0) + ChatGlassFade.topApproach : 0
     }
 }

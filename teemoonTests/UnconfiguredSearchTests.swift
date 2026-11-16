@@ -1,3 +1,4 @@
+import AnyLanguageModel
 import Foundation
 import Testing
 @testable import teemoon
@@ -235,6 +236,46 @@ struct GroundingToolAttachmentTests {
         )
         #expect(tools.count == 1)
         #expect(tools.first is BraveWebSearchTool)
+    }
+
+    /// Measured 2026-10-28 on the iPhone 16 Pro: the full schema is ~400 prefill tokens and put a new on-device
+    /// chat's first token at 1.65 s against 0.30 s without it. Keyless it cannot search, so only `query` is sent.
+    @Test("on device, the keyless offer trigger sends only the query argument")
+    func keylessOnDeviceSchemaIsQueryOnly() throws {
+        let tools = ChatGeneration().makeGroundingTools(
+            provider: .local(LocalModelCatalog.all[0]), groundingAPIKey: nil, threadID: UUID()
+        )
+        let tool = try #require(tools.first)
+        #expect(tools.count == 1)
+        #expect(tool.name == "web_search")
+        let schema = GenerationEngine.flattenedToolSchema(tool)
+        let properties = try #require(schema["properties"] as? [String: Any])
+        #expect(Set(properties.keys) == ["query"])
+        let bytes = try JSONSerialization.data(withJSONObject: schema).count
+        #expect(bytes < 300, "keyless on-device schema is \(bytes) bytes")
+    }
+
+    @Test("with a key, the on-device tool keeps its full schema")
+    func keyedOnDeviceSchemaIsFull() throws {
+        let tools = ChatGeneration().makeGroundingTools(
+            provider: .local(LocalModelCatalog.all[0]), groundingAPIKey: "k", threadID: UUID()
+        )
+        let tool = try #require(tools.first)
+        #expect(tool is BraveWebSearchTool)
+    }
+
+    @Test("on device, a key with the web chip off sends no tool")
+    func onDeviceKeyTurnedOffAttachesNothing() {
+        #expect(ChatGeneration().makeGroundingTools(
+            provider: .local(LocalModelCatalog.all[0]), groundingAPIKey: nil, searchTurnedOff: true, threadID: UUID()
+        ).isEmpty)
+    }
+
+    @Test("in the cloud, a key with the web chip off still sends the offer trigger")
+    func cloudKeyTurnedOffStillAttaches() {
+        #expect(ChatGeneration().makeGroundingTools(
+            provider: .fireworks, groundingAPIKey: nil, searchTurnedOff: true, threadID: UUID()
+        ).count == 1)
     }
 
     @Test("a declined thread does not pay for the schema while keyless")

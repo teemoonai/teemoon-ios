@@ -108,7 +108,14 @@ extension AttestationService {
             if !apiKey.isEmpty {
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             }
-            guard let (data, response) = try? await http.data(for: request) else {
+            let data: Data, response: URLResponse
+            do {
+                (data, response) = try await http.data(for: request)
+            } catch {
+                if requestWasCancelled(error, taskCancelled: Task.isCancelled) {
+                    logger.debug("[\(label, privacy: .public)] model attestation attempt \(attempt+1): cancelled (the other source answered)")
+                    return nil
+                }
                 logger.warning("[\(label, privacy: .public)] model attestation attempt \(attempt+1): network request failed")
                 continue
             }
@@ -166,11 +173,18 @@ extension AttestationService {
                 intelQuote: report.resolvedQuote,
                 nonce: nonce,
                 nvidiaPayload: report.resolvedNvidiaPayload,
-                osImageHash: report.resolvedOSImageHash
+                osImageHash: report.resolvedOSImageHash,
+                advertisedReportData: Ed25519Report.quoteLegString(["report_data"], in: data),
+                appCompose: Ed25519Report.quoteLegString(["info", "tcb_info", "app_compose"], in: data)
             )
         }
         logger.error("[\(label, privacy: .public)] model attestation: Ed25519 key unavailable after \(max(1, maxAttempts)) attempt(s)")
         return nil
+    }
+
+    /// A request that ended because its task was cancelled (the race's loser), not a network failure.
+    static func requestWasCancelled(_ error: Error, taskCancelled: Bool) -> Bool {
+        taskCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     /// Awaits the first task to produce a non-nil value, then cancels the rest.

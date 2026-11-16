@@ -70,7 +70,7 @@ final class ProductLiveE2ETests: XCTestCase {
                 }
                 ProductE2E.send(app)
             } else {
-                XCTFail("send raised an alert instead of going out: \(app.alerts.firstMatch.label)")
+                XCTFail("send raised the send-gate question instead of going out: \(app.alerts.firstMatch.label)")
                 return
             }
         }
@@ -139,7 +139,7 @@ final class ProductLiveE2ETests: XCTestCase {
                        "session blocked after two live turns with the debug panel on")
     }
 
-    // MARK: - use cases (the Android port's list), 2026-10-05. Neither spends: attestation and a key probe.
+    // MARK: - use cases (docs/USE_CASES.md in teemoon-android), 2026-10-05. Neither spends: attestation and a key probe.
 
     /// E10: re-verify on the trust sheet refreshes the stamp (a new nonce), and the expert rung's copy puts the
     /// self-verify script on the clipboard.

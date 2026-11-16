@@ -16,6 +16,7 @@ struct SelfVerifyScriptCard: View {
     let script: String
 
     @State private var copied = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     // A real code look: a dark terminal panel with a monospaced code font and
     // light syntax highlighting.
@@ -40,41 +41,69 @@ struct SelfVerifyScriptCard: View {
     }
 
     /// Filename · language tag · filled copy pill (green when copied).
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "apple.terminal").font(.caption2)
-            Text("teemoon_verify.py")
-                .font(.system(.caption, design: .monospaced))
-                .fontDesign(.monospaced)
-                // A filename never wraps: one line, middle-truncated if the
-                // bar gets tight, and it wins space over the language tag.
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .layoutPriority(1)
-            Text("shell · python")
-                .font(.caption2.weight(.medium))
-                // Never wraps: the tag stays whole and the (middle-
-                // truncating) filename yields space instead.
-                .lineLimit(1)
-                .fixedSize()
-                .foregroundStyle(Color(red: 0.60, green: 0.64, blue: 0.71))
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.white.opacity(0.07), in: Capsule())
-            Spacer(minLength: 8)
-            copyButton
+    @ViewBuilder private var header: some View {
+        // At accessibility sizes one line is wider than the phone and widens the whole sheet: stack it.
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) { terminalIcon; fileName }
+                languageTag
+                copyButton
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(BarStyle())
+        } else {
+            HStack(spacing: 8) {
+                terminalIcon
+                fileName
+                languageTag
+                Spacer(minLength: 8)
+                copyButton
+            }
+            .modifier(BarStyle())
         }
-        .foregroundStyle(Color(red: 0.68, green: 0.71, blue: 0.77))
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(Self.codeBarBG)
+    }
+
+    private struct BarStyle: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .foregroundStyle(Color(red: 0.68, green: 0.71, blue: 0.77))
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(SelfVerifyScriptCard.codeBarBG)
+        }
+    }
+
+    private var terminalIcon: some View { Image(systemName: "apple.terminal").font(.caption2) }
+
+    private var fileName: some View {
+        Text("teemoon_verify.py")
+            .font(.system(.caption, design: .monospaced))
+            .fontDesign(.monospaced)
+            // A filename never wraps: one line, middle-truncated if the
+            // bar gets tight, and it wins space over the language tag.
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .layoutPriority(1)
+    }
+
+    private var languageTag: some View {
+        Text("shell · python")
+            .font(.caption2.weight(.medium))
+            // Never wraps: the tag stays whole and the (middle-
+            // truncating) filename yields space instead.
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(Color(red: 0.60, green: 0.64, blue: 0.71))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.white.opacity(0.07), in: Capsule())
     }
 
     private var copyButton: some View {
         Button {
             Clipboard.copy(script)
-            withAnimation(.spring(duration: 0.35, bounce: 0.1)) { copied = true }
+            withAnimation(Motion.swap) { copied = true }
             Task {
                 try? await Task.sleep(nanoseconds: 1_600_000_000)
-                await MainActor.run { withAnimation { copied = false } }
+                await MainActor.run { withAnimation(Motion.swap) { copied = false } }
             }
         } label: {
             HStack(spacing: 5) {
@@ -120,6 +149,8 @@ struct SelfVerifyScriptCard: View {
             .padding(12)
         }
         .frame(maxHeight: 300)
+        // Capped: at AX5 the source, one Text, grew too large to draw and the card showed only line numbers.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .defaultScrollAnchor(.topLeading)
         // Faint right-edge fade: signals the source scrolls sideways without
         // an always-visible scrollbar.

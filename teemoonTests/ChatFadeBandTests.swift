@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import teemoon
@@ -171,9 +172,9 @@ struct ChatFadeBandTests {
         let chrome = ChatChrome(bottom: band)
         #expect(chrome.topChromeHeight(titleMaxYInCanvas: 118) == 118)
         #expect(chrome.topOverlayHeight(titleMaxYInCanvas: 118)
-                    == 118 + ChatGlassFade.topApproach)
+                    == 118 - ChatGlassFade.topLift + ChatGlassFade.topApproach)
         #expect(chrome.topOverlayHeight(titleMaxYInCanvas: 96)
-                    == 96 + ChatGlassFade.topApproach)
+                    == 96 - ChatGlassFade.topLift + ChatGlassFade.topApproach)
         #expect(chrome.topOverlayHeight(titleMaxYInCanvas: 0) == 0)
         #expect(chrome.topOverlayHeight(titleMaxYInCanvas: 0.4) == 0)
     }
@@ -182,56 +183,98 @@ struct ChatFadeBandTests {
         let chrome = ChatChrome(topInset: 130, bottom: band)
         #expect(chrome.topChromeHeight(titleMaxYInCanvas: 96) == 130)
         #expect(chrome.topOverlayHeight(titleMaxYInCanvas: 140)
-                    == 140 + ChatGlassFade.topApproach)
+                    == 140 - ChatGlassFade.topLift + ChatGlassFade.topApproach)
     }
 
-    /// The dim RUNS OUT BELOW THE TITLE, it does not stop on its edge.
-    ///
-    /// This reverses `fc2e18b`'s rule that the first body line under the
-    /// header is full brightness. That was fine while whatever sat there
-    /// was arbitrary; the anchor now parks the prompt at
-    /// `U.minY - topFade`, so there is always body text on that boundary
-    /// and it read as the previous reply colliding with the header
-    /// (measured 147/255 at the title's edge on the capture fixture).
-    ///
-    /// The two bounds below are the ones that stay: never an opaque
-    /// shelf, never a hard edge. Both were tried on device and reverted.
-    @Test func theGlassTopFadeRunsOutBelowTheTitle_notOnItsEdge() {
-        // A run-out, not a body-line band: 64pt was rejected for that.
-        #expect(ChatGlassFade.topApproach > 16)
-        #expect(ChatGlassFade.topApproach < 40)
-        let stops = ChatGlassFade.topStops(titleHeight: 118)
-        #expect(stops.first?.dim ?? 1 < 0.85)   // never the opaque shelf
-        #expect(stops.first?.blur ?? 0 > 0.5)
-        #expect(stops.last?.dim == 0)           // never a hard edge
-        #expect(stops.last?.blur == 0)
-        #expect(stops.allSatisfy { $0.dim < 1 })
-        // Still substantially dimmed where the title ends — this is the
-        // assertion that changed, and the whole point of the change.
-        let titleEnd = stops.first { abs($0.location - 118 / (118 + ChatGlassFade.topApproach)) < 0.02 }
-        #expect((titleEnd?.dim ?? 0) > 0.3)
-        #expect((titleEnd?.dim ?? 1) < 0.6)
-        // The peak sits under the title, and every stop after it falls.
-        let dims = stops.map(\.dim)
-        #expect(dims.max() == dims[1])
-        #expect(dims[1] > dims[2] && dims[2] > dims[3])
-        #expect(dims.dropLast().allSatisfy { $0 > 0 })
-        let throughTitle = stops.first { $0.location > 0.4 && $0.location < 0.8 }
-        #expect((throughTitle?.dim ?? 0) > 0.5)
+    /// No grey anywhere around the bars (the maintainer 2026-11-14: "i dont want to see word shapes behind the title bar", "i
+    /// dont like the gray"): no material, no tint; behind the status row and title the transcript fades to the page's
+    /// own black, at most about 8/255 for white text.
+    @Test func theTopFadesToBlack_noBlurNoTint() {
+        let stops = ChatGlassFade.topStops(titleHeight: 106)
+        let held = (106 - ChatGlassFade.topLift) / (106 - ChatGlassFade.topLift + ChatGlassFade.topApproach)
+        #expect(stops.allSatisfy { $0.blur == 0 })
+        // Fully black: at 0.97 white text still read on an OLED black (review of the stills, 2026-11-14).
+        #expect(stops.filter { $0.location <= held + 0.0001 }.allSatisfy { $0.dim == 1 })
     }
 
-    /// Fade starts above the chip so the last line dissolves into the
-    /// glass. From the chip down, dim is high enough that body text is
-    /// not a second sentence on the capsules.
-    @Test func theGlassBottomFadeStartsAboveTheChip_andDoesNotEatTheAnswer() {
-        #expect(ChatGlassFade.bottomApproach > 0)
+    /// Nothing legible touches the bar (the maintainer 2026-11-14: "the chat text touches the round buttons"), and no wide
+    /// empty strip under it (the maintainer 2026-11-14: about 45 pt was too much; then, after 2 + 10 pt, "the space just needs to
+    /// be a little smaller"). The run-out starts 6 pt above the bar's measured bottom, under the subtitle and inside the
+    /// circles' lower edge, and runs 10 pt.
+    @Test func textClearsTheButtons() {
+        let title: CGFloat = 106
+        let start = title - ChatGlassFade.topLift
+        let h = start + ChatGlassFade.topApproach
+        let stops = ChatGlassFade.topStops(titleHeight: title)
+        #expect(ChatGlassFade.topLift == 6)
+        #expect(ChatGlassFade.topApproach == 10)
+        #expect(stops.filter { $0.location <= start / h + 0.0001 }.allSatisfy { $0.dim == 1 })
+        #expect(stops.contains { abs($0.location - start / h) < 0.001 && $0.dim == 1 })
+        #expect(stops.last?.dim == 0 && stops.last?.blur == 0)
+        #expect(ChatChrome(topInset: 0, bottom: band).topOverlayHeight(titleMaxYInCanvas: title) == 110)
+    }
+
+    /// Text runs at full strength until 14 pt above the panel, then fades into its edge; beside and below the panel
+    /// it is the page's own black, no blur and no grey (the maintainer 2026-11-14: "i want black around the composer").
+    @Test func textRunsToThePanel_andTheSurroundIsBlack() {
+        #expect(ChatGlassFade.bottomApproach == 14)
         let stops = ChatGlassFade.bottomStops(ramp: band.ramp, hidden: band.hidden, home: 34)
         #expect(stops.first?.dim == 0)
-        #expect(stops.first?.blur == 0)
-        #expect(stops.last?.dim ?? 0 > 0.9)
-        #expect(stops.last?.dim ?? 1 < 1)
+        #expect(stops.allSatisfy { $0.blur == 0 })
         #expect(band.overlayHeight() == ChatGlassFade.bottomApproach + band.total)
-        let onChip = stops.first { $0.location > 0.2 && $0.dim > 0.8 }
-        #expect(onChip != nil, "dim must jump once the overlay reaches the chip")
+        let h = ChatGlassFade.bottomApproach + band.ramp + band.hidden + 34
+        let fromThePanel = stops.filter { $0.location >= ChatGlassFade.bottomApproach / h - 0.0001 }
+        #expect(!fromThePanel.isEmpty)
+        #expect(fromThePanel.allSatisfy { $0.dim == 1 })
+    }
+
+    /// The panel is a tinted surface over its glass (the maintainer 2026-11-14: "85 is fine"), between Claude's opaque
+    /// composer and Grok's clear glass.
+    @Test func thePanelFillIs85Percent() {
+        #expect(ChatGlassFade.panelFill == 0.85)
+    }
+
+    /// Under the glass only, a clear panel-shaped hole: the panel's Liquid Glass alone blurs the transcript to shapes
+    /// (the maintainer 2026-11-13). An extra frost there measured as a darkened panel (spread 1.3-2.9 against 4.1-5.8 clear,
+    /// sharpness under 1.3 either way; tools/measure_glass_showthrough.py, iPhone 17 Pro sim, 2026-11-14).
+    /// The hole is the panel's measured frame: with the keyboard up the panel sat at x 20, width 362, and a fixed 16 pt
+    /// inset left 4 pt strips of transcript showing at its edges (review, 2026-11-14).
+    @Test func theHoleFollowsTheMeasuredPanel() {
+        let up = ChatFadeBand(chipTop: band.chipTop, chipBottom: band.chipBottom, insetHeight: band.insetHeight,
+                              chipMinX: 20, chipWidth: 362)
+        let hole = ChatGlassFade.panelHole(overlayWidth: 402, band: up, reduceTransparency: false)
+        #expect(hole?.minX == 20)
+        #expect(hole?.width == 362)
+    }
+
+    @Test func thePanelIsAClearHole() {
+        let hole = ChatGlassFade.panelHole(overlayWidth: 402, band: band, reduceTransparency: false)
+        #expect(hole == CGRect(x: 16, y: ChatGlassFade.bottomApproach, width: 370, height: band.ramp))
+        #expect(ChatGlassFade.panelCornerRadius == 30)
+    }
+
+    /// At accessibility text sizes the glass's fixed blur leaves glyphs readable (AX5 sim, 2026-11-14: "the loaf"
+    /// behind the panel; sharpness 44 at the glyph scale). Then the hole holds the band's full blur; at other sizes
+    /// it stays clear.
+    @Test func largeTextFrostsThePanel() {
+        #expect(ChatGlassFade.panelFrost(accessibilityText: false) == nil)
+        let frost = ChatGlassFade.panelFrost(accessibilityText: true)
+        #expect(frost?.blur == 1)
+        #expect((frost?.dim ?? 1) <= 0.3)
+    }
+
+    /// The fade reserves the home indicator only where it lies inside the view. With the keyboard up the view ends
+    /// at the keyboard, and reserving 34 pt anyway put the panel's hole 34 pt too high: a full-brightness line of
+    /// the transcript sat just above the panel (iPhone 17 Pro sim, keyboard up, 2026-11-14).
+    @Test func theHomeIndicatorCountsOnlyInsideTheView() {
+        #expect(ChatGlassFade.homeIndicatorInView(safeAreaBottom: 34, gapBelowView: 0) == 34)
+        #expect(ChatGlassFade.homeIndicatorInView(safeAreaBottom: 34, gapBelowView: 336) == 0)
+        #expect(ChatGlassFade.homeIndicatorInView(safeAreaBottom: 34, gapBelowView: 10) == 24)
+        #expect(ChatGlassFade.homeIndicatorInView(safeAreaBottom: 0, gapBelowView: 0) == 0)
+    }
+
+    /// Reduce Transparency: the panel is opaque again, so no hole.
+    @Test func reduceTransparencyLeavesNoHole() {
+        #expect(ChatGlassFade.panelHole(overlayWidth: 402, band: band, reduceTransparency: true) == nil)
     }
 }

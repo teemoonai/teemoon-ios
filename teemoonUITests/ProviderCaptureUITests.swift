@@ -14,7 +14,10 @@
 import XCTest
 
 final class ProviderCaptureUITests: XCTestCase {
-    override func setUpWithError() throws { continueAfterFailure = true }
+    override func setUpWithError() throws {
+        try CaptureRig.skipUnlessAsked()
+        continueAfterFailure = true
+    }
 
     private func snap(_ app: XCUIApplication, _ name: String) {
         let s = XCTAttachment(screenshot: app.screenshot())

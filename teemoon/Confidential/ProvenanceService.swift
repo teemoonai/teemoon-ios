@@ -46,12 +46,14 @@ struct ProvenanceService {
     let verifier: ProvenanceVerifier
     let session: URLSession
     let defaults: UserDefaults
+    let launcherIndex: LauncherIndex
 
     init(verifier: ProvenanceVerifier = ProvenanceVerifier(), session: URLSession = .shared,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard, launcherIndex: LauncherIndex? = nil) {
         self.verifier = verifier
         self.session = session
         self.defaults = defaults
+        self.launcherIndex = launcherIndex ?? LauncherIndex(session: session, defaults: defaults)
     }
 
     /// One image reference and its digest, parsed from a compose manifest.
@@ -370,6 +372,13 @@ struct ProvenanceService {
     /// renderer substitutes only the session block); a test pins the two.
     static let fallbackRepos = [modelComposeRepo]
 
+    /// Only this repository's children are looked up through an index; don't extend it to other images.
+    static func isLauncherImage(_ image: String) -> Bool {
+        var parts = image.lowercased().split(separator: "/").map(String.init)
+        if parts.count == 3, ["docker.io", "index.docker.io"].contains(parts[0]) { parts.removeFirst() }
+        return parts.joined(separator: "/") == LauncherIndex.repository
+    }
+
     /// The repos to ask for an image's attestation, guessed one first.
     static func githubRepos(forImage image: String) -> [String] {
         guard let guessed = githubRepo(forImage: image) else { return [] }
@@ -507,8 +516,38 @@ struct ProvenanceService {
                 continue
             }
         }
+        if Self.isLauncherImage(ref.image) {
+            switch await launcherIndex.resolve(child: ref.digest) {
+            case .found(let index):
+                if let outcome = await verifyThroughIndex(ref, index: index, repos: repos) { return outcome }
+            case .inconclusive(let why):
+                // Docker Hub not answering is GitHub not answering: never unpublished.
+                return .unverified(.fetchTransient(why, from: .dockerHub))
+            case .notFound:
+                break
+            }
+        }
         Self.recentMisses.withLock { $0[ref.digest] = Date() }
         return .unverified(.fetchFailed("GitHub attestations HTTP 404"))
+    }
+
+    /// nil: no candidate repo has the index's attestation either. The verdict is cached under the CHILD's digest.
+    private func verifyThroughIndex(_ ref: ImageRef, index: String, repos: [String]) async -> ImageProvenance? {
+        for repo in repos {
+            switch await fetchAttestation(repo: repo, digest: index) {
+            case .found(let data):
+                let outcome = LauncherIndex.signedByItsBuilder(verifier.verify(attestationJSON: data, expectedDigest: index))
+                if case .verified = outcome {
+                    Self.cacheVerification(digest: ref.digest, outcome: outcome, defaults: defaults)
+                }
+                return outcome
+            case .transient(let reason):
+                return .unverified(.fetchTransient(reason))
+            case .notFound:
+                continue
+            }
+        }
+        return nil
     }
 
     private func fetchAttestation(repo: String, digest: String) async -> AttestationFetch {

@@ -17,8 +17,8 @@ import SwiftUI
 struct OllamaModelDownloadView: View {
     /// The probe base URL (…/v1); OllamaAdapter derives the /api root from it.
     let baseURL: URL
-    /// Called with the pulled model's ref when it finishes *while this sheet is
-    /// open*, so the parent can re-fetch the list and select the new model.
+    /// Called with the pulled model's ref when the pull this sheet started finishes, even after the
+    /// sheet has closed (the center reports it), so the parent can re-fetch the list and select it.
     var onCompleted: ((String) -> Void)? = nil
     /// Called with the normalized ref the moment a pull STARTS.
     ///
@@ -35,6 +35,10 @@ struct OllamaModelDownloadView: View {
     /// already hold the list — the Where sheet from `HomeServerProbe`, settings from
     /// its own probe — so it was only ever a matter of passing it in.
     var installed: [String] = []
+    /// The where sheet's filters (§4e): only the site links can carry them; the shortlist has no image data.
+    var browseFilters: ModelBrowserQuery.Filter = []
+    /// False when pushed inside another stack (the where sheet, §4e): no stack of its own, the back arrow, no cancel.
+    var embedsNavigationStack = true
 
     @Environment(\.dismiss) private var dismiss
     @Environment(OllamaDownloadCenter.self) private var center
@@ -52,8 +56,12 @@ struct OllamaModelDownloadView: View {
          onStarted: ((String) -> Void)? = nil,
          installed: [String] = [],
          initialRef: String = "",
-         initialProblem: String? = nil) {
+         initialProblem: String? = nil,
+         browseFilters: ModelBrowserQuery.Filter = [],
+         embedsNavigationStack: Bool = true) {
         self.baseURL = baseURL
+        self.embedsNavigationStack = embedsNavigationStack
+        self.browseFilters = browseFilters
         self.onCompleted = onCompleted
         self.onStarted = onStarted
         self.installed = installed
@@ -84,7 +92,15 @@ struct OllamaModelDownloadView: View {
     private var trimmedRef: String { ref.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        NavigationStack {
+        if embedsNavigationStack {
+            NavigationStack { page }
+        } else {
+            page
+        }
+    }
+
+    private var page: some View {
+        Group {
             Form {
                 // RECOMMENDATIONS FIRST, then the field, then browse.
                 //
@@ -113,8 +129,10 @@ struct OllamaModelDownloadView: View {
             #endif
             .toolbar {
                 #if os(iOS) || os(visionOS)
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(isPulling ? "close" : "cancel") { dismiss() }
+                if embedsNavigationStack {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(isPulling ? "close" : "cancel") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("download") { startPull() }
@@ -128,12 +146,9 @@ struct OllamaModelDownloadView: View {
                 }
                 #endif
             }
-            // Finished while the sheet is open → select it and close.
+            // Finished while the sheet is open → close; the center reports the completion.
             .onChange(of: current?.phase) { _, phase in
-                if phase == .done, let r = startedRef {
-                    onCompleted?(r)
-                    dismiss()
-                }
+                if phase == .done, startedRef != nil { dismiss() }
             }
         }
     }
@@ -151,9 +166,9 @@ struct OllamaModelDownloadView: View {
         Section {
             if !isPulling {
                 browseLink("ollama.com", "curated · tools and vision badges",
-                           "https://ollama.com/search")
+                           OllamaBrowseLinks.ollama(browseFilters))
                 browseLink("hugging face — gguf", "any community quant",
-                           "https://huggingface.co/models?library=gguf&sort=trending")
+                           OllamaBrowseLinks.huggingFace(browseFilters))
             }
             TextField("paste the link here", text: $ref)
                 .textFieldStyle(.plain)
@@ -246,7 +261,7 @@ struct OllamaModelDownloadView: View {
                             HStack(spacing: 6) {
                                 if model.isMixtureOfExperts {
                                     Text("MoE")
-                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                        .scaledFont(size: 10, weight: .semibold, design: .monospaced)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 2)
                                         .overlay(
@@ -281,7 +296,7 @@ struct OllamaModelDownloadView: View {
                         // if it were the selection. Both numbers are metadata about
                         // the model, so both belong on the model's caption line.
                         if trimmedRef == model.tag {
-                            Image(systemName: "checkmark").font(.system(size: 13, weight: .semibold))
+                            Image(systemName: "checkmark").scaledFont(size: 13, weight: .semibold)
                                 .foregroundStyle(.tint)
                         }
                     }
@@ -385,7 +400,7 @@ struct OllamaModelDownloadView: View {
         refProblem = nil
         let normalized = OllamaAdapter.normalizePullRef(ref)
         guard !normalized.isEmpty else { return }
-        center.start(ref: normalized, baseURL: baseURL)
+        center.start(ref: normalized, baseURL: baseURL, onDone: onCompleted)
         startedRef = normalized
         // Announced at START, not just completion. `onCompleted` only fires while
         // this sheet is open, so dismissing it left the pull running with nothing

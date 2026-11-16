@@ -66,7 +66,7 @@ struct SignatureVerdictTests {
         return try JSONDecoder().decode(TEEMessageSignature.self, from: JSONSerialization.data(withJSONObject: f))
     }
 
-    static func quote(reportData: Data) -> TDXVerificationResult {
+    static func quote(reportData: Data, verified: Bool = true) -> TDXVerificationResult {
         let zero48 = Data(count: 48)
         let body = TDXQuote.TDReportBody(
             teeTcbSvn: Data(count: 16), mrSeam: zero48, mrSignerSeam: zero48,
@@ -81,7 +81,7 @@ struct SignatureVerdictTests {
                 ecdsaSignature: Data(count: 64), attestationPublicKey: Data(count: 64),
                 certificateChainPEM: [], rawCertificationData: Data()))
         return TDXVerificationResult(quote: quote, measurements: TDXMeasurements(from: body),
-                                     signatureValid: true, certChainValid: true, certChainError: nil)
+                                     signatureValid: verified, certChainValid: true, certChainError: nil)
     }
 
     /// report_data carrying `prefix` (an address or key) in its first bytes.
@@ -96,14 +96,15 @@ struct SignatureVerdictTests {
     }
 
     static func record(gateway: String? = nil, gatewayBound: Bool = true,
-                       gpu: String? = nil, gpuBound: Bool = true,
+                       gpu: String? = nil, gpuBound: Bool = true, gpuQuoteVerified: Bool = true,
                        modelKey: Data? = nil, modelKeyBound: Bool = true) -> AttestationRecord {
         AttestationRecord(
             composeHash: "", mrtd: "", osImageHash: "", intelQuote: "",
             composeManifest: nil, gpuArch: nil, gpuNodeComposeHash: nil, modelFileHash: nil,
             signingAddress: gateway, gpuSigningAddress: gpu, modelEd25519PubKey: modelKey,
             quoteVerification: gateway.map { quote(reportData: reportData(gatewayBound ? hex($0) : Data(count: 20))) },
-            gpuQuoteVerification: gpu.map { quote(reportData: reportData(gpuBound ? hex($0) : Data(count: 20))) },
+            gpuQuoteVerification: gpu.map { quote(reportData: reportData(gpuBound ? hex($0) : Data(count: 20)),
+                                                  verified: gpuQuoteVerified) },
             modelQuoteVerification: modelKey.map { quote(reportData: reportData(modelKeyBound ? $0 : Data(count: 32))) },
             fetchedAt: Date(), providerID: UUID())
     }
@@ -123,6 +124,15 @@ struct SignatureVerdictTests {
         let v = TEESignatureVerifier.evaluate(try Self.signature(m.sig),
                                               attestation: Self.record(gpu: m.sig["signing_address"], gpuBound: false),
                                               exchange: m.exchange)
+        guard case .unverified(.signerUnattested) = v else { Issue.record("expected signerUnattested, got \(v)"); return }
+    }
+
+    /// The GPU quote's own signature failed: the address in its report_data binds nothing (1.0.6 audit INFO).
+    @Test func modelSignatureByAKeyInAFailedGPUQuoteIsNotVerified() throws {
+        let m = try Self.model()
+        let att = Self.record(gpu: m.sig["signing_address"], gpuQuoteVerified: false)
+        #expect(att.gpuSigningKeyBoundToHardware == false)
+        let v = TEESignatureVerifier.evaluate(try Self.signature(m.sig), attestation: att, exchange: m.exchange)
         guard case .unverified(.signerUnattested) = v else { Issue.record("expected signerUnattested, got \(v)"); return }
     }
 

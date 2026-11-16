@@ -68,6 +68,26 @@ extension WhereSheetView {
 
     // MARK: - Filter
 
+    /// The count + "show only" row, and the one line when a filter leaves nothing (docs/IMAGES.md §4e).
+    var showOnlySection: some View {
+        let policy = getPolicy
+        let shown = equippedRows
+        return Section {
+            WhereShowOnlyRow(count: policy.show.countLabel(shown: shown.count, total: tabRows.count),
+                             filters: $showOnly)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 16))
+                .listRowBackground(Color.clear)
+            if let line = policy.show.emptyLine(tab: filter, nothingShown: shown.isEmpty && visibleRecents.isEmpty,
+                                                getOffers: policy.getOffers(hasKey: hasKey)) {
+                Text(line)
+                    .foregroundStyle(.secondary)
+                    .textCase(.lowercase)
+                    .listRowBackground(Color.clear)
+                    .accessibilityIdentifier("where.showOnly.line")
+            }
+        }
+    }
+
     var localityPicker: some View {
         Section {
             Picker("where", selection: $filter) {
@@ -123,7 +143,7 @@ extension WhereSheetView {
             // people open first.
             return nil
         case .phone:
-            return "runs entirely on this device. no key, nothing leaves the phone."
+            return "runs entirely on this device. no key; nothing leaves the phone unless web search is on."
         case .home:
             return "stays on your machines — laptop, desktop, or home server."
         case .cloud:

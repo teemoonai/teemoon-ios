@@ -40,7 +40,7 @@ struct StoreResidueTests {
     }
 
     @MainActor static func container(_ url: URL) throws -> ModelContainer {
-        try ModelContainer(for: Schema(versionedSchema: TeemoonSchemaV1.self),
+        try ModelContainer(for: Schema(versionedSchema: TeemoonSchemaV3.self),
                            migrationPlan: TeemoonMigrationPlan.self,
                            configurations: ModelConfiguration(url: url))
     }

@@ -29,7 +29,8 @@ struct HighlightedTextFragment: View {
   }
 
   var body: some View {
-    TextFragment(model.highlightedCode ?? AttributedString(content))
+    // TEEMOON PATCH (7): a rebuilt block draws from the token cache, not plain.
+    TextFragment(model.highlightedCode ?? firstFrame)
       .foregroundStyle(theme.foregroundColor)
       .task(id: content) {
         await model.tokenize(
@@ -49,16 +50,32 @@ struct HighlightedTextFragment: View {
 }
 
 extension HighlightedTextFragment {
+  private var firstFrame: AttributedString {
+    let code = String(content.characters[...])
+    let tokens = HighlightTokenCache.provisionalTokens(for: code, language: languageHint, previous: nil)
+    guard tokens.count > 1 || tokens.first?.type != .plain else { return AttributedString(content) }
+    return Model.render(
+      tokens: tokens, presentationIntent: content.presentationIntent, using: theme, environment: textEnvironment)
+  }
+
   @MainActor @Observable final class Model {
     var tokens: [CodeToken] = []
     var highlightedCode: AttributedString?
+    @ObservationIgnored private var tokenized: (code: String, tokens: [CodeToken])?
 
+    // TEEMOON PATCH (7): upstream reset to one plain token here on every change; keep the last colours.
     func tokenize(content: AttributedSubstring, languageHint: String?) async {
       let code = String(content.characters[...])
-      tokens = [CodeToken(content: code, type: .plain)]
+      let provisional = HighlightTokenCache.provisionalTokens(
+        for: code, language: languageHint, previous: tokenized)
+      if provisional != tokens { tokens = provisional }
 
       if let tokenizer = CodeTokenizer.shared, let languageHint {
-        tokens = await tokenizer.tokenize(code: code, language: languageHint)
+        let result = await tokenizer.tokenize(code: code, language: languageHint)
+        guard !Task.isCancelled else { return }
+        HighlightTokenCache.shared.store(code: code, language: languageHint, tokens: result)
+        tokenized = (code, result)
+        tokens = result
       }
     }
 
@@ -68,6 +85,16 @@ extension HighlightedTextFragment {
       using theme: StructuredText.HighlighterTheme,
       environment: TextEnvironmentValues
     ) {
+      self.highlightedCode = Self.render(
+        tokens: tokens, presentationIntent: presentationIntent, using: theme, environment: environment)
+    }
+
+    static func render(
+      tokens: [CodeToken],
+      presentationIntent: PresentationIntent?,
+      using theme: StructuredText.HighlighterTheme,
+      environment: TextEnvironmentValues
+    ) -> AttributedString {
       var attributes = AttributeContainer()
       // Re-apply the presentation intent for pasteboard formatters
       attributes.presentationIntent = presentationIntent
@@ -87,7 +114,7 @@ extension HighlightedTextFragment {
         highlightedCode.append(content)
       }
 
-      self.highlightedCode = highlightedCode
+      return highlightedCode
     }
   }
 }

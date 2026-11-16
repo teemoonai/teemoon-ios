@@ -24,6 +24,8 @@ import XCTest
 
 final class WhereSheetCaptureUITests: XCTestCase {
 
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
+
     /// Every segment of the locality picker, `all` first (`filter == nil`).
     private let segments = ["all", "phone", "home", "cloud"]
 

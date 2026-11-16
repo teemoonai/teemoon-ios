@@ -30,7 +30,15 @@ final class LiveCatalogStore {
     /// beside the rows: without it a cold launch would label every row from
     /// the id guess, which answers "own fleet" for ids it has never seen.
     struct Entry: Codable, Equatable {
-        static let currentVersion = 1
+        /// 2: 1.0.6's Fireworks list could be the no-capability fallback (2026-10-28); see `serves`.
+        static let currentVersion = 2
+
+        /// A version-1 list is kept except Fireworks'. Never drop near.ai's: without its saved tiers a
+        /// cold launch labels rows from the id guess, which reads an unseen third-party id as own fleet.
+        var serves: Bool {
+            version == Self.currentVersion
+                || (version == 1 && !FireworksAdapter.handles(host: URL(string: endpoint)?.host))
+        }
         var version = currentVersion
         var endpoint: String
         var scope: String
@@ -99,6 +107,9 @@ final class LiveCatalogStore {
 
     /// Records an answer teemoon already has (a probe, a browser fetch), so
     /// every door updates the same copy.
+    /// Called with every list recorded. The app points it at `ProviderStore.adoptCapabilities`.
+    var onRecorded: ((Provider, [KnownModel]) -> Void)?
+
     func record(_ models: [KnownModel], for provider: Provider, apiKey: String) {
         guard !models.isEmpty, let key = Self.key(for: provider, apiKey: apiKey) else { return }
         var entry = Entry(endpoint: key.endpoint, scope: key.scope, fetchedAt: Date(), models: models)
@@ -107,6 +118,7 @@ final class LiveCatalogStore {
         loaded.insert(key)
         pruneOtherScopes(of: key)
         write(entry, at: key)
+        onRecorded?(provider, models)
     }
 
     /// Lists the server when the saved copy is older than `maxAge`, and saves
@@ -238,7 +250,7 @@ final class LiveCatalogStore {
 
     private func decode(_ data: Data) -> Entry? {
         guard var entry = try? JSONDecoder().decode(Entry.self, from: data),
-              entry.version == Entry.currentVersion else { return nil }
+              entry.serves else { return nil }
         // Badges age even while the copy sits on disk, and a near.ai row's
         // direct host belongs to the directory, not to a month-old list.
         let now = Date()

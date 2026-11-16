@@ -3,7 +3,7 @@
 //  teemoonUITests
 //
 //  Every screenshot teemoon.ai shows, from one seeded launch per frame — no
-//  hand-configured simulator. Driven by the website's recapture script,
+//  hand-configured simulator. Driven by teemoon-web's scripts/recapture-site.sh,
 //  which picks the models from the site's model registry, so a retired model
 //  is replaced by re-running the script rather than by re-tapping a setup.
 //
@@ -20,6 +20,8 @@
 import XCTest
 
 final class SiteCaptureUITests: XCTestCase {
+
+    override func setUpWithError() throws { try CaptureRig.skipUnlessAsked() }
 
     private let outputDir = URL(fileURLWithPath: "/tmp/teemoon-site-captures")
     private var env: [String: String] { ProcessInfo.processInfo.environment }

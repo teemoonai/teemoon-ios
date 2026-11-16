@@ -210,8 +210,7 @@ import SwiftUI
                 Text("none of the 22 operator-settable env vars is a logging or debug switch.")
                     .font(.caption2).foregroundStyle(.tertiary)
                 FableAuditBlock(url: URL(string: "https://github.com/teemoonai/audits/blob/main/manifests/measured/sha256-242a627.md")!,
-                                title: "fable miniaudit · deployment config",
-                                subtitle: "allowed_envs, egress & telemetry reviewed · this measurement")
+                                title: "fable miniaudit · deployment config")
             }
         }
         .padding()

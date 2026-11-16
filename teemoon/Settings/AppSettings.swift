@@ -74,7 +74,7 @@ final class AppSettings {
     var appFontSize: AppFontSize {
         get {
             access(keyPath: \.appFontSize)
-            return Self.defaults.string(forKey: UserDefaultsKey.appFontSize).flatMap(AppFontSize.init(rawValue:)) ?? .medium
+            return Self.defaults.string(forKey: UserDefaultsKey.appFontSize).flatMap(AppFontSize.init(rawValue:)) ?? .system
         }
         set {
             withMutation(keyPath: \.appFontSize) {
@@ -171,6 +171,11 @@ final class AppSettings {
         guard braveGroundingEnabled else { return nil }
         let key = braveSearchKey.trimmingCharacters(in: .whitespaces)
         return key.isEmpty ? nil : key
+    }
+
+    /// A key is stored but the web chip is off. Not the same as keyless: there is no offer to trigger.
+    var searchKeyTurnedOff: Bool {
+        !braveGroundingEnabled && !braveSearchKey.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// The stored Brave Search API key ("" when none). Setting an empty
