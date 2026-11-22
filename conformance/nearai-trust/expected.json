@@ -1,0 +1,2059 @@
+{
+ "fixture_file": "glm-5-3-flash-gpu04-5f7ebd85-2026-10-30T2241Z.json",
+ "fetched_utc": "2026-10-30T22:41Z",
+ "host": "glm-5-3-flash.completions.near.ai (gpu04 CVM)",
+ "request_nonce_sent": "fa819c2f530373729edb1a6f356fe47bb82bc6e9aee0d5247d0b1da1acd6eaa5",
+ "model_node_quote": {
+  "mrtd": "df4d77c857de652bd0fafa343a2026b51071ee03773d076d283abf1a7d36ff91ffa279ee4a617ac664f7e2a2c8d5891b",
+  "mr_config_id": "015f7ebd85cf1f480a118f75dd10fd0cb277e4ddbb23845f1c20d8ea0f1e87efa6000000000000000000000000000000",
+  "rtmr0": "bc122d143ab768565ba5c3774ff5f03a63c89a4df7c1f5ea38d3bd173409d14f8cbdcc36d40e703cccb996a9d9687590",
+  "rtmr1": "4ae609807c765916a31d724786ed74bcb97e168a9d937b04936aeef2015c907eba5ac352c6bcd749c246fd62ffb659ec",
+  "rtmr2": "bd67ab7554dc27ab03a077bc1447a1a67d0624ff547c4c809a8626f12d6a89712f8ec60e781e99b98208574065d21a71",
+  "rtmr3": "e0f6c83eec48dfbfdb41d438a96783bcde1de18a1ac73705e2a8e24c2bc2051cbbf05ec0e856fed86498316a1b3e1bec",
+  "report_data": "3b753b4406613c5e70ae640508632b600424fa0c000000000000000000000000fa819c2f530373729edb1a6f356fe47bb82bc6e9aee0d5247d0b1da1acd6eaa5",
+  "quote_len_bytes": 5010
+ },
+ "compose_manager_quote": {
+  "mrtd": "df4d77c857de652bd0fafa343a2026b51071ee03773d076d283abf1a7d36ff91ffa279ee4a617ac664f7e2a2c8d5891b",
+  "mr_config_id": "015f7ebd85cf1f480a118f75dd10fd0cb277e4ddbb23845f1c20d8ea0f1e87efa6000000000000000000000000000000",
+  "rtmr0": "bc122d143ab768565ba5c3774ff5f03a63c89a4df7c1f5ea38d3bd173409d14f8cbdcc36d40e703cccb996a9d9687590",
+  "rtmr1": "4ae609807c765916a31d724786ed74bcb97e168a9d937b04936aeef2015c907eba5ac352c6bcd749c246fd62ffb659ec",
+  "rtmr2": "bd67ab7554dc27ab03a077bc1447a1a67d0624ff547c4c809a8626f12d6a89712f8ec60e781e99b98208574065d21a71",
+  "rtmr3": "e0f6c83eec48dfbfdb41d438a96783bcde1de18a1ac73705e2a8e24c2bc2051cbbf05ec0e856fed86498316a1b3e1bec",
+  "report_data": "617be5914d178c435050db0af275a67317fcf3e6c0fa94c4b433e2c58e8e93fefa819c2f530373729edb1a6f356fe47bb82bc6e9aee0d5247d0b1da1acd6eaa5",
+  "quote_len_bytes": 5010
+ },
+ "same_td_check": {
+  "mrtd": true,
+  "rtmr0": true,
+  "rtmr1": true,
+  "rtmr2": true,
+  "rtmr3": true
+ },
+ "node_report_data_nonce_echo": true,
+ "actions_count": 180,
+ "actions_hash_field": "617be5914d178c435050db0af275a67317fcf3e6c0fa94c4b433e2c58e8e93fe",
+ "actions_hash_recomputed": "617be5914d178c435050db0af275a67317fcf3e6c0fa94c4b433e2c58e8e93fe",
+ "actions_hash_matches": true,
+ "canonical_actions_sha256_preimage_len": 52557,
+ "canonical_actions_preimage_first200": "[{\"action\":\"compose_manager_started\",\"container\":\"compose-manager\",\"image\":\"nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be\",\"timestamp\":\"2026-09-02T1",
+ "cm_report_data_split": {
+  "first32_equals_actions_hash": true,
+  "last32_equals_nonce": true,
+  "nonce_source": "client"
+ },
+ "event_log": {
+  "path": "info.tcb_info.event_log",
+  "entries": 32,
+  "imr3_entries": 12,
+  "entry_fields": [
+   "digest",
+   "event",
+   "event_payload",
+   "event_type",
+   "imr"
+  ],
+  "top_level_event_log_type": "list",
+  "top_level_equals_tcb": false,
+  "cma_event_log_type": "str",
+  "cma_event_log_parsed_equals_tcb": false
+ },
+ "rtmr3_replay": {
+  "start": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "rule": "for each entry with imr==3 in array order: rtmr3 = SHA384(rtmr3 || bytes.fromhex(digest))",
+  "result": "e0f6c83eec48dfbfdb41d438a96783bcde1de18a1ac73705e2a8e24c2bc2051cbbf05ec0e856fed86498316a1b3e1bec",
+  "equals_tcb_info_rtmr3": true,
+  "equals_node_quote_rtmr3": true,
+  "equals_cm_quote_rtmr3": true
+ },
+ "event_digest_rule": "SHA384( u32le(int(event_type)) || ':' || event_utf8 || ':' || bytes.fromhex(event_payload) )",
+ "imr3_events": [
+  {
+   "event": "system-preparing",
+   "digest_recomputed_matches": true,
+   "payload_utf8": ""
+  },
+  {
+   "event": "app-id",
+   "digest_recomputed_matches": true,
+   "payload_utf8": ",\n\f��m�e��Dn/?�X\u0017/�\u001b"
+  },
+  {
+   "event": "compose-hash",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "_~���\u001fH\n\u0011�u�\u0010�\f�w�ݻ#�_\u001c ��\u000f\u001e��"
+  },
+  {
+   "event": "instance-id",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "{��\nŰ�-�9\u0003!�X�ot1d�"
+  },
+  {
+   "event": "boot-mr-done",
+   "digest_recomputed_matches": true,
+   "payload_utf8": ""
+  },
+  {
+   "event": "mr-kms",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "jd�yS�L�X���CIt�[\u0017m`}��=�C*�<�\u0000�"
+  },
+  {
+   "event": "os-image-hash",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "��]i��>^��ɶ2�5�N���o��\u0002� �)"
+  },
+  {
+   "event": "key-provider",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "{\"name\":\"kms\",\"id\":\"3059301306072a8648ce3d020106082a8648ce3d03010703420004394aaed2c745e6a457cb835f7f47423f57ff3ead71b92a"
+  },
+  {
+   "event": "storage-fs",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "zfs"
+  },
+  {
+   "event": "system-ready",
+   "digest_recomputed_matches": true,
+   "payload_utf8": ""
+  },
+  {
+   "event": "nearai-replica-report-key-v1",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "{\"boot_id\":\"441a8db1-9408-4f40-872d-95b5f7cd7107\",\"host_id\":\"gpu04\",\"key_id\":\"00f54438e808bd98\",\"public_key_hex\":\"1095e0"
+  },
+  {
+   "event": "nearai-replica-report-key-v1",
+   "digest_recomputed_matches": true,
+   "payload_utf8": "{\"key_id\":\"202c35f6bc8b23e1\",\"public_key_hex\":\"c449889fdc3a76beea320850ffaf4ed7437a63a2e818505eb5fac16a7c445bf0\",\"boot_i"
+  }
+ ],
+ "compose_hash": {
+  "tcb_info": "5f7ebd85cf1f480a118f75dd10fd0cb277e4ddbb23845f1c20d8ea0f1e87efa6",
+  "info": "5f7ebd85cf1f480a118f75dd10fd0cb277e4ddbb23845f1c20d8ea0f1e87efa6",
+  "sha256_app_compose": "5f7ebd85cf1f480a118f75dd10fd0cb277e4ddbb23845f1c20d8ea0f1e87efa6",
+  "event_payload": [
+   "_~���\u001fH\n\u0011�u�\u0010�\f�w�ݻ#�_\u001c ��\u000f\u001e��"
+  ]
+ },
+ "os_image_hash": {
+  "tcb_info": "91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829",
+  "event_payload": [
+   "��]i��>^��ɶ2�5�N���o��\u0002� �)"
+  ]
+ },
+ "compose_manager": {
+  "declared_default_in_measured_compose": [
+   "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+  ],
+  "started_entries": [
+   {
+    "timestamp": "2026-09-02T18:25:33.145082059+00:00",
+    "image": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+   },
+   {
+    "timestamp": "2026-09-25T20:56:50.303331399+00:00",
+    "image": "nearaidev/compose-manager@sha256:bc44e44e619dc003b3b5bcf53420b759a0ea058d0b81cf0caffc063a9d733193"
+   },
+   {
+    "timestamp": "2026-09-25T21:37:12.009135199+00:00",
+    "image": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+   },
+   {
+    "timestamp": "2026-09-29T06:08:19.794050993+00:00",
+    "image": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+   },
+   {
+    "timestamp": "2026-10-27T19:46:07.124027119+00:00",
+    "image": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+   },
+   {
+    "timestamp": "2026-10-27T19:46:18.359933684+00:00",
+    "image": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+   },
+   {
+    "timestamp": "2026-10-27T19:56:15.838791064+00:00",
+    "image": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+   },
+   {
+    "timestamp": "2026-10-27T19:56:39.432240906+00:00",
+    "image": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be"
+   },
+   {
+    "timestamp": "2026-10-29T06:04:13.003364888+00:00",
+    "image": "nearaidev/compose-manager@sha256:a320bb4882341c8e19ef1944436f6591ed73303732009ed5db9f6db6c9da756a"
+   }
+  ],
+  "running_last_started": "nearaidev/compose-manager@sha256:a320bb4882341c8e19ef1944436f6591ed73303732009ed5db9f6db6c9da756a",
+  "mutations": [
+   {
+    "id": "running_manager_no_page",
+    "defined_utc": "2026-11-06",
+    "edit": "replace the image of the last compose_manager_started entry (2026-10-29T06:04:13Z, a320bb48…) with nearaidev/compose-manager@sha256:a0c073085684e12e19f31bb279fc8da663a374199bfecc47b04167ae79eaa766, which has no page in audits index.json",
+    "apply_at": "the parsed actions AFTER the compose-manager quote binding (a) has passed — editing the signed actions changes actions_hash, so applied before (a) this mutation fails the binding and tests nothing about the row; alternatively run the unmodified check against the live glm-5-3-flash host, which has been in exactly this state since 2026-11-04T04:16:10Z",
+    "expected": {
+     "declared_default": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be",
+     "running_last_started": "nearaidev/compose-manager@sha256:a0c073085684e12e19f31bb279fc8da663a374199bfecc47b04167ae79eaa766",
+     "audits_page_for_running": "none — index.json images['docker.io/nearaidev/compose-manager'] does not list a0c07308",
+     "row_state": "not green: the running compose-manager has no audit page; the row's wording and whether it is soft (asks) or hard (blocks) are pending the maintainer's trust-scope review and are deliberately NOT fixed here",
+     "attestation_binding_verdict": "unchanged — (a) and (b) still pass; this is a trust-page row, not a quote failure",
+     "must_not": [
+      "render the running manager as verified or reviewed",
+      "show the declared default's page (6e035c8f) as if it were the running manager's",
+      "collapse the row into the generic verified chip"
+     ]
+    },
+    "live_basis": "tools/fleet_drift.py 2026-11-06: a0c07308 running by boot-path override on 14 CVMs since 2026-11-04T04:13–04:16Z against measured defaults 6e035c8f (13 CVMs) and a320bb48 (qwen3-8-27b)"
+   }
+  ]
+ },
+ "launcher": {
+  "declared_in_measured_compose": [
+   "nearaidev/compose-manager-launcher@sha256:079a14b41deb11e0e27f9b69648e8b3d89bd6fb9ccf6071643b8f447fa415085"
+  ],
+  "index_digest": "91fdff3cfa3543d72656b2368c7d8a0a83d95a0f1087378c897aa1537acdba56",
+  "index_lists_child_linux_amd64": true,
+  "github_attestation_subject": "docker.io/nearaidev/compose-manager-launcher@sha256:91fdff3c…",
+  "builder": "https://github.com/nearai/compose-manager/.github/workflows/build.yml@refs/heads/master"
+ },
+ "per_service_running_table": {
+  "otelcol-contrib": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+   "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+   "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+   "tag": "v0.0.521",
+   "up": "2026-10-28T03:39:20.051234204+00:00"
+  },
+  "proxy-glm53": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+   "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+   "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+   "tag": "v0.0.521",
+   "up": "2026-10-29T00:11:24.857389316+00:00"
+  },
+  "nginx": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+   "file_sha256": "5745db6b0d3e4a4f1ff6872acbf90da254ef83ca834c0bfd4cffb86f540ff781",
+   "commit": "0e55b0e7ddc212b085ffded94857af4a7b645611",
+   "tag": "v0.0.462",
+   "up": "2026-10-01T18:02:45.638948228+00:00"
+  },
+  "dcgm-glm53": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+   "file_sha256": "5745db6b0d3e4a4f1ff6872acbf90da254ef83ca834c0bfd4cffb86f540ff781",
+   "commit": "0e55b0e7ddc212b085ffded94857af4a7b645611",
+   "tag": "v0.0.462",
+   "up": "2026-10-01T18:02:45.638948228+00:00"
+  },
+  "model-downloader": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP4.yaml",
+   "file_sha256": "b2d8b87cf185ff809f662ce276c2487da852e9903fe5fe0f0dbc3980af49f4ba",
+   "commit": "0a51138ef3ec104706c40a53dab0c3bcea75d7b3",
+   "tag": "v0.0.443",
+   "up": "2026-09-23T22:19:53.114026792+00:00"
+  },
+  "hf-cleanup": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP4.yaml",
+   "file_sha256": "b2d8b87cf185ff809f662ce276c2487da852e9903fe5fe0f0dbc3980af49f4ba",
+   "commit": "0a51138ef3ec104706c40a53dab0c3bcea75d7b3",
+   "tag": "v0.0.443",
+   "up": "2026-09-23T22:42:21.540288890+00:00"
+  },
+  "rotate-token": {
+   "file": "prod/rotate-compose-manager-token.yaml",
+   "file_sha256": "0d1263e5169ebacdb1da157857aafff9a5bb5645aabbd921b3bd7e18d60a8ee2",
+   "commit": "3c2f033b2a44d08832ffec32417dc35a95cdbe2c",
+   "tag": "v0.0.457",
+   "up": "2026-09-29T06:07:39.854697052+00:00"
+  },
+  "model-sg-glm53-w4afp8-tp2-r4": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary.yaml",
+   "file_sha256": "bb7505f16a942aa058894bf1999ae68542315d94e9621b554fb897e3ebb223b8",
+   "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+   "tag": "v0.0.521",
+   "up": "2026-10-28T01:24:51.836383252+00:00"
+  },
+  "model-sg-glm53-w4afp8-tp2-r3": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+   "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+   "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+   "tag": "v0.0.521",
+   "up": "2026-10-28T02:50:55.895373858+00:00"
+  },
+  "model-sg-glm53-w4afp8-tp2-r1": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+   "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+   "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+   "tag": "v0.0.521",
+   "up": "2026-10-28T03:12:04.153077361+00:00"
+  },
+  "model-sg-glm53-w4afp8-tp2-r2": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+   "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+   "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+   "tag": "v0.0.521",
+   "up": "2026-10-28T03:00:44.200971583+00:00"
+  },
+  "glm53-ghost-aggregator": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+   "file_sha256": "b0077025ac5f099ca6b30dd21a2605e3ba600b01be38e1605b5ec93f69a125da",
+   "commit": "1121ee56851dcec7dc89e60099d7be28fc51a73e",
+   "tag": "v0.0.480",
+   "up": "2026-10-08T22:59:43.022812342+00:00"
+  },
+  "sage-cert": {
+   "file": "prod/sage.yaml",
+   "file_sha256": "1d13adf085448054f2ca97985daec1841f0304d0c12f77730c28958e5560645f",
+   "commit": "2781fa6644cf1048bcc41ec0c9e2a91692ec236a",
+   "tag": "v0.0.498",
+   "up": "2026-10-21T12:32:51.778835621+00:00"
+  },
+  "<whole file>": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+   "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+   "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+   "tag": "v0.0.500",
+   "up": "2026-10-24T04:13:22.623863999+00:00"
+  },
+  "model-proxy-registrar": {
+   "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+   "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+   "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+   "tag": "v0.0.500",
+   "up": "2026-10-27T19:59:05.891957470+00:00"
+  }
+ },
+ "compose_up_count": 132,
+ "compose_down_count": 33,
+ "running_pairs": {
+  "rule": "per-service running table from the signed action log, walked NEWEST entry first: (1) an entry that names services decides those services (compose_up -> attributed to that entry's (commit, file); compose_down -> gone) unless a newer entry already decided them; (2) an entry WITHOUT a services list is a whole-file compose up/down of that file: compose-manager runs `up -d --remove-orphans` under a per-model compose project, so every container of that file not in the new revision is removed and every service in it is re-created from it -- therefore once a whole-file entry for file F is seen, every OLDER entry for F is dead (ignored). A whole-file entry's service list is the service names of the file fetched at that commit. Report every distinct (commit, file) still attributed to a service, ordered by latest attributing compose_up desc; fetch raw.githubusercontent.com/nearai/cvm-compose-files/<commit>/<file>, require SHA256(body) == file_sha256; walk the WHOLE log (only whole-file entries need a fetch, for their service names; the walk is never cut short, and a whole-file entry whose file cannot be fetched still supersedes older entries of its file and is reported with services unknown); then hash-check up to 10 reported pairs, newest first (rows past the cap read \"not fetched\"); cache by (commit, file) with no expiry. Rule 3 (2026-11-06): EVERY compose_up runs with --remove-orphans whether or not it names services, so any up of file F at revision R removes F's containers whose service name is absent from R; walking newest-first, the INTERSECTION of the service sets of every newer up revision of F bounds what any older entry of F can still own (a middle revision that dropped S removed S's containers then, even if a later revision re-adds the name without naming or re-creating it); a name filtered out by that bound counts as DECIDED (retired) so that no older entry, of this or another file, can attribute it. This needs the service set of every up revision of F (fetched at its commit, cached). Cross-file eviction (two files sharing one project) is not derivable from the log and is NOT modelled.",
+  "why_changed": "2026-11-06: the previous rule attributed containers whose service names a later whole-file up of the SAME file no longer contained (renamed services), e.g. gpu02's DeepSeek DEP4x2 r1/r2 ranks after the 2026-10-31T00:17Z whole-file re-up that renamed them dp0..7 -- sixteen ranks on eight GPUs. compose-manager main.rs @c7fbaaf5 :1888-1899 and :1938-1949 document `--remove-orphans` under the per-model project. 2026-11-06 later: the first corrected derivation counted every fetch against the cap and stopped the walk, which dropped the still-running rotate-token (3c2f033b); ios found it. The cap applies to REPORTED pairs only. 2026-11-06 rule 3: on gpu13 the 2026-11-04 proxy-scoped up of small-models (320afade) removed the GLM-5.3 engine pair of the 10-27 revision (service names no longer in the file); GPU capacity confirms; no compose_down was logged. The fixture's four pairs are unchanged by rule 3. 2026-11-06 (ios): the bound is the intersection of all newer up revisions, and a filtered name is retired, not freed — otherwise mutation 9's r4 was re-attributed to an older TP2x4 entry.",
+  "verified_utc": "2026-11-06T13:09Z",
+  "distinct_pairs": 4,
+  "within_cap": true,
+  "all_match": true,
+  "outcomes": {
+   "sha256_mismatch": "hard (red, blocks)",
+   "http_404_at_pinned_commit": "unpublished (orange, not red)",
+   "network_or_rate_limit": "inconclusive"
+  },
+  "pairs": [
+   {
+    "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+    "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+    "latest_up": "2026-10-29T00:11:24.857389316+00:00",
+    "services": [
+     "model-sg-glm53-w4afp8-tp2-r1",
+     "model-sg-glm53-w4afp8-tp2-r2",
+     "model-sg-glm53-w4afp8-tp2-r3",
+     "otelcol-contrib",
+     "proxy-glm53"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+    "expected": "match",
+    "liveness": "running",
+    "last_entry": "2026-10-29T00:11:24.857389316+00:00"
+   },
+   {
+    "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary.yaml",
+    "file_sha256": "bb7505f16a942aa058894bf1999ae68542315d94e9621b554fb897e3ebb223b8",
+    "latest_up": "2026-10-28T01:24:51.836383252+00:00",
+    "services": [
+     "model-sg-glm53-w4afp8-tp2-r4"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary.yaml",
+    "expected": "match",
+    "liveness": "running",
+    "last_entry": "2026-10-28T01:36:07.448667072+00:00"
+   },
+   {
+    "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+    "latest_up": "2026-10-27T19:59:05.891957470+00:00",
+    "services": [
+     "dcgm-glm53",
+     "glm53-ghost-aggregator",
+     "glm53-perception-check",
+     "glm53-soak-relay",
+     "hf-cleanup",
+     "model-downloader",
+     "model-proxy-registrar",
+     "nginx"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/cd94860052fede8d56d8f017c55b241362c75d29/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "expected": "match",
+    "liveness": "running",
+    "last_entry": "2026-10-27T19:59:05.891957470+00:00"
+   },
+   {
+    "commit": "3c2f033b2a44d08832ffec32417dc35a95cdbe2c",
+    "file": "prod/rotate-compose-manager-token.yaml",
+    "file_sha256": "0d1263e5169ebacdb1da157857aafff9a5bb5645aabbd921b3bd7e18d60a8ee2",
+    "latest_up": "2026-09-29T06:07:39.854697052+00:00",
+    "services": [
+     "rotate-token"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/3c2f033b2a44d08832ffec32417dc35a95cdbe2c/prod/rotate-compose-manager-token.yaml",
+    "expected": "match",
+    "liveness": "undecidable",
+    "last_entry": "2026-09-29T06:07:39.854697052+00:00"
+   }
+  ],
+  "dropped_vs_previous_rule": [
+   "2781fa66 sage.yaml",
+   "1121ee56 GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+   "0e55b0e7 GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+   "0a51138e GLM-5.3-Flash-SGL-TP4.yaml"
+  ],
+  "liveness_rule": "LEFTOVER / liveness undecidable, PER SERVICE (rule revised 2026-11-06, superseding the whole-file-only bound): the container of file F's service S, created by the entry that decided S at time t_S, is under the default-project reading removed as an orphan by the FIRST LATER compose_up of a DIFFERENT file G (scoped or whole-file: every up runs --remove-orphans) whose revision does not define the name S; under the per-model-project reading it persists. The log records no project, so S is undecidable; a name G's revision also defines is not an orphan and stays running; an up whose revision cannot be fetched counts as evicting (fail closed). A pair is LEFTOVER when every service attributed to it is undecidable; a pair with both keeps its running services and reports the others. Whole-file DOWNs of other files never count. LIVE REFUTATION: the proxy that answered THIS attestation report is alive now — the service(s) whose block sets MODEL_NAME=<report model_name> in the newest attributed revision. If a later up of another file G whose revision lacks that proxy's name exists, G demonstrably did not evict the proxy's file F: (F, G) is a refuted eviction and no up of G counts against any service of F (gpu13, 2026-11-04: prod/sage-pull.yaml was upped whole at 15:30:08Z after the 03:03:35Z small-models proxies, which answered on 11-06; without the refutation the whole serving stack reads undecidable). Downs carry no file_sha256: a whole-file down's service list is read from the file at its commit unhashed (commit-addressed over TLS); where an up in the same log pins the same (commit, file), hash-check against that up's file_sha256; a down can only retire services, never attribute one.",
+  "mutation_9": "insert, after the Q8Canary r4 up, a service-scoped compose_up of GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary.yaml at a revision whose service set lacks model-sg-glm53-w4afp8-tp2-r4 (e.g. only proxy-glm53) -> r4 is retired and the 7ee4a4c7 Q8Canary pair disappears; listing it is red",
+  "mutation_10": "middle-revision drop: for a file F with three ups R1 < R2 < R3 where R1 and R3 define service S but R2 does not, and S was created by R1's up and never named later -> S is retired at R2's up and the R1 pair must not list S (nor may any other file's older entry claim S); a derivation using only R3's set re-attributes S to R1 and is red",
+  "liveness_rule_superseded_2026_11_06": "the 10-30/11-06 text bounded LEFTOVER by the newest WHOLE-FILE up of a different file; the rotate-token reviewer (2026-11-06) showed scoped ups remove orphans too, and gpu13 showed the bound needs the live refutation above",
+  "undecidable_by": {
+   "rotate-token": {
+    "pair": "prod/rotate-compose-manager-token.yaml 0d1263e5169e",
+    "decided": "2026-09-29T06:07:39Z (entry 74)",
+    "first_later_up_of_another_file_lacking_the_name": {
+     "timestamp": "2026-09-30T19:49:51Z",
+     "file": "prod/GLM-5.3-Flash-SGL-TP4-W4AFP8.yaml",
+     "entry": 76
+    },
+    "reading_i": "removed as an orphan then",
+    "reading_ii": "persists as an EXITED one-shot (restart: no); under neither reading is a process running"
+   }
+  },
+  "alive_evidence": {
+   "model_name": "z-ai/glm-5.3-flash",
+   "service": "proxy-glm53",
+   "pair": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml @ 7ee4a4c7 (2026-10-29T00:11:24Z)",
+   "later_ups_of_other_files_lacking_the_name": "none in this capture -> nothing refuted; the four pairs and their liveness are unchanged by the revised rule"
+  }
+ },
+ "running_pairs_superseded_2026_11_06": {
+  "rule": "distinct (commit, file) pairs the per_service_running_table attributes to a running service, ordered by latest attributing compose_up descending; fetch raw.githubusercontent.com/nearai/cvm-compose-files/<commit>/<file>, require SHA256(body) == file_sha256; cap 10 pairs per report (rows past the cap read \"not fetched\"); cache by (commit, file) with no expiry",
+  "verified_utc": "2026-11-04T04:20Z",
+  "distinct_pairs": 8,
+  "within_cap": true,
+  "all_match": true,
+  "outcomes": {
+   "sha256_mismatch": "hard (red, blocks)",
+   "http_404_at_pinned_commit": "unpublished (orange, not red)",
+   "network_or_rate_limit": "inconclusive"
+  },
+  "pairs": [
+   {
+    "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+    "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+    "tag": "v0.0.521",
+    "latest_up": "2026-10-29T00:11:24.857389316+00:00",
+    "services": [
+     "proxy-glm53",
+     "otelcol-contrib",
+     "model-sg-glm53-w4afp8-tp2-r1",
+     "model-sg-glm53-w4afp8-tp2-r2",
+     "model-sg-glm53-w4afp8-tp2-r3"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+    "expected": "match"
+   },
+   {
+    "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary.yaml",
+    "file_sha256": "bb7505f16a942aa058894bf1999ae68542315d94e9621b554fb897e3ebb223b8",
+    "tag": "v0.0.521",
+    "latest_up": "2026-10-28T01:24:51.836383252+00:00",
+    "services": [
+     "model-sg-glm53-w4afp8-tp2-r4"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary.yaml",
+    "expected": "match"
+   },
+   {
+    "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+    "tag": "v0.0.500",
+    "latest_up": "2026-10-27T19:59:05.891957470+00:00",
+    "services": [
+     "model-proxy-registrar",
+     "<whole file>"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/cd94860052fede8d56d8f017c55b241362c75d29/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "expected": "match"
+   },
+   {
+    "commit": "2781fa6644cf1048bcc41ec0c9e2a91692ec236a",
+    "file": "prod/sage.yaml",
+    "file_sha256": "1d13adf085448054f2ca97985daec1841f0304d0c12f77730c28958e5560645f",
+    "tag": "v0.0.498",
+    "latest_up": "2026-10-21T12:32:51.778835621+00:00",
+    "services": [
+     "sage-cert"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/2781fa6644cf1048bcc41ec0c9e2a91692ec236a/prod/sage.yaml",
+    "expected": "match"
+   },
+   {
+    "commit": "1121ee56851dcec7dc89e60099d7be28fc51a73e",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "file_sha256": "b0077025ac5f099ca6b30dd21a2605e3ba600b01be38e1605b5ec93f69a125da",
+    "tag": "v0.0.480",
+    "latest_up": "2026-10-08T22:59:43.022812342+00:00",
+    "services": [
+     "glm53-ghost-aggregator"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/1121ee56851dcec7dc89e60099d7be28fc51a73e/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "expected": "match"
+   },
+   {
+    "commit": "0e55b0e7ddc212b085ffded94857af4a7b645611",
+    "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "file_sha256": "5745db6b0d3e4a4f1ff6872acbf90da254ef83ca834c0bfd4cffb86f540ff781",
+    "tag": "v0.0.462",
+    "latest_up": "2026-10-01T18:02:45.638948228+00:00",
+    "services": [
+     "nginx",
+     "dcgm-glm53"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/0e55b0e7ddc212b085ffded94857af4a7b645611/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+    "expected": "match"
+   },
+   {
+    "commit": "3c2f033b2a44d08832ffec32417dc35a95cdbe2c",
+    "file": "prod/rotate-compose-manager-token.yaml",
+    "file_sha256": "0d1263e5169ebacdb1da157857aafff9a5bb5645aabbd921b3bd7e18d60a8ee2",
+    "tag": "v0.0.457",
+    "latest_up": "2026-09-29T06:07:39.854697052+00:00",
+    "services": [
+     "rotate-token"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/3c2f033b2a44d08832ffec32417dc35a95cdbe2c/prod/rotate-compose-manager-token.yaml",
+    "expected": "match"
+   },
+   {
+    "commit": "0a51138ef3ec104706c40a53dab0c3bcea75d7b3",
+    "file": "prod/GLM-5.3-Flash-SGL-TP4.yaml",
+    "file_sha256": "b2d8b87cf185ff809f662ce276c2487da852e9903fe5fe0f0dbc3980af49f4ba",
+    "tag": "v0.0.443",
+    "latest_up": "2026-09-23T22:42:21.540288890+00:00",
+    "services": [
+     "hf-cleanup",
+     "model-downloader"
+    ],
+    "raw_url": "https://raw.githubusercontent.com/nearai/cvm-compose-files/0a51138ef3ec104706c40a53dab0c3bcea75d7b3/prod/GLM-5.3-Flash-SGL-TP4.yaml",
+    "expected": "match"
+   }
+  ]
+ },
+ "chat_path": {
+  "rule": "Per CVM and per connection HOST (never per model id: on gpu04 proxy-glm53 and proxy-glm53-long both declare MODEL_NAME=z-ai/glm-5.3-flash). (1) INGRESS: among the running revisions on the CVM (per-service running table from the signed log, running_pairs.rule), the service with published ports: whose nginx config has a server block whose server_name matches HOST (exact name or its ~^ regex forms); that block's `location /` proxy_pass target, or the `set $var http://<service>:<port>` it references in the same location, names the PROXY service. (2) the proxy's VLLM_BACKEND_URLS (comma-separated http://<service>:<port>), else VLLM_BASE_URL, names the ENGINE services; the literal default of ${VAR:-default} counts, an override is unrecorded. (3) PATH = {ingress, proxy, engines}; each path service maps to the (file, sha256) that created it (running table) and to the image it runs (a build: service -> its FROM digest). (4) a LEAKS page counts for this chat iff it is a recipe page whose exposure.services intersects PATH, or an image page (scope_kind image) whose digest a path service runs. The rollup is computed from on-path pages only; off-path LEAKS pages are 'not LEAKS for this chat'. (5) AMBIGUOUS (count every LEAKS page on the CVM): no server_name match for HOST, an unresolvable proxy_pass, a non-literal backend list, a path service with no attributed revision.",
+  "decided": "pm relay 2026-11-06 (the maintainer: '2 has to be in 1.1.0'); off-path LEAKS = not LEAKS for this chat; ambiguous counts the leak",
+  "verified_utc": "2026-11-06",
+  "log": {
+   "file": "actions-5e513dbd72e1-2026-11-04T1933Z.json",
+   "sha256": "4a427d4618dea09cf6a3147584a73bd6fa0f1ef548d9f12f9e6d72454ba5641b",
+   "entries": 82,
+   "newest_entry": "2026-11-04T19:33:54Z",
+   "cvm": "small-models cluster, measured harness 5e513dbd72e1 (ten hosts: flux2-klein, privacy-filter, qwen3-30b, qwen3-6-35b, qwen3-8-27b, qwen3-8-27b-abliterated, qwen3-embedding, qwen3-reranker, qwen3-vl-30b, whisper-large-v3)",
+   "note": "the signed action log alone (no quote in this file); the quote-to-log binding is the gpu04 fixture's job"
+  },
+  "revisions": {
+   "320afade84f1": "prod/small-models.yaml @ 75d31e6461dc51465a81ff69203200a51a820d1c (v0.0.540, 2026-11-04): created nginx, nginx-qwen38 and every proxy",
+   "68b80451c141": "prod/small-models.yaml @ cab4087076ad5321f3c2413627d30af455eb3cb6 (v0.0.539, 2026-11-03): created model-sg-qwen38-27b-fp8-tp1-coloc, otelcol-contrib",
+   "dfac28986618": "prod/small-models.yaml @ e99f50fc2c08db4081e5436113e60fad68840cb4 (v0.0.513, 2026-10-24): created model-sg-flux2-klein-4b-tp1"
+  },
+  "line_numbers_note": "line numbers are in the small-models file at the named revision (fetch by commit from nearai/cvm-compose-files and re-hash); the orchestrator read each one",
+  "cases": [
+   {
+    "name": "off-path: a Qwen3.8 chat on the small-models CVM while the FLUX engine in the same file leaks",
+    "host": "qwen3-8-27b.completions.near.ai",
+    "ingress": {
+     "service": "nginx-qwen38",
+     "revision": "320afade84f1",
+     "config": "nginx_qwen38_conf (320afade :3507)",
+     "server_block": "listen 8001 ssl http2; server_name qwen3-8-27b.completions.near.ai ... (:3568-3577)",
+     "proxy_pass": "http://proxy-qwen38-27b:8000 (:3577)"
+    },
+    "proxy": {
+     "service": "proxy-qwen38-27b",
+     "revision": "320afade84f1",
+     "backend_env": "VLLM_BACKEND_URLS=http://model-sg-qwen38-27b-fp8-tp1-coloc:8000 (:860)",
+     "image": "nearaidev/vllm-proxy-rs@sha256:0be4ee8f... (:846)"
+    },
+    "engines": [
+     {
+      "service": "model-sg-qwen38-27b-fp8-tp1-coloc",
+      "revision": "68b80451c141",
+      "image": "lmsysorg/sglang@sha256:febfb971... (anchor x-qwen3-8-27b-dedicated :129)"
+     }
+    ],
+    "path": [
+     "nginx-qwen38",
+     "proxy-qwen38-27b",
+     "model-sg-qwen38-27b-fp8-tp1-coloc"
+    ],
+    "pages_on_path": [
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/small-models/sha256-320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba.md",
+      "class": "leaks",
+      "scope": "wholesale",
+      "services": [
+       "model-sg-flux2-klein-4b-tp1"
+      ],
+      "on_path": false,
+      "why": "services do not intersect the path"
+     },
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/small-models/sha256-68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2.md",
+      "class": "leaks",
+      "scope": "wholesale",
+      "services": [
+       "model-sg-flux2-klein-4b-tp1"
+      ],
+      "on_path": false,
+      "why": "services do not intersect the path"
+     },
+     {
+      "page": "images/docker.io/nearaidev/vllm-proxy-rs/sha256-0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207.md",
+      "class": "qualified-pass",
+      "on_path": true
+     },
+     {
+      "page": "images/docker.io/lmsysorg/sglang/sha256-febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1.md",
+      "class": "private",
+      "on_path": true
+     },
+     {
+      "page": null,
+      "service": "nginx-qwen38",
+      "note": "nginx image has no page: ciphertext side (OHTTP-encapsulated bodies), deliberately ungated"
+     }
+    ],
+    "expected": {
+     "leaks_for_this_chat": false,
+     "scope": null,
+     "rollup_from": [
+      "qualified-pass",
+      "private"
+     ],
+     "sibling_leaks_present_on_cvm": true
+    }
+   },
+   {
+    "name": "on-path: a FLUX image-generation request on the same CVM",
+    "host": "flux2-klein.completions.near.ai",
+    "ingress": {
+     "service": "nginx",
+     "revision": "320afade84f1",
+     "config": "nginx_conf (320afade :3255)",
+     "server_block": "listen 443 ssl http2; server_name flux2-klein.completions.near.ai ... (:3378-3388)",
+     "proxy_pass": "http://proxy-flux2-klein-4b:8000 (:3387)"
+    },
+    "proxy": {
+     "service": "proxy-flux2-klein-4b",
+     "revision": "320afade84f1",
+     "backend_env": "VLLM_BASE_URL=http://model-sg-flux2-klein-4b-tp1:8000 (:1579; no VLLM_BACKEND_URLS on this proxy)",
+     "image": "nearaidev/vllm-proxy-rs@sha256:0be4ee8f... (anchor x-vllm-proxy-common :29-30)"
+    },
+    "engines": [
+     {
+      "service": "model-sg-flux2-klein-4b-tp1",
+      "revision": "dfac28986618",
+      "image": "in-enclave build (:170-176) FROM lmsysorg/sglang@sha256:8ece90ad52faa8b56149f0117227d9009db34513213e35990da468aeb6fe0b75 -> resolves to that digest's page"
+     }
+    ],
+    "path": [
+     "nginx",
+     "proxy-flux2-klein-4b",
+     "model-sg-flux2-klein-4b-tp1"
+    ],
+    "pages_on_path": [
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/small-models/sha256-320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba.md",
+      "class": "leaks",
+      "scope": "wholesale",
+      "services": [
+       "model-sg-flux2-klein-4b-tp1"
+      ],
+      "on_path": true,
+      "why": "model-sg-flux2-klein-4b-tp1 is on the path"
+     },
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/small-models/sha256-dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac.md",
+      "class": "leaks",
+      "scope": "wholesale",
+      "services": [
+       "model-sg-flux2-klein-4b-tp1"
+      ],
+      "on_path": true,
+      "why": "created the engine on the path"
+     },
+     {
+      "page": "images/docker.io/lmsysorg/sglang/sha256-8ece90ad52faa8b56149f0117227d9009db34513213e35990da468aeb6fe0b75.md",
+      "class": "leaks",
+      "scope": "wholesale",
+      "scope_kind": "image",
+      "on_path": true,
+      "why": "the FROM base of the engine on the path"
+     },
+     {
+      "page": "images/docker.io/nearaidev/vllm-proxy-rs/sha256-0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207.md",
+      "class": "qualified-pass",
+      "on_path": true
+     }
+    ],
+    "expected": {
+     "leaks_for_this_chat": true,
+     "scope": "wholesale",
+     "summary_from": "the 320afade page's exposure.summary (or dfac2898's; identical scope), shown verbatim"
+    }
+   }
+  ]
+ },
+ "sheet_rows": {
+  "rule": "DISPLAY-ONLY filter over the per-service running table (running_pairs.rule, liveness_rule unchanged; the newest-first hash checks of all attributed pairs, cap 10, unchanged). The sheet lists ACTIVE INFRASTRUCTURE = (a) every service the log vouches for (attributed and not liveness-undecidable) UNION (b) every service on the chat PATH (chat_path.rule steps 1-3: ingress by server_name -> proxy_pass -> proxy -> VLLM_BACKEND_URLS / VLLM_BASE_URL -> engines), whether or not the log can vouch for it. Conditions on (b): (i) each path service is attributed by ITS OWN newest entry in the running table, and its row (file hash, image digest, audit page) is that revision's, never the proxy's revision; (ii) an upstream name counts only if the proxy's revision defines it as a service or the table has an attributing up for it, otherwise AMBIGUOUS; (iii) follow routers transitively (an upstream whose definition has its own VLLM_BACKEND_URLS / VLLM_BASE_URL, e.g. a vllm-proxy-rs image or a privacy filter) until an engine image, depth cap 4, beyond it AMBIGUOUS; (iv) the literal default of ${VAR:-default} counts and an env override is unrecorded (residual, unchanged). Everything else the log never closed (liveness undecidable, off path) is dropped from the sheet with no footnote. FALLBACK (chat_path.rule step 5, AMBIGUOUS): no server_name match for HOST, an unresolvable proxy_pass, a non-literal backend list, an upstream with neither definition nor attributing up, or depth exceeded -> show the FULL list (every attributed service, undecidable ones included) and count every LEAKS page on the CVM. Hash, signature and audit findings stay on every shown row.",
+  "why": "ios 2026-11-08 on the maintainer's request: since near.ai moved to services-scoped ups the log rarely closes old services, and the sheet showed ~20 'can't tell' rows beside 4 current ones on glm-5-3-flash; the maintainer: show the active infrastructure. Reasoning on what the drop loses (nothing the LEAKS rollup depends on: plaintext exists only in the proxy and the engines it forwards to; a collector only receives what on-path services emit; host-level capabilities are the CVM operator's trust, which the measurement covers) is the audit session's answer of 2026-11-08.",
+  "decided": "pending the maintainer's decision; fixture vectors prepared 2026-11-08 by the audit session",
+  "verified_utc": "2026-11-08",
+  "line_numbers_note": "line numbers are in the named file at the named commit (fetch from nearai/cvm-compose-files by commit, re-hash against file_sha256); the audit session read each one on 2026-11-08",
+  "cases": [
+   {
+    "name": "gpu04 fixture log 2026-10-30: 14 shown, 1 dropped; r4 is a cross-file upstream",
+    "log": {
+     "file": "glm-5-3-flash-gpu04-5f7ebd85-2026-10-30T2241Z.json",
+     "instance_id": "7bb9af0ac5b0e22dde3903218f58e56f743164a1",
+     "compose_hash": "5f7ebd85cf1f480a118f75dd10fd0cb277e4ddbb23845f1c20d8ea0f1e87efa6",
+     "entries": 180
+    },
+    "host": "glm-5-3-flash.completions.near.ai",
+    "path": [
+     "nginx",
+     "proxy-glm53",
+     "model-sg-glm53-w4afp8-tp2-r1",
+     "model-sg-glm53-w4afp8-tp2-r2",
+     "model-sg-glm53-w4afp8-tp2-r3",
+     "model-sg-glm53-w4afp8-tp2-r4"
+    ],
+    "ambiguous": false,
+    "rows": [
+     {
+      "service": "nginx",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log+path",
+      "role": "ingress",
+      "evidence": "nginx_conf: server_name glm-5-3-flash.completions.near.ai (:1832), location / sets $proxy_glm53 http://proxy-glm53:8000 (:1846) and proxy_pass $proxy_glm53 (:1847); image nginx@sha256:1d13701a... (:413, no audit page)"
+     },
+     {
+      "service": "proxy-glm53",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "log+path",
+      "role": "proxy",
+      "evidence": "MODEL_NAME=z-ai/glm-5.3-flash (:482) = report model_name -> alive; VLLM_BACKEND_URLS=http://model-sg-glm53-w4afp8-tp2-r1:8000,...-r2,...-r3,...-r4 (:487); image nearaidev/vllm-proxy-rs@sha256:e4a42b32... (anchor :134)",
+      "page": "images/docker.io/nearaidev/vllm-proxy-rs/sha256-e4a42b327523e304c0fc389f656ba7a02fd7b3d4a38cdc822f9288fd193a525a.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r1",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "log+path",
+      "role": "engine",
+      "evidence": "named in the proxy's VLLM_BACKEND_URLS; defined in the proxy's own revision; image docker.io/nearaidev/sglang@sha256:da8d4e4b... (anchor :149)",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r2",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "log+path",
+      "role": "engine",
+      "evidence": "named in the proxy's VLLM_BACKEND_URLS; defined in the proxy's own revision; image docker.io/nearaidev/sglang@sha256:da8d4e4b... (anchor :149)",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r3",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "log+path",
+      "role": "engine",
+      "evidence": "named in the proxy's VLLM_BACKEND_URLS; defined in the proxy's own revision; image docker.io/nearaidev/sglang@sha256:da8d4e4b... (anchor :149)",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r4",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "bb7505f16a942aa058894bf1999ae68542315d94e9621b554fb897e3ebb223b8",
+      "shown_by": "log+path",
+      "role": "engine",
+      "evidence": "CROSS-FILE upstream: named in proxy-glm53's VLLM_BACKEND_URLS but defined in Q8Canary, attributed by its own scoped compose_up 2026-10-28T01:24:51Z (condition ii satisfied by the table); image docker.io/nearaidev/sglang@sha256:fa730e6e... (anchor :147); the Q8Canary revision has no recipe page",
+      "page": "images/docker.io/nearaidev/sglang/sha256-fa730e6e62b2ae8058114ce540487ade33ab93bc42b1179ae78edc92bd563fc5.md"
+     },
+     {
+      "service": "otelcol-contrib",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-glm53",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "glm53-ghost-aggregator",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "glm53-perception-check",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "glm53-soak-relay",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "hf-cleanup",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "model-downloader",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "model-proxy-registrar",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml",
+      "commit": "cd94860052fede8d56d8f017c55b241362c75d29",
+      "file_sha256": "a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be",
+      "shown_by": "log",
+      "role": "other"
+     }
+    ],
+    "dropped": [
+     {
+      "service": "rotate-token",
+      "file": "prod/rotate-compose-manager-token.yaml",
+      "commit": "3c2f033b2a44d08832ffec32417dc35a95cdbe2c",
+      "file_sha256": "0d1263e5169ebacdb1da157857aafff9a5bb5645aabbd921b3bd7e18d60a8ee2",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable (running_pairs.undecidable_by.rotate-token); not on the path; under neither reading is a process running (exited one-shot)"
+     }
+    ],
+    "pages_on_path": [
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8/sha256-a49d9c15e866c6f569655fb506a0c60cf97e70c01a6de580c1a4fac0a1e334be.md",
+      "class": "qualified-pass"
+     },
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8/sha256-904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0.md",
+      "class": "qualified-pass"
+     },
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-Q8Canary/sha256-bb7505f16a942aa058894bf1999ae68542315d94e9621b554fb897e3ebb223b8.md",
+      "class": null,
+      "note": "no page for this revision; the row shows 'not reviewed'"
+     },
+     {
+      "page": "images/docker.io/nearaidev/vllm-proxy-rs/sha256-e4a42b327523e304c0fc389f656ba7a02fd7b3d4a38cdc822f9288fd193a525a.md",
+      "class": "qualified-pass"
+     },
+     {
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md",
+      "class": "private"
+     },
+     {
+      "page": "images/docker.io/nearaidev/sglang/sha256-fa730e6e62b2ae8058114ce540487ade33ab93bc42b1179ae78edc92bd563fc5.md",
+      "class": "private"
+     }
+    ],
+    "leaks_rollup": "none on path",
+    "note": "per_service_running_table is the pre-2026-11-06 table (nginx there still reads 0e55b0e7); running_pairs.pairs is current: the whole-file up of cd948600 on 2026-10-24T04:13:22Z re-created nginx and seven more"
+   },
+   {
+    "name": "the other glm-5-3-flash CVM, captured 2026-11-08T12:31Z: 8 shown, 12 dropped; the four live engines are log-undecidable and shown by the path",
+    "log": {
+     "file": "actions-a0e3c6f4f21a-2026-11-08T1231Z.json",
+     "sha256": "33f48bbc7e840c749316c682f2f080ee817d6e2c0854c8d0b7006cdb912ad08f",
+     "instance_id": "19aea1693533dc2d529db03e3f725f20bde8d66d",
+     "compose_hash": "a0e3c6f4f21a60ea3f5c96bc7ef319b03a184ca2049605399275fbcea74e8c5f",
+     "entries": 236,
+     "newest_entry": "2026-11-08T08:55:16Z",
+     "actions_hash": "e40070ecfcb32ed8",
+     "actions_hash_recomputed_matches": true,
+     "nonce_echoed": true,
+     "note": "the actions array of the /v1/attestation/report answer (no quote in this file); this CVM's log carries the acknowledged gpu03 leftovers 71d005a4 and bcd313cf; its 7ee4a4c7 entries attribute r4 to V12Q8, unlike the gpu04 log where r4 came from Q8Canary"
+    },
+    "host": "glm-5-3-flash.completions.near.ai",
+    "path": [
+     "nginx",
+     "proxy-glm53",
+     "model-sg-glm53-w4afp8-tp2-r1",
+     "model-sg-glm53-w4afp8-tp2-r2",
+     "model-sg-glm53-w4afp8-tp2-r3",
+     "model-sg-glm53-w4afp8-tp2-r4"
+    ],
+    "ambiguous": false,
+    "rows": [
+     {
+      "service": "nginx",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "log+path",
+      "role": "ingress",
+      "evidence": "nginx_conf: server_name glm-5-3-flash.completions.near.ai (:1844), location / sets $proxy_glm53 http://proxy-glm53:8000 (:1858) and proxy_pass $proxy_glm53 (:1859); image nginx@sha256:1d13701a... (:425); scoped up 2026-11-08T02:38:35Z"
+     },
+     {
+      "service": "proxy-glm53",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "log+path",
+      "role": "proxy",
+      "evidence": "alive: MODEL_NAME=z-ai/glm-5.3-flash (:482) = report model_name, newest attributing up 2026-11-08T08:55:16Z; VLLM_BACKEND_URLS (:487) names r1..r4; image nearaidev/vllm-proxy-rs@sha256:0be4ee8f... (anchor :134)",
+      "page": "images/docker.io/nearaidev/vllm-proxy-rs/sha256-0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r1",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "path",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r2",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "path",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r3",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "path",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r4",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "path",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-downloader",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "log",
+      "role": "other",
+      "evidence": "scoped up 2026-11-08T06:58:29Z beside proxy-glm53"
+     },
+     {
+      "service": "model-proxy-registrar",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "log",
+      "role": "other",
+      "evidence": "down 08:30:20Z, up 08:36:03Z"
+     }
+    ],
+    "dropped": [
+     {
+      "service": "otelcol-contrib",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path; the collector only receives what on-path services emit; the on-path pages' verdicts already carry that"
+     },
+     {
+      "service": "dcgm-glm53",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "glm53-ghost-aggregator",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "glm53-perception-check",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "glm53-soak-relay",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "hf-cleanup",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "dcgm-glm52",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "model-sg-glm52-w4a-tp4-r1",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "model-sg-glm52-w4a-tp4-r2",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "proxy-glm52",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp4-r1",
+      "file": "prod/GLM-5.3-Flash-SGL-TP4-W4AFP8.yaml",
+      "commit": "0a51138ef3ec104706c40a53dab0c3bcea75d7b3",
+      "file_sha256": "bcd313cf7117b82f0f850f9b93da06a4129a3073ae4a58c017a3723eb30a7255",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@3c2f033b2a44 2026-09-29T05:45:35Z (name not defined in that revision); not on the path; acknowledged leftover bcd313cf, no page; cannot be serving (GPU reservations collide with r1..r4)"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp4-r2",
+      "file": "prod/GLM-5.3-Flash-SGL-TP4-W4AFP8.yaml",
+      "commit": "0a51138ef3ec104706c40a53dab0c3bcea75d7b3",
+      "file_sha256": "bcd313cf7117b82f0f850f9b93da06a4129a3073ae4a58c017a3723eb30a7255",
+      "shown_by": "none",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@3c2f033b2a44 2026-09-29T05:45:35Z (name not defined in that revision); not on the path; acknowledged leftover bcd313cf, no page; cannot be serving (GPU reservations collide with r1..r4)"
+     }
+    ],
+    "pages_on_path": [
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8/sha256-309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1.md",
+      "class": "qualified-pass"
+     },
+     {
+      "page": "manifests/nearai/cvm-compose-files/prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8/sha256-904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0.md",
+      "class": "qualified-pass"
+     },
+     {
+      "page": "images/docker.io/nearaidev/vllm-proxy-rs/sha256-0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207.md",
+      "class": "qualified-pass"
+     },
+     {
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md",
+      "class": "private"
+     }
+    ],
+    "leaks_rollup": "none on path",
+    "liveness_from_tool": {
+     "alive": [
+      "proxy-glm53"
+     ],
+     "alive_evidence": {
+      "proxy-glm53": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml@5a5119f79940 (2026-11-08T08:55:16)"
+     },
+     "refuted_evictions": [],
+     "leftover_pairs": [
+      "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml@ddec8d8c4f63",
+      "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml@7ee4a4c74125",
+      "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml@6b8c3b191a43",
+      "prod/GLM-5.3-Flash-SGL-TP4-W4AFP8.yaml@0a51138ef3ec"
+     ]
+    }
+   },
+   {
+    "name": "AMBIGUOUS on the same 2026-11-08 log: a host no running nginx serves -> the full list of 20 and every LEAKS page counts",
+    "log": {
+     "file": "actions-a0e3c6f4f21a-2026-11-08T1231Z.json"
+    },
+    "host": "qwen3-8-27b.completions.near.ai",
+    "why_ambiguous": "no server block in any running nginx config of this CVM names the host (chat_path.rule step 5: no server_name match)",
+    "ambiguous": true,
+    "path": null,
+    "rows": [
+     {
+      "service": "nginx",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "ambiguous-full-list",
+      "role": "ingress",
+      "evidence": "nginx_conf: server_name glm-5-3-flash.completions.near.ai (:1844), location / sets $proxy_glm53 http://proxy-glm53:8000 (:1858) and proxy_pass $proxy_glm53 (:1859); image nginx@sha256:1d13701a... (:425); scoped up 2026-11-08T02:38:35Z"
+     },
+     {
+      "service": "proxy-glm53",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy",
+      "evidence": "alive: MODEL_NAME=z-ai/glm-5.3-flash (:482) = report model_name, newest attributing up 2026-11-08T08:55:16Z; VLLM_BACKEND_URLS (:487) names r1..r4; image nearaidev/vllm-proxy-rs@sha256:0be4ee8f... (anchor :134)",
+      "page": "images/docker.io/nearaidev/vllm-proxy-rs/sha256-0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r1",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r2",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r3",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp2-r4",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine",
+      "log_liveness": "undecidable",
+      "evicted_under_reading_i_by": "prod/rotate-compose-manager-token.yaml@132912c5a119 up 2026-11-08T02:37:39Z (name not defined in that revision)",
+      "evidence": "THE CASE THE MAINTAINER SAW: the log never closed r1..r4 (created by scoped ups of 7ee4a4c7 on 2026-10-28) and a later up of another file lacking the names makes them undecidable; the live proxy at 5a5119f7 routes every request to them (:487) and they are defined there too (:526/:564/:675/:786), so they are on the path and shown; their row cites 7ee4a4c7, the revision that created them (condition i), whose image is docker.io/nearaidev/sglang@sha256:da8d4e4b... (:149). Had the 02:37:39Z rotate-token up removed them (shared project), the proxy re-created at 06:58:29Z and 08:55:16Z would have no backend and no chat would complete; the four TP2 replicas also reserve all eight GPUs.",
+      "page": "images/docker.io/nearaidev/sglang/sha256-da8d4e4b5ec667499b58a21e56050aae9bcfc4df9669b3ac27e2e20af033d681.md"
+     },
+     {
+      "service": "model-downloader",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "evidence": "scoped up 2026-11-08T06:58:29Z beside proxy-glm53"
+     },
+     {
+      "service": "model-proxy-registrar",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "5a5119f799409672cfd101429b01dcd6db30188e",
+      "file_sha256": "309c07af98ff96349716dde078158ee021cf0eed33cd8690aa638f2e61546dd1",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "evidence": "down 08:30:20Z, up 08:36:03Z"
+     },
+     {
+      "service": "otelcol-contrib",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V12Q8.yaml",
+      "commit": "7ee4a4c741259d0c69a81e5cda22c3dfce21cbc2",
+      "file_sha256": "904054f502ccdb2f913d6b80f156ea658b8bc5cb6f8af06082723581d62a45c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path; the collector only receives what on-path services emit; the on-path pages' verdicts already carry that"
+     },
+     {
+      "service": "dcgm-glm53",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "glm53-ghost-aggregator",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "glm53-perception-check",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "glm53-soak-relay",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "hf-cleanup",
+      "file": "prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8-V8KdaCanary.yaml",
+      "commit": "6b8c3b191a432f671a0529e7e8589149fb910c0d",
+      "file_sha256": "2a4865b227a6908f5a50e20c3f5e7a4e8222c2c6da0d25359b11e78d86e9e1c0",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@132912c5a119 2026-11-08T02:37:39Z (name not defined in that revision); not on the path"
+     },
+     {
+      "service": "dcgm-glm52",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "model-sg-glm52-w4a-tp4-r1",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "model-sg-glm52-w4a-tp4-r2",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "proxy-glm52",
+      "file": "prod/GLM-5.2-W4AFP8-SGL-2xTP4.yaml",
+      "commit": "ddec8d8c4f637d16884ca949e43c51582d8ed858",
+      "file_sha256": "71d005a45c5be89ab60b1b8f6142903b9a504e3ad67e80db3db8b737db7c9651",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/GLM-5.3-Flash-SGL-TP2x4-W4AFP8.yaml@ddec8d8c4f63 2026-10-02T04:52:36Z (name not defined in that revision); not on the path; GLM 5.2 retired 2026-09-12; acknowledged leftover 71d005a4 (audits acknowledged.json), no page; its GPUs are held by the live r1..r4"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp4-r1",
+      "file": "prod/GLM-5.3-Flash-SGL-TP4-W4AFP8.yaml",
+      "commit": "0a51138ef3ec104706c40a53dab0c3bcea75d7b3",
+      "file_sha256": "bcd313cf7117b82f0f850f9b93da06a4129a3073ae4a58c017a3723eb30a7255",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@3c2f033b2a44 2026-09-29T05:45:35Z (name not defined in that revision); not on the path; acknowledged leftover bcd313cf, no page; cannot be serving (GPU reservations collide with r1..r4)"
+     },
+     {
+      "service": "model-sg-glm53-w4afp8-tp4-r2",
+      "file": "prod/GLM-5.3-Flash-SGL-TP4-W4AFP8.yaml",
+      "commit": "0a51138ef3ec104706c40a53dab0c3bcea75d7b3",
+      "file_sha256": "bcd313cf7117b82f0f850f9b93da06a4129a3073ae4a58c017a3723eb30a7255",
+      "shown_by": "ambiguous-full-list",
+      "role": "other",
+      "why": "liveness undecidable: first later up of another file lacking the name = prod/rotate-compose-manager-token.yaml@3c2f033b2a44 2026-09-29T05:45:35Z (name not defined in that revision); not on the path; acknowledged leftover bcd313cf, no page; cannot be serving (GPU reservations collide with r1..r4)"
+     }
+    ],
+    "dropped": [],
+    "leaks_rollup": "every LEAKS page on the CVM counts; none exists for these pairs, so none"
+   },
+   {
+    "name": "gpu13 log 2026-11-04, on-path Qwen3.8 chat: the filter changes nothing (no undecidable row after the live refutation); the FLUX leak stays off path",
+    "log": {
+     "file": "actions-5e513dbd72e1-2026-11-04T1933Z.json",
+     "sha256": "4a427d4618dea09cf6a3147584a73bd6fa0f1ef548d9f12f9e6d72454ba5641b",
+     "entries": 82,
+     "newest_entry": "2026-11-04T19:33:54Z",
+     "cvm": "small-models cluster, measured harness 5e513dbd72e1 (ten hosts: flux2-klein, privacy-filter, qwen3-30b, qwen3-6-35b, qwen3-8-27b, qwen3-8-27b-abliterated, qwen3-embedding, qwen3-reranker, qwen3-vl-30b, whisper-large-v3)",
+     "note": "the signed action log alone (no quote in this file); the quote-to-log binding is the gpu04 fixture's job"
+    },
+    "host": "qwen3-8-27b.completions.near.ai",
+    "path": [
+     "nginx-qwen38",
+     "proxy-qwen38-27b",
+     "model-sg-qwen38-27b-fp8-tp1-coloc"
+    ],
+    "ambiguous": false,
+    "rows": [
+     {
+      "service": "model-vllm-dsv41-dp4",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-dsv41-dp5",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-dsv41-dp6",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-dsv41-dp7",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "proxy-dsv41",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-dsv41-abliterated",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "sage",
+      "file": "prod/small-models.yaml",
+      "commit": "86d7ec5db459c02c3870f1e3e31226c661dc0c36",
+      "file_sha256": "2afeafa24b31df9e56923659f106d17f04c1a182c52d576768456c005811720f",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "sage-dstack",
+      "file": "prod/small-models.yaml",
+      "commit": "86d7ec5db459c02c3870f1e3e31226c661dc0c36",
+      "file_sha256": "2afeafa24b31df9e56923659f106d17f04c1a182c52d576768456c005811720f",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "nginx",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "ingress"
+     },
+     {
+      "service": "nginx-qwen38",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log+path",
+      "role": "ingress"
+     },
+     {
+      "service": "proxy-flux2-klein-4b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-privacy-filter",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen3-embedding-0.6b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen3-reranker-0.6b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen36-35b-a3b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen38-27b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log+path",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen38-27b-abliterated",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen3vl-30b-a3b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-whisper-large-v3",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "log",
+      "role": "proxy"
+     },
+     {
+      "service": "model-sg-qwen38-27b-fp8-tp1-coloc",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "log+path",
+      "role": "engine"
+     },
+     {
+      "service": "otelcol-contrib",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "qwen38-abliterated-registrar",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "qwen38-registrar",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-dsv41",
+      "file": "prod/small-models.yaml",
+      "commit": "368dc049942ae672968ffaa6b9182b9dd06a7525",
+      "file_sha256": "f146e3604ba9367781c41aea6d34199213ea2ac6537867b338817bd69dab1615",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "model-downloader",
+      "file": "prod/small-models.yaml",
+      "commit": "368dc049942ae672968ffaa6b9182b9dd06a7525",
+      "file_sha256": "f146e3604ba9367781c41aea6d34199213ea2ac6537867b338817bd69dab1615",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-proxy-registrar",
+      "file": "prod/small-models.yaml",
+      "commit": "368dc049942ae672968ffaa6b9182b9dd06a7525",
+      "file_sha256": "f146e3604ba9367781c41aea6d34199213ea2ac6537867b338817bd69dab1615",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "dcgm-sage",
+      "file": "prod/small-models.yaml",
+      "commit": "4b5d2d517ee4d6ac8f73e00f0d36ebb9fc801772",
+      "file_sha256": "23e17f384a872c8fd7a378469ad18498ea804d3868e5509952523557b9e13868",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "model-vllm-qwen3-reranker-0.6b-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "256e915c22033cad76f1a0aa06e3777b9221ca23",
+      "file_sha256": "e2f4aac22eeaa63d21764d93a73fd067613f348a0487c4f4e0414a21507526dc",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "qwen38-lora-adapter-downloader",
+      "file": "prod/small-models.yaml",
+      "commit": "28a15af593b604d354691dcd77fb1f316cc9dbe1",
+      "file_sha256": "88e8371122f7a4039ebb24e680658c2df5e77a4cea5464180f3bcf1ea8b72552",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-privacy-filter",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-qwen36-35b-a3b",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-shared-gpu3",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "other"
+     },
+     {
+      "service": "model-downloader-qwen38",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-privacy-filter",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-sg-flux2-klein-4b-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-sg-qwen36-35b-a3b-fp8-tp1-r1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-qwen3-embedding-0.6b-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-qwen3vl-30b-a3b-fp8-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-whisper-large-v3-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "log",
+      "role": "engine"
+     }
+    ],
+    "dropped": [],
+    "pages_on_path": "chat_path.cases[0].pages_on_path",
+    "leaks_rollup": "not LEAKS for this chat (chat_path.cases[0])",
+    "liveness_from_tool": {
+     "alive": [
+      "proxy-qwen36-35b-a3b",
+      "proxy-qwen38-27b",
+      "proxy-qwen38-27b-abliterated",
+      "proxy-dsv41",
+      "proxy-dsv41-abliterated",
+      "proxy-flux2-klein-4b",
+      "proxy-qwen3vl-30b-a3b",
+      "proxy-qwen3-embedding-0.6b",
+      "proxy-qwen3-reranker-0.6b",
+      "proxy-whisper-large-v3",
+      "proxy-privacy-filter"
+     ],
+     "refuted_evictions": [
+      "prod/small-models.yaml <- prod/sage-pull.yaml"
+     ],
+     "undecidable": {}
+    }
+   },
+   {
+    "name": "AMBIGUOUS on the gpu13 log: a host no running nginx serves -> identical rows, but the rollup flips to LEAKS",
+    "log": {
+     "file": "actions-5e513dbd72e1-2026-11-04T1933Z.json",
+     "sha256": "4a427d4618dea09cf6a3147584a73bd6fa0f1ef548d9f12f9e6d72454ba5641b",
+     "entries": 82,
+     "newest_entry": "2026-11-04T19:33:54Z",
+     "cvm": "small-models cluster, measured harness 5e513dbd72e1 (ten hosts: flux2-klein, privacy-filter, qwen3-30b, qwen3-6-35b, qwen3-8-27b, qwen3-8-27b-abliterated, qwen3-embedding, qwen3-reranker, qwen3-vl-30b, whisper-large-v3)",
+     "note": "the signed action log alone (no quote in this file); the quote-to-log binding is the gpu04 fixture's job"
+    },
+    "host": "glm-5-3-flash.completions.near.ai",
+    "why_ambiguous": "no server_name match on this CVM (node-lottery mismatch: the report came from a CVM whose ingress does not serve the connected host)",
+    "ambiguous": true,
+    "path": null,
+    "rows": [
+     {
+      "service": "model-vllm-dsv41-dp4",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-dsv41-dp5",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-dsv41-dp6",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-dsv41-dp7",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "proxy-dsv41",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-dsv41-abliterated",
+      "file": "prod/small-models.yaml",
+      "commit": "81da1f6290a2bdb2f8f7712ab8ca76c891f5660d",
+      "file_sha256": "79f6fe9c746b5e1f7b4da882c49b434bdd1acbb603616266fc80d640361f6fd3",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "sage",
+      "file": "prod/small-models.yaml",
+      "commit": "86d7ec5db459c02c3870f1e3e31226c661dc0c36",
+      "file_sha256": "2afeafa24b31df9e56923659f106d17f04c1a182c52d576768456c005811720f",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "sage-dstack",
+      "file": "prod/small-models.yaml",
+      "commit": "86d7ec5db459c02c3870f1e3e31226c661dc0c36",
+      "file_sha256": "2afeafa24b31df9e56923659f106d17f04c1a182c52d576768456c005811720f",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "nginx",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "ingress"
+     },
+     {
+      "service": "nginx-qwen38",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "ingress"
+     },
+     {
+      "service": "proxy-flux2-klein-4b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-privacy-filter",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen3-embedding-0.6b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen3-reranker-0.6b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen36-35b-a3b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen38-27b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen38-27b-abliterated",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-qwen3vl-30b-a3b",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "proxy-whisper-large-v3",
+      "file": "prod/small-models.yaml",
+      "commit": "75d31e6461dc51465a81ff69203200a51a820d1c",
+      "file_sha256": "320afade84f1606bda2c473ec0d09d3b6cd745038133bf353252f2683cc24eba",
+      "shown_by": "ambiguous-full-list",
+      "role": "proxy"
+     },
+     {
+      "service": "model-sg-qwen38-27b-fp8-tp1-coloc",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "otelcol-contrib",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "qwen38-abliterated-registrar",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "qwen38-registrar",
+      "file": "prod/small-models.yaml",
+      "commit": "cab4087076ad5321f3c2413627d30af455eb3cb6",
+      "file_sha256": "68b80451c141f21eab9f80302e60f48857ddf2d6304b485327c23abe8c9423b2",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-dsv41",
+      "file": "prod/small-models.yaml",
+      "commit": "368dc049942ae672968ffaa6b9182b9dd06a7525",
+      "file_sha256": "f146e3604ba9367781c41aea6d34199213ea2ac6537867b338817bd69dab1615",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "model-downloader",
+      "file": "prod/small-models.yaml",
+      "commit": "368dc049942ae672968ffaa6b9182b9dd06a7525",
+      "file_sha256": "f146e3604ba9367781c41aea6d34199213ea2ac6537867b338817bd69dab1615",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-proxy-registrar",
+      "file": "prod/small-models.yaml",
+      "commit": "368dc049942ae672968ffaa6b9182b9dd06a7525",
+      "file_sha256": "f146e3604ba9367781c41aea6d34199213ea2ac6537867b338817bd69dab1615",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "dcgm-sage",
+      "file": "prod/small-models.yaml",
+      "commit": "4b5d2d517ee4d6ac8f73e00f0d36ebb9fc801772",
+      "file_sha256": "23e17f384a872c8fd7a378469ad18498ea804d3868e5509952523557b9e13868",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "model-vllm-qwen3-reranker-0.6b-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "256e915c22033cad76f1a0aa06e3777b9221ca23",
+      "file_sha256": "e2f4aac22eeaa63d21764d93a73fd067613f348a0487c4f4e0414a21507526dc",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "qwen38-lora-adapter-downloader",
+      "file": "prod/small-models.yaml",
+      "commit": "28a15af593b604d354691dcd77fb1f316cc9dbe1",
+      "file_sha256": "88e8371122f7a4039ebb24e680658c2df5e77a4cea5464180f3bcf1ea8b72552",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-privacy-filter",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-qwen36-35b-a3b",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "dcgm-shared-gpu3",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "other"
+     },
+     {
+      "service": "model-downloader-qwen38",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-privacy-filter",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-sg-flux2-klein-4b-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-sg-qwen36-35b-a3b-fp8-tp1-r1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-qwen3-embedding-0.6b-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-qwen3vl-30b-a3b-fp8-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     },
+     {
+      "service": "model-vllm-whisper-large-v3-tp1",
+      "file": "prod/small-models.yaml",
+      "commit": "e99f50fc2c08db4081e5436113e60fad68840cb4",
+      "file_sha256": "dfac289866183c8fdd21606a0c431f7a5e8b240f2aeeb939461b823aec9541ac",
+      "shown_by": "ambiguous-full-list",
+      "role": "engine"
+     }
+    ],
+    "dropped": [],
+    "leaks_rollup": "every LEAKS page on the CVM counts: the small-models LEAKS pages (FLUX engine, wholesale) -> LEAKS wholesale for this chat, although the row set equals the previous case"
+   }
+  ]
+ }
+}

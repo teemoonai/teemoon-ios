@@ -11,6 +11,19 @@ import Foundation
 
 protocol HTTPClient: Sendable {
     func data(for request: URLRequest) async throws -> (Data, URLResponse)
+    /// Stops reading once the body passes `limit` bytes and throws `HTTPBodyTooLarge`.
+    func data(for request: URLRequest, limit: Int) async throws -> (Data, URLResponse)
+}
+
+struct HTTPBodyTooLarge: Error, Equatable {}
+
+extension HTTPClient {
+    /// Seams that hand back planted bytes: the limit is checked on what they return.
+    func data(for request: URLRequest, limit: Int) async throws -> (Data, URLResponse) {
+        let (data, response) = try await data(for: request)
+        guard data.count <= limit else { throw HTTPBodyTooLarge() }
+        return (data, response)
+    }
 }
 
 struct URLSessionHTTP: HTTPClient {
@@ -20,5 +33,18 @@ struct URLSessionHTTP: HTTPClient {
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         try await session.data(for: request)
+    }
+
+    /// Streams the body and cancels the transfer past `limit`: an oversize answer is never downloaded whole.
+    func data(for request: URLRequest, limit: Int) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request)
+        if response.expectedContentLength > Int64(limit) { bytes.task.cancel(); throw HTTPBodyTooLarge() }
+        var data = Data()
+        data.reserveCapacity(Int(min(max(response.expectedContentLength, 0), Int64(limit))))
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count > limit { bytes.task.cancel(); throw HTTPBodyTooLarge() }
+        }
+        return (data, response)
     }
 }

@@ -568,10 +568,14 @@ extension SSEStreamParser {
     }
 
     static func stripTextToolCalls(from content: String) -> String {
+        // Search the close only after the open: a stray close before it made a backwards range (a trap).
         var result = content
-        while let openRange  = result.range(of: "<tool_call>"),
-              let closeRange = result.range(of: "</tool_call>") {
+        var from = result.startIndex
+        while let openRange = result.range(of: "<tool_call>", range: from..<result.endIndex),
+              let closeRange = result.range(of: "</tool_call>", range: openRange.upperBound..<result.endIndex) {
+            let at = result.distance(from: result.startIndex, to: openRange.lowerBound)
             result.removeSubrange(openRange.lowerBound..<closeRange.upperBound)
+            from = result.index(result.startIndex, offsetBy: at)
         }
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }

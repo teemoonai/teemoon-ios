@@ -1,0 +1,487 @@
+[
+  {
+    "id": "conv_lisbon",
+    "created_at": 1760000000,
+    "metadata": {
+      "title": "Two days in Lisbon",
+      "pinned_at": "2026-09-01T10:00:00Z"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "msg_u1",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000000,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "What should I see in Lisbon in two days?"
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "reasoning",
+        "id": "rs_1",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000001,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "content": "Thinking about the request.",
+        "summary": ""
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_1",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000001,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "action": {
+          "type": "search",
+          "query": "lisbon two day itinerary"
+        }
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_2",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000002,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "action": {
+          "type": "search",
+          "query": "belem tower opening hours"
+        }
+      },
+      {
+        "type": "message",
+        "id": "msg_a1",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000003,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Day one: Alfama and the castle.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://www.visitlisboa.com/en/itineraries",
+                "title": "Lisbon itineraries",
+                "start_index": 0,
+                "end_index": 31
+              }
+            ]
+          },
+          {
+            "type": "output_text",
+            "text": "Day two: Belém — the tower and the pastéis.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://en.wikipedia.org/wiki/Bel%C3%A9m_Tower",
+                "title": "Belém Tower",
+                "start_index": 0,
+                "end_index": 43
+              },
+              {
+                "type": "url_citation",
+                "url": "https://www.visitlisboa.com/en/itineraries",
+                "title": "Lisbon itineraries",
+                "start_index": 0,
+                "end_index": 43
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "msg_u2",
+        "response_id": "resp_l2",
+        "next_response_ids": [
+          "resp_l3"
+        ],
+        "created_at": 1760000003,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l1",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "And where to eat?"
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_3",
+        "response_id": "resp_l2",
+        "next_response_ids": [
+          "resp_l3"
+        ],
+        "created_at": 1760000004,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l1",
+        "action": {
+          "type": "search",
+          "query": "lisbon food market",
+          "sources": [
+            {
+              "type": "url",
+              "url": "https://www.timeout.com/lisbon"
+            }
+          ]
+        }
+      },
+      {
+        "type": "message",
+        "id": "msg_a2",
+        "response_id": "resp_l2",
+        "next_response_ids": [
+          "resp_l3"
+        ],
+        "created_at": 1760000010,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Time Out Market for variety.",
+            "annotations": []
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "msg_u3",
+        "response_id": "resp_l3",
+        "next_response_ids": [],
+        "created_at": 1760000020,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l2",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Anything open late?"
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_4",
+        "response_id": "resp_l3",
+        "next_response_ids": [],
+        "created_at": 1760000021,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l2",
+        "action": {
+          "type": "search",
+          "query": "lisbon late night food"
+        }
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_5",
+        "response_id": "resp_l3",
+        "next_response_ids": [],
+        "created_at": 1760000021,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l2",
+        "action": {
+          "type": "search",
+          "query": "bairro alto bars"
+        }
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_6",
+        "response_id": "resp_l3",
+        "next_response_ids": [],
+        "created_at": 1760000022,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l2",
+        "action": {
+          "type": "search",
+          "query": "lisbon open after midnight"
+        }
+      },
+      {
+        "type": "reasoning",
+        "id": "rs_2",
+        "response_id": "resp_l3",
+        "next_response_ids": [],
+        "created_at": 1760000023,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l2",
+        "content": "Thinking about the request.",
+        "summary": ""
+      },
+      {
+        "type": "message",
+        "id": "msg_a3",
+        "response_id": "resp_l3",
+        "next_response_ids": [],
+        "created_at": 1760000025,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_l2",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Bairro Alto stays busy past midnight.",
+            "annotations": []
+          }
+        ]
+      }
+    ],
+    "first_id": "msg_u1",
+    "has_more": false,
+    "last_id": "msg_a3",
+    "object": "list"
+  },
+  {
+    "id": "conv_prime",
+    "created_at": 1760100000,
+    "metadata": {
+      "title": ""
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "msg_u1",
+        "response_id": "resp_p1",
+        "next_response_ids": [
+          "resp_p2",
+          "resp_p3"
+        ],
+        "created_at": 1760100000,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_prime",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Name a prime number."
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "message",
+        "id": "msg_a1",
+        "response_id": "resp_p1",
+        "next_response_ids": [
+          "resp_p2",
+          "resp_p3"
+        ],
+        "created_at": 1760100001,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_prime",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "7",
+            "annotations": []
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "msg_u2",
+        "response_id": "resp_p2",
+        "next_response_ids": [],
+        "created_at": 1760100010,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_p1",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "A bigger one?"
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "message",
+        "id": "msg_a2",
+        "response_id": "resp_p2",
+        "next_response_ids": [],
+        "created_at": 1760100011,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_p1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "9",
+            "annotations": []
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "msg_u3",
+        "response_id": "resp_p3",
+        "next_response_ids": [
+          "resp_p4"
+        ],
+        "created_at": 1760100050,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_p1",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "A bigger one?"
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "message",
+        "id": "msg_a3",
+        "response_id": "resp_p3",
+        "next_response_ids": [
+          "resp_p4"
+        ],
+        "created_at": 1760100051,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_p1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "101",
+            "annotations": []
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "msg_u4",
+        "response_id": "resp_p4",
+        "next_response_ids": [],
+        "created_at": 1760100100,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_p3",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Bigger still?"
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "message",
+        "id": "msg_a4",
+        "response_id": "resp_p4",
+        "next_response_ids": [],
+        "created_at": 1760100101,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_p3",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "1009",
+            "annotations": []
+          }
+        ]
+      }
+    ],
+    "first_id": "msg_u1",
+    "has_more": false,
+    "last_id": "msg_a4",
+    "object": "list"
+  },
+  {
+    "id": "conv_tie",
+    "created_at": 1760150000,
+    "metadata": {
+      "title": "New Conversation"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "msg_u1",
+        "response_id": "resp_t1",
+        "next_response_ids": [
+          "resp_t2",
+          "resp_t3"
+        ],
+        "created_at": 1760150000,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flas

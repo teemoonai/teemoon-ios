@@ -1,0 +1,116 @@
+{
+ "spec": "docs/DISCLOSURE.md (the maintainer, 2026-11-12, 1.1.0)",
+ "tiers": {
+  "private": {
+   "places": [
+    "phone",
+    "home",
+    "cloud sealed end to end (near.ai E2EE)"
+   ]
+  },
+  "minimised": {
+   "places": [
+    "everything else"
+   ]
+  }
+ },
+ "decide": [
+  {
+   "place": "phone",
+   "sealed": false,
+   "tier": "private"
+  },
+  {
+   "place": "home",
+   "sealed": false,
+   "tier": "private"
+  },
+  {
+   "place": "cloud",
+   "sealed": true,
+   "tier": "private"
+  },
+  {
+   "place": "cloud",
+   "sealed": false,
+   "tier": "minimised"
+  }
+ ],
+ "items": {
+  "dateLine": {
+   "what": "the system prompt's {{date}}",
+   "private": "local day, the zone named once: '<Weekday>, <Month> <d>, <yyyy> (<zone id>, UTC±hh:mm)'",
+   "minimised": "the day in UTC: '<Weekday>, <Month> <d>, <yyyy> (UTC)'"
+  },
+  "toolDay": {
+   "what": "the web-search tool's 'Today is …'",
+   "private": "local day, no zone",
+   "minimised": "the day in UTC, no marker"
+  },
+  "sentAt": {
+   "what": "the note ending each user turn (history turns too, by the CURRENT request's tier)",
+   "private": "'\\n\\n[Sent at h:mm a]' local",
+   "minimised": "'\\n\\n[Sent at HH:mm UTC]'"
+  }
+ },
+ "locale": "en_US_POSIX for every name, whatever the phone's language",
+ "instant": "2026-11-13T01:42:00Z",
+ "cells": [
+  {
+   "zone": "America/Toronto",
+   "tier": "private",
+   "dateLine": "Thursday, November 12, 2026 (America/Toronto, UTC−05:00)",
+   "toolDay": "Thursday, November 12, 2026",
+   "sentAt": "\n\n[Sent at 8:42 PM]"
+  },
+  {
+   "zone": "America/Toronto",
+   "tier": "minimised",
+   "dateLine": "Friday, November 13, 2026 (UTC)",
+   "toolDay": "Friday, November 13, 2026",
+   "sentAt": "\n\n[Sent at 01:42 UTC]"
+  },
+  {
+   "zone": "Asia/Kolkata",
+   "tier": "private",
+   "dateLine": "Friday, November 13, 2026 (Asia/Kolkata, UTC+05:30)",
+   "toolDay": "Friday, November 13, 2026",
+   "sentAt": "\n\n[Sent at 7:12 AM]"
+  },
+  {
+   "zone": "Asia/Kolkata",
+   "tier": "minimised",
+   "dateLine": "Friday, November 13, 2026 (UTC)",
+   "toolDay": "Friday, November 13, 2026",
+   "sentAt": "\n\n[Sent at 01:42 UTC]"
+  },
+  {
+   "zone": "Pacific/Chatham",
+   "tier": "private",
+   "dateLine": "Friday, November 13, 2026 (Pacific/Chatham, UTC+13:45)",
+   "toolDay": "Friday, November 13, 2026",
+   "sentAt": "\n\n[Sent at 3:27 PM]"
+  },
+  {
+   "zone": "Pacific/Chatham",
+   "tier": "minimised",
+   "dateLine": "Friday, November 13, 2026 (UTC)",
+   "toolDay": "Friday, November 13, 2026",
+   "sentAt": "\n\n[Sent at 01:42 UTC]"
+  },
+  {
+   "zone": "Europe/London",
+   "tier": "private",
+   "dateLine": "Friday, November 13, 2026 (Europe/London, UTC+00:00)",
+   "toolDay": "Friday, November 13, 2026",
+   "sentAt": "\n\n[Sent at 1:42 AM]"
+  },
+  {
+   "zone": "Europe/London",
+   "tier": "minimised",
+   "dateLine": "Friday, November 13, 2026 (UTC)",
+   "toolDay": "Friday, November 13, 2026",
+   "sentAt": "\n\n[Sent at 01:42 UTC]"
+  }
+ ]
+}

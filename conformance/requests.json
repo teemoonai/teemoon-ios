@@ -1,0 +1,39 @@
+{
+  "fixtureClass" : "requests",
+  "kitVersion" : "0.5.5",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "commonPrefixBytes" : 141,
+    "rule" : "A chat request body is a pure function of the turn: JSON with sorted keys and no per-request values. Sending the same history twice gives identical bytes, and send N+1's body extends send N's byte-for-byte through the last message they share.",
+    "turn1Body" : "{\"messages\":[{\"content\":\"You are a concise assistant.\",\"role\":\"system\"},{\"content\":\"What is a tide pool?\\n\\n[Sent at 9:41 AM]\",\"role\":\"user\"}],\"model\":\"accounts\\/fireworks\\/models\\/glm-5p3-flash\",\"reasoning_effort\":\"low\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"tools\":[{\"function\":{\"description\":\"Search the web for current, real-time information. Use this when the user asks about recent events, current news, live prices, or anything that may have changed since your training cutoff. Today is Thursday, October 22, 2026 — always use the specific date (not just the month or year) in queries for time-sensitive information. Results are returned as XML <source> elements with <url>, <title>, <content> and, when known, <published> fields. Do not reproduce the XML tags in your response. When citing information, use a markdown link: [Page Title](url).\",\"name\":\"web_search\",\"parameters\":{\"additionalProperties\":false,\"description\":\"Generated Arguments\",\"properties\":{\"contextThresholdMode\":{\"description\":\"            Relevance threshold for returned content. \\\\\\n            \\\"strict\\\" = factual, medical, legal, or technical queries where precision matters; \\\\\\n            \\\"balanced\\\" = general use (default); \\\\\\n            \\\"lenient\\\" = exploratory, creative, or niche topics where broader coverage helps.\\n\",\"type\":\"string\"},\"count\":{\"description\":\"            Number of web pages to consider (1–50). \\\\\\n            Use 5–10 for simple factual lookups, 20–30 for research questions, \\\\\\n            40–50 for rare, niche, or highly specific information. Default is 20.\\n\",\"type\":\"integer\"},\"freshness\":{\"description\":\"            Recency filter for news-style content. Use only when the user explicitly asks \\\\\\n            about recent events or breaking news. \\\\\\n            \\\"pd\\\" = past day (breaking news, live scores — NOT for weather or service pages); \\\\\\n            \\\"pw\\\" = past week (recent announcements, this week's developments); \\\\\\n            \\\"pm\\\" = past month (recent trends, last few weeks); \\\\\\n            \\\"py\\\" = past year (annual summaries, recent history). \\\\\\n            Omit for weather, prices, general knowledge, or any query where freshness \\\\\\n            would filter out authoritative service pages (weather.gov, accuweather.com, etc.).\\n\",\"type\":\"string\"},\"query\":{\"description\":\"The search query. Be specific and include key terms. For time-sensitive topics, include the date or year.\",\"type\":\"string\"}},\"required\":[\"query\"],\"type\":\"object\"}},\"type\":\"function\"}]}",
+    "turn1Messages" : [
+      {
+        "content" : "You are a concise assistant.",
+        "role" : "system"
+      },
+      {
+        "content" : "What is a tide pool?\n\n[Sent at 9:41 AM]",
+        "role" : "user"
+      }
+    ],
+    "turn2Body" : "{\"messages\":[{\"content\":\"You are a concise assistant.\",\"role\":\"system\"},{\"content\":\"What is a tide pool?\\n\\n[Sent at 9:41 AM]\",\"role\":\"user\"},{\"content\":\"A shallow pool of seawater left among rocks at low tide.\",\"role\":\"assistant\"},{\"content\":\"Name three animals that live in one.\\n\\n[Sent at 9:42 AM]\",\"role\":\"user\"}],\"model\":\"accounts\\/fireworks\\/models\\/glm-5p3-flash\",\"reasoning_effort\":\"low\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"tools\":[{\"function\":{\"description\":\"Search the web for current, real-time information. Use this when the user asks about recent events, current news, live prices, or anything that may have changed since your training cutoff. Today is Thursday, October 22, 2026 — always use the specific date (not just the month or year) in queries for time-sensitive information. Results are returned as XML <source> elements with <url>, <title>, <content> and, when known, <published> fields. Do not reproduce the XML tags in your response. When citing information, use a markdown link: [Page Title](url).\",\"name\":\"web_search\",\"parameters\":{\"additionalProperties\":false,\"description\":\"Generated Arguments\",\"properties\":{\"contextThresholdMode\":{\"description\":\"            Relevance threshold for returned content. \\\\\\n            \\\"strict\\\" = factual, medical, legal, or technical queries where precision matters; \\\\\\n            \\\"balanced\\\" = general use (default); \\\\\\n            \\\"lenient\\\" = exploratory, creative, or niche topics where broader coverage helps.\\n\",\"type\":\"string\"},\"count\":{\"description\":\"            Number of web pages to consider (1–50). \\\\\\n            Use 5–10 for simple factual lookups, 20–30 for research questions, \\\\\\n            40–50 for rare, niche, or highly specific information. Default is 20.\\n\",\"type\":\"integer\"},\"freshness\":{\"description\":\"            Recency filter for news-style content. Use only when the user explicitly asks \\\\\\n            about recent events or breaking news. \\\\\\n            \\\"pd\\\" = past day (breaking news, live scores — NOT for weather or service pages); \\\\\\n            \\\"pw\\\" = past week (recent announcements, this week's developments); \\\\\\n            \\\"pm\\\" = past month (recent trends, last few weeks); \\\\\\n            \\\"py\\\" = past year (annual summaries, recent history). \\\\\\n            Omit for weather, prices, general knowledge, or any query where freshness \\\\\\n            would filter out authoritative service pages (weather.gov, accuweather.com, etc.).\\n\",\"type\":\"string\"},\"query\":{\"description\":\"The search query. Be specific and include key terms. For time-sensitive topics, include the date or year.\",\"type\":\"string\"}},\"required\":[\"query\"],\"type\":\"object\"}},\"type\":\"function\"}]}",
+    "turn2Messages" : [
+      {
+        "content" : "You are a concise assistant.",
+        "role" : "system"
+      },
+      {
+        "content" : "What is a tide pool?\n\n[Sent at 9:41 AM]",
+        "role" : "user"
+      },
+      {
+        "content" : "A shallow pool of seawater left among rocks at low tide.",
+        "role" : "assistant"
+      },
+      {
+        "content" : "Name three animals that live in one.\n\n[Sent at 9:42 AM]",
+        "role" : "user"
+      }
+    ]
+  }
+}

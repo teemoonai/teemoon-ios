@@ -121,7 +121,7 @@ struct AttestationHeroCopyTests {
         let s = summary(state: .ok)
 
         #expect(s.headerTitle == "end-to-end encrypted")
-        #expect(s.headerSubtitle == "only you and the attested TEE hardware can read these messages.")
+        #expect(s.headerSubtitle == "sealed to the attested enclave key. near.ai's key service decides which enclaves hold it.")
         #expect(s.headerIcon == "checkmark.shield.fill")
         #expect(s.headerSeverity == .ok)
     }

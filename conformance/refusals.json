@@ -1,0 +1,80 @@
+{
+  "fixtureClass" : "refusals",
+  "kitVersion" : "0.5.5",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "rows" : [
+      {
+        "body" : "{\"code\":\"invalid-argument\",\"error\":\"Model grok-build-0.1 does not support parameter reasoningEffort.\"}",
+        "note" : "xAI grok-build-0.1, camel case; build 58 missed it and every send failed",
+        "refusal" : true,
+        "source" : "live 2026-10-22",
+        "status" : 400
+      },
+      {
+        "body" : "{\"error\":{\"message\":\"Unknown field reasoning_effort\"}}",
+        "note" : "snake case in a nested OpenAI-style error",
+        "refusal" : true,
+        "source" : "shape",
+        "status" : 400
+      },
+      {
+        "body" : "{\"error\":\"Invalid reasoning effort.\"}",
+        "note" : "words with spaces",
+        "refusal" : true,
+        "source" : "shape",
+        "status" : 400
+      },
+      {
+        "body" : "{\"error\":\"Unsupported parameter: reasoning.effort\"}",
+        "note" : "dotted path",
+        "refusal" : true,
+        "source" : "shape",
+        "status" : 400
+      },
+      {
+        "body" : "{\"error\":\"unexpected field chat_template_kwargs\"}",
+        "note" : "the thinking switch's outer field",
+        "refusal" : true,
+        "source" : "shape",
+        "status" : 400
+      },
+      {
+        "body" : "{\"error\":\"unknown field enableThinking\"}",
+        "note" : "the thinking switch's inner field, camel case",
+        "refusal" : true,
+        "source" : "shape",
+        "status" : 400
+      },
+      {
+        "body" : "{\"error\":\"context length exceeded\"}",
+        "note" : "a 400 about something else",
+        "refusal" : false,
+        "source" : "shape",
+        "status" : 400
+      },
+      {
+        "body" : "reasoning_effort",
+        "note" : "names the field but is not a 400",
+        "refusal" : false,
+        "source" : "shape",
+        "status" : 401
+      },
+      {
+        "body" : "{\"error\":\"invalid effort\"}",
+        "note" : "says effort without naming the field",
+        "refusal" : false,
+        "source" : "shape",
+        "status" : 400
+      },
+      {
+        "body" : "{\"error\":\"reasoning tokens exceed max_tokens\"}",
+        "note" : "about reasoning tokens, not the setting",
+        "refusal" : false,
+        "source" : "shape",
+        "status" : 400
+      }
+    ],
+    "rule" : "A response is a refusal of the effort setting only when its status is 400 and its body names one of the fields the app sends for it (reasoning_effort, chat_template_kwargs, enable_thinking). Names are matched case-insensitively with '_', '.' and spaces removed, so reasoningEffort and reasoning.effort count. A refusal is retried once without the field; the model is not sent it again this launch."
+  }
+}

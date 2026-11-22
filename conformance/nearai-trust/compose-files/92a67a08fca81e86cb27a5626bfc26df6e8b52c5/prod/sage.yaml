@@ -1,0 +1,128 @@
+# Levanto Sage on gpu04 GPU 6, as its own compose-manager project inside gpu04's GLM CVM.
+# gpu04 must run prod/GLM-5.3-Flash-SGL-TP2x3-W4AFP8-gpu04.yaml (three GLM replicas on GPUs 0-5) first.
+#
+# Deploy as project "sage" (never "work" or "dstack"):
+#   POST /compose/up {"tag":"v0.0.N","file":"prod/sage.yaml","project":"sage","env":{SAGE_* values}}
+# prod/sage-pull.yaml must have put the image in the VM's image store before: compose-manager has no registry
+# login, and this file never pulls the private image (pull_policy: never), so a missing image fails closed.
+#
+# Sage runs with SAGE_CONFIDENTIAL=required: it refuses to start unless the env, the TDX quote, the GPU CC state
+# (Protected PCIe on this board) and the weights all check out, ends TLS itself on 8443 with a key made in the CVM
+# (VM port 8010; the gpu04 host maps 443 to 8010) and serves /v1/attestation/report.
+# Sage never gets the CVM's dstack socket: sage-dstack exposes only GET /Info and GET /GetQuote to it. Key
+# derivation and event calls (GetKey, EmitEvent, ...) are refused, since our own services use them.
+# Values come from SAGE_-prefixed variables our own env never sets. They are not marked required (${VAR:?}) so
+# that compose/logs, which takes no env, can still read this project's logs; Sage itself refuses to start
+# without them.
+
+name: sage
+
+services:
+  sage-dstack:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: sage-dstack
+    restart: unless-stopped
+    network_mode: none
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - /var/run/sage-dstack:/sock
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /etc/nginx/nginx.conf <<'EOF'
+        user root;
+        worker_processes 1;
+        events { worker_connections 64; }
+        http {
+          access_log /dev/stdout;
+          server {
+            listen unix:/sock/dstack.sock;
+            location = /Info {
+              limit_except GET { deny all; }
+              proxy_pass http://unix:/var/run/dstack.sock;
+            }
+            location = /GetQuote {
+              limit_except GET { deny all; }
+              proxy_pass http://unix:/var/run/dstack.sock;
+            }
+            location / {
+              return 403;
+            }
+          }
+        }
+        EOF
+        rm -rf /sock/dstack.sock
+        exec nginx -g 'daemon off;'
+    healthcheck:
+      test: ["CMD", "test", "-S", "/sock/dstack.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  sage:
+    image: levantolabs/sage-v1.4-hopper-pod@sha256:6c15ca25e06d8fb797ab3e8b4992f0df60f6507bb99141cd8d7804c141e0f0e6
+    container_name: sage
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      sage-dstack:
+        condition: service_healthy
+    # Only keys on Sage's confidential allowlist; the image's own profile sets everything else.
+    environment:
+      SAGE_CONFIDENTIAL: required
+      HF_TOKEN: ${SAGE_HF_TOKEN}
+      HUGGING_FACE_HUB_TOKEN: ${SAGE_HF_TOKEN}
+      SERVING_HMAC_SECRET: ${SAGE_SERVING_HMAC_SECRET}
+      SAGE_ACME_AWS_ACCESS_KEY_ID: ${SAGE_ACME_AWS_ACCESS_KEY_ID}
+      SAGE_ACME_AWS_SECRET_ACCESS_KEY: ${SAGE_ACME_AWS_SECRET_ACCESS_KEY}
+      SAGE_ACME_ROUTE53_ZONE_ID: ${SAGE_ACME_ROUTE53_ZONE_ID}
+      # Sage ships its own log to Levanto's CloudWatch (write-only key for one log group).
+      SAGE_LOG_AWS_ACCESS_KEY_ID: ${SAGE_LOG_AWS_ACCESS_KEY_ID}
+      SAGE_LOG_AWS_SECRET_ACCESS_KEY: ${SAGE_LOG_AWS_SECRET_ACCESS_KEY}
+      # Enables Sage's content-free /internal/diagnostics endpoint.
+      SAGE_ADMIN_TOKEN: ${SAGE_ADMIN_TOKEN}
+      # Same GPU as device_ids below (exactly one GPU, as the image requires).
+      NVIDIA_VISIBLE_DEVICES: GPU-bafbdde0-cd41-8379-fa93-149864963329
+    volumes:
+      - sage-data:/workspace
+      - /var/run/sage-dstack/dstack.sock:/var/run/dstack.sock
+    ports:
+      # Host 8010 is QEMU-forwarded to VM 8010. TLS ends inside Sage.
+      - "8010:8443"
+    networks:
+      - sage
+    shm_size: 32gb
+    ipc: private
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256g
+    memswap_limit: 256g
+    pids_limit: 8192
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # Index 6, the GPU freed by GLM r4. GPU 7 stays idle.
+              device_ids: ["GPU-bafbdde0-cd41-8379-fa93-149864963329"]
+              capabilities: [gpu]
+
+networks:
+  sage:
+    name: sage_net
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+
+volumes:
+  sage-data:

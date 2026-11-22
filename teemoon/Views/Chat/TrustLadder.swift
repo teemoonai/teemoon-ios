@@ -4,8 +4,8 @@
 //
 //  Reusable presentation pieces for the "who can read this?" trust-ladder
 //  redesign (Direction D): a two-rung detail ladder (everyday / expert)
-//  and a connected-rail chain that renders "how your plaintext reaches only
-//  <model>" as one spine of evidence — each node carrying a status, a
+//  and a connected-rail chain that renders "how your words reach <model>"
+//  as one spine of evidence — each node carrying a status, a
 //  plain-language claim, the literal attested value, and the links that back
 //  it. A broken link (failed check) dashes the spine below it and dims every
 //  node downstream, so the chain visibly stops where the proof stops.
@@ -329,7 +329,7 @@ private struct VLine: Shape {
     ScrollView {
         VStack(alignment: .leading, spacing: 22) {
             RungPicker(rung: .constant(.expert))
-            Text("how your plaintext reaches only GLM-5.1")
+            Text("how your words reach GLM-5.1, sealed to its enclave key")
                 .font(.subheadline).fontWeight(.semibold)
             ChainRailView(nodes: ChainNode.sampleVerified, rung: .expert)
         }
@@ -341,7 +341,7 @@ private struct VLine: Shape {
     ScrollView {
         VStack(alignment: .leading, spacing: 22) {
             RungPicker(rung: .constant(.expert))
-            Text("how your plaintext reaches only GLM-5.1")
+            Text("how your words reach GLM-5.1, sealed to its enclave key")
                 .font(.subheadline).fontWeight(.semibold)
             ChainRailView(nodes: ChainNode.sampleFailed, rung: .expert)
         }
@@ -358,7 +358,7 @@ extension ChainNode {
                       detail: "your device seals this chat to GLM-5.1's public key before it ever leaves your phone.",
                       value: "ed25519:9f8e7d6c5b4a…"),
             ChainNode(id: "bound", status: .ok, title: "key bound in the model's TDX quote",
-                      detail: "that public key sits in `report_data` of GLM-5.1's hardware quote — the private half never leaves the enclave. no one else (gateway, operator, near.ai) can decrypt.",
+                      detail: KeyCustodyCopy.keyInQuoteExpert(model: "GLM-5.1", listed: .checked),
                       value: "d41de5f2c9a7…"),
             ChainNode(id: "compose", status: .ok, title: "the same quote measures the booted compose",
                       detail: "GLM-5.1's quote carries an `mr_config` that measures exactly what the enclave booted.",
@@ -374,10 +374,10 @@ extension ChainNode {
                               RunLink(title: "sigstore", url: "https://search.sigstore.dev"),
                               RunLink(title: "egress review", url: "https://example.com")]),
             ChainNode(id: "plaintext", status: .ok, title: "who sees plaintext · vllm-proxy-rs + sglang",
-                      detail: "only these two ever see your message decrypted. everything else only touches ciphertext.",
+                      detail: "these two handle your message decrypted, inside the enclave. the network and gateway carry ciphertext.",
                       jumpTitle: "provenance"),
-            ChainNode(id: "decrypt", status: .ok, title: "only GLM-5.1 can decrypt",
-                      detail: "no one else holds the key"),
+            ChainNode(id: "decrypt", status: .ok, title: "sealed to GLM-5.1's enclave key",
+                      detail: KeyCustodyCopy.keyNotHeldRow),
         ]
     }
 
@@ -394,8 +394,8 @@ extension ChainNode {
             ChainNode(id: "compose", status: .ok, title: "the same quote measures the booted compose",
                       detail: "GLM-5.1's quote carries an `mr_config` that measures exactly what the enclave booted.",
                       dimmed: true),
-            ChainNode(id: "decrypt", status: .ok, title: "only GLM-5.1 can decrypt",
-                      detail: "no one else holds the key", dimmed: true),
+            ChainNode(id: "decrypt", status: .ok, title: "sealed to GLM-5.1's enclave key",
+                      detail: KeyCustodyCopy.keyNotHeldRow, dimmed: true),
         ]
     }
 }

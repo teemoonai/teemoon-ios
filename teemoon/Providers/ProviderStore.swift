@@ -186,6 +186,7 @@ final class ProviderStore {
     /// nothing referenced any more — unreachable, unremovable, and still a secret.
     func removeProvider(_ provider: Provider) {
         providers.removeAll { $0.id == provider.id }
+        if provider.isNearAI { SealedModels().clear() }
         // Both accounts: the endpoint one this record uses, and any legacy UUID copy
         // that never got migrated. Leaving either behind is an unreachable secret.
         if let account = Self.keyAccount(for: provider) { try? Keychain.delete(for: account) }

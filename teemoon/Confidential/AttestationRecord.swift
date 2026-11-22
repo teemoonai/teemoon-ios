@@ -115,7 +115,7 @@ struct AttestationRecord {
     let gpuQuoteVerification: TDXVerificationResult?
     /// Result of on-device TDX quote verification for the model TEE (from model_attestations[0].intel_quote).
     /// This is the strongest E2EE guarantee: the Ed25519 key is bound to a verified TDX quote.
-    let modelQuoteVerification: TDXVerificationResult?
+    var modelQuoteVerification: TDXVerificationResult?
     /// When this record was fetched from the endpoint.
     let fetchedAt: Date
     /// Provider UUID this was fetched for — used for stale detection.
@@ -133,6 +133,10 @@ struct AttestationRecord {
     var gatewayAdvertisedReportData: String? = nil
     var modelAdvertisedReportData: String? = nil
     var gpuAdvertisedReportData: String? = nil
+    /// Every enclave near.ai listed for the model and each one's result (C3); nil when no list was read.
+    var modelCandidates: ModelCandidates.Listed? = nil
+    /// The list was asked for and never came: a couldn't-check, never "verified".
+    var modelCandidatesListFailed = false
     /// The model leg's measured compose (its info.tcb_info.app_compose), read from the attestation its quote came from.
     var modelComposeManifest: String? = nil
     /// Holds SHA-256 of `composeManifest` once worked out; copies of the record share it.

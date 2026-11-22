@@ -78,10 +78,17 @@ public struct TDXQuote: Sendable {
         public let certificateChainPEM: [String]
         /// Raw certification data bytes (for advanced inspection).
         public let rawCertificationData: Data
+        /// The Quoting Enclave's report (384 bytes), its signature under the PCK leaf (r || s) and its auth data:
+        /// what binds `attestationPublicKey` to the chain. nil when the quote carries no type-6 certification data.
+        public let qeReport: Data?
+        public let qeReportSignature: Data?
+        public let qeAuthData: Data?
 
-        public init(ecdsaSignature: Data, attestationPublicKey: Data, certificateChainPEM: [String], rawCertificationData: Data) {
+        public init(ecdsaSignature: Data, attestationPublicKey: Data, certificateChainPEM: [String], rawCertificationData: Data,
+                    qeReport: Data? = nil, qeReportSignature: Data? = nil, qeAuthData: Data? = nil) {
             self.ecdsaSignature = ecdsaSignature; self.attestationPublicKey = attestationPublicKey
             self.certificateChainPEM = certificateChainPEM; self.rawCertificationData = rawCertificationData
+            self.qeReport = qeReport; self.qeReportSignature = qeReportSignature; self.qeAuthData = qeAuthData
         }
     }
 }
@@ -233,6 +240,7 @@ public enum QuoteParser {
         let remaining = data.subdata(in: (sigStart + 128)..<(sigStart + sigDataSize))
         var certData = remaining
         var pemCerts: [String] = []
+        var qeReport: Data?, qeReportSig: Data?, qeAuth: Data?
 
         if remaining.count >= 6 {
             let outerType = remaining.uint16(at: 0)
@@ -252,6 +260,11 @@ public enum QuoteParser {
                 var p = qeReportSize + qeReportSigSize
                 if p + 2 <= inner.count {
                     let authDataSize = Int(inner.uint16(at: p))
+                    if p + 2 + authDataSize <= inner.count {
+                        qeReport = inner.subdata(in: 0..<qeReportSize)
+                        qeReportSig = inner.subdata(in: qeReportSize..<p)
+                        qeAuth = inner.subdata(in: (p + 2)..<(p + 2 + authDataSize))
+                    }
                     p += 2 + authDataSize
                     // Nested Certification Data
                     if p + 6 <= inner.count {
@@ -282,7 +295,8 @@ public enum QuoteParser {
             ecdsaSignature: ecdsaSig,
             attestationPublicKey: attestKey,
             certificateChainPEM: pemCerts,
-            rawCertificationData: certData
+            rawCertificationData: certData,
+            qeReport: qeReport, qeReportSignature: qeReportSig, qeAuthData: qeAuth
         )
     }
 

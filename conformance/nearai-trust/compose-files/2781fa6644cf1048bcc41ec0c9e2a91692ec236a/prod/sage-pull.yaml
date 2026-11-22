@@ -1,0 +1,41 @@
+# One-shot: pull Levanto's private Sage image into the VM's image store, for prod/sage.yaml (pull_policy: never).
+# compose-manager has no registry login, so this file does the pull with a read-only Docker Hub token.
+#
+#   POST /compose/up   {"tag":"v0.0.N","file":"prod/sage-pull.yaml","project":"sage-pull",
+#                       "env":{"SAGE_DOCKERHUB_USER":"...","SAGE_DOCKERHUB_TOKEN":"..."}}
+#   POST /compose/logs (project sage-pull) -> expect "sage-pull: ok sha256:..."
+#   POST /compose/down {"tag":"v0.0.N","file":"prod/sage-pull.yaml","project":"sage-pull"}
+# Run the down right away: the exited container still holds the token in its env.
+
+name: sage-pull
+
+services:
+  sage-pull:
+    # Our compose-manager-launcher image (alpine + docker-cli), the digest the CVM already runs, so nothing new is
+    # pulled to do the pull. Its normal entrypoint is replaced below.
+    image: nearaidev/compose-manager-launcher@sha256:91fdff3cfa3543d72656b2368c7d8a0a83d95a0f1087378c897aa1537acdba56
+    pull_policy: missing
+    container_name: sage-pull
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # Root-equivalent in the VM: a separate one-shot project with our own image and a fixed command.
+      - /var/run/docker.sock:/var/run/docker.sock
+    tmpfs:
+      # Docker CLI credentials live only in RAM and go away with the container.
+      - /dockercfg:rw,noexec,nosuid,size=1m,mode=0700
+    environment:
+      DOCKER_CONFIG: /dockercfg
+      PULL_USER: ${SAGE_DOCKERHUB_USER:?set SAGE_DOCKERHUB_USER}
+      PULL_TOKEN: ${SAGE_DOCKERHUB_TOKEN:?set SAGE_DOCKERHUB_TOKEN}
+      IMAGE: levantolabs/sage-v1.4-hopper-pod@sha256:36a2d4dd60e8311684abe9e5af51a98d68c0ca0f327438dbcf98edbde94efa0d
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        trap 'docker logout docker.io >/dev/null 2>&1 || true' EXIT
+        printf '%s' "$$PULL_TOKEN" | docker login -u "$$PULL_USER" --password-stdin docker.io >/dev/null
+        docker pull --quiet "$$IMAGE" >/dev/null
+        echo "sage-pull: ok $$(docker image inspect --format '{{.Id}}' "$$IMAGE")"

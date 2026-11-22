@@ -151,7 +151,7 @@ final class MarketingCaptureUITests: XCTestCase {
         for _ in 0..<25 {
             let d = app.debugDescription
             let clean = (d.localizedCaseInsensitiveContains("encrypted to")
-                    || d.localizedCaseInsensitiveContains("only it can read"))
+                    || d.localizedCaseInsensitiveContains("enclave key"))
                 && d.localizedCaseInsensitiveContains("GLM-5.1")
                 && !d.localizedCaseInsensitiveContains("verifying…")
                 && !d.localizedCaseInsensitiveContains("sending paused")

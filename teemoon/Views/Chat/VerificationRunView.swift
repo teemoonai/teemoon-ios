@@ -40,7 +40,10 @@ struct VerificationRunView: View {
             hasAttestation: session.attestation != nil,
             chatPath: session.trustScope?.chatPath,
             runningSources: session.trustScope?.running.map(\.service.source) ?? [],
-            composeManager: session.trustScope?.composeManager)
+            composeManager: session.trustScope?.composeManager,
+            listed: session.attestation?.modelCandidates,
+            listFailed: session.attestation?.modelCandidatesListFailed == true,
+            listedScopes: session.listedTrustScopes)
     }
 
     private var summary: AttestationSummary {
@@ -52,11 +55,12 @@ struct VerificationRunView: View {
             gatewayTrustResponseCount: session.gatewayTrustResponseCount,
             attestationFetchFailed: session.attestationFetchFailed, imageProvenance: session.imageProvenance,
             dcapVerification: session.dcapVerification, nrasVerification: session.gpuAttestation,
+            listedTrustScopes: session.listedTrustScopes,
             tlsAttestation: session.tlsAttestation,
             modelLayerVerification: session.modelLayerVerification,
             degradeIsHardFailure: session.degradeIsHardFailure,
             e2eeIntact: session.e2eeBindingIntact,
-            provenanceInconclusive: session.provenanceInconclusive,
+            provenanceInconclusive: session.provenanceInconclusive, deadlinePassed: session.deadlinePassed,
             auditState: audit.state, leaksExposure: audit.leaksExposure)
     }
 
@@ -86,10 +90,7 @@ struct VerificationRunView: View {
         }
         // inert in normal runs; -DesignTourBottom captures the lower sections
         .task {
-            // DesignTour is an iOS-only capture harness (it drives `simctl
-            // launch` flags). Its absence is not a behaviour difference — both
-            // hooks are inert in a normal run on either platform.
-            #if os(iOS)
+            #if os(iOS) && DEBUG
             guard DesignTour.scrollToBottom else { return }
             try? await Task.sleep(nanoseconds: 800_000_000)
             proxy.scrollTo("lower-sections", anchor: .top)
@@ -328,7 +329,7 @@ private struct RunSectionRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     // collapsed by default; -DesignTourExpandAll opens every section so the
     // per-step rows are capturable headlessly
-    #if os(iOS)
+    #if os(iOS) && DEBUG
     @State private var isExpanded = DesignTour.expandAll
     #else
     @State private var isExpanded = false
@@ -496,7 +497,7 @@ struct GlossaryEntry: Identifiable, Equatable {
     /// dense wall of text at exactly their moment of anxiety).
     static let primer = GlossaryEntry(
         id: "primer", title: "how teemoon proves your privacy",
-        definition: "your messages are processed inside a **sealed region of the chip** (a TEE) that even the machine’s operator can’t read into.\n\nbefore each conversation, teemoon checks **Intel- and NVIDIA-signed proofs** that the hardware is genuine, that the images its launch config names are near.ai’s published source, and that your connection is encrypted all the way into that sealed hardware.\n\nit runs the same checks near.ai documents — automatically, on your live data — and **shows you the signed values** so you can re-verify everything yourself.",
+        definition: "your messages are processed inside a **sealed region of the chip** (a TEE) whose memory the machine’s operator can’t read from outside. what the software inside does with your messages is what the published reviews check.\n\nbefore each conversation, teemoon checks **Intel- and NVIDIA-signed proofs** that the hardware is genuine, that the images its launch config names are near.ai’s published source, and that your connection is encrypted all the way into that sealed hardware.\n\nit runs the same checks near.ai documents — automatically, on your live data — and **shows you the signed values** so you can re-verify everything yourself.",
         url: "https://docs.near.ai/cloud/verification/")
 }
 

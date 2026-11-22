@@ -220,6 +220,15 @@ struct SelfVerifyScriptTests {
         #expect(script.contains(#"find_all(r, "model_name")"#))
     }
 
+    /// Audit C5: the script restates the app's repo aliases; a row in only one table is a drift.
+    @Test func repoAliasesRestateTheApp() throws {
+        let script = try #require(summary().selfVerifyScript)
+        let block = try #require(script.firstMatch(of: /REPO_ALIASES = \{([^}]*)\}/)).1
+        let pairs = block.matches(of: /"([^"]+)":\s*"([^"]+)"/).map { (String($0.1), String($0.2)) }
+        #expect(Dictionary(pairs, uniquingKeysWith: { a, _ in a }) == ProvenanceService.repoAliases)
+        #expect(pairs.count == ProvenanceService.repoAliases.count, "a key is repeated in REPO_ALIASES")
+    }
+
     /// Review item selfverify-launcher-index: the script restates LauncherIndex's lookup, so its constants are the app's,
     /// and its three verdict lines are the approved ones verbatim. tools/test_self_verify_script.py runs the branches.
     @Test func launcherIndexLookupRestatesTheApp() throws {

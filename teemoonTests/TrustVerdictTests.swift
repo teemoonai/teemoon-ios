@@ -30,9 +30,27 @@ struct TrustVerdictTests {
 
     @Test func verifiedHeroIsTheSealClaim() {
         let v = TrustVerdict.make(input { _ in })
-        #expect(v.heroTitle == "encrypted to glm-5.2 — only it can read this")
+        #expect(v.heroTitle == "encrypted to glm-5.2's enclave key")
         #expect(v.sendPolicy == .allow)
         #expect(v.chipCaption == "end-to-end encrypted")
+    }
+
+    /// the maintainer 2026-11-20: the quant follows the model's enclave key ("GLM-5.1 · AWQ's enclave key" read as the quant's key).
+    @Test func theQuantFollowsTheModelsEnclaveKey() {
+        let quanted = TrustVerdict.make(input { $0.modelName = "GLM-5.1"; $0.quant = "AWQ" })
+        #expect(quanted.heroTitle == "encrypted to GLM-5.1's enclave key · AWQ")
+        #expect(TrustVerdict.make(input { $0.modelName = "GLM-5.1" }).heroTitle == "encrypted to GLM-5.1's enclave key")
+        // Subtitle and sealed row name the model only, with or without a quant.
+        for quant in [nil, "AWQ"] as [String?] {
+            let v = TrustVerdict.make(input { $0.modelName = "GLM-5.1"; $0.quant = quant })
+            #expect(v.heroSubtitle == "sealed to GLM-5.1's enclave key. near.ai's key service decides which secure enclaves hold it.")
+            #expect(v.everydayClaims.first { $0.id == "sealed" }?.title == "sealed to GLM-5.1's enclave key")
+        }
+        // No enclave-key tail: the quant stays beside the model.
+        let unreviewed = TrustVerdict.make(input { $0.modelName = "GLM-5.1"; $0.quant = "AWQ"; $0.auditState = nil })
+        #expect(unreviewed.heroTitle == "encrypted to GLM-5.1 · AWQ")
+        let unpublished = TrustVerdict.make(input { $0.modelName = "GLM-5.1"; $0.quant = "AWQ"; $0.unpublishedButSealed = true })
+        #expect(unpublished.heroTitle == "encrypted to GLM-5.1 · AWQ — one image unpublished")
     }
 
     /// trust-leaks-wording (the maintainer 2026-11-06), row 3: the reviewer's own sentence, never a fixed one.
@@ -51,7 +69,7 @@ struct TrustVerdictTests {
         #expect(bare.sendPolicy == .allow, "audits never gate")
     }
 
-    /// Row 1 and 2: "only it can read this" only when reviewed; otherwise the tail drops and line A shows.
+    /// Row 1 and 2: the enclave-key tail only when reviewed; otherwise the tail drops and line A shows.
     @Test func theReadingClaimNeedsAReviewedBuild() {
         for state: EverydayAuditState? in [nil, .incomplete, .reviewedWithCaveat] {
             let v = TrustVerdict.make(input { $0.auditState = state })
@@ -60,7 +78,7 @@ struct TrustVerdictTests {
             #expect(v.chipCaption == "end-to-end encrypted", "row 5: the chip is unchanged")
         }
         let reviewed = TrustVerdict.make(input { _ in })
-        #expect(reviewed.heroSubtitle == "only you and glm-5.2's sealed hardware can read this chat.")
+        #expect(reviewed.heroSubtitle == "sealed to glm-5.2's enclave key. near.ai's key service decides which secure enclaves hold it.")
         let unchecked = TrustVerdict.make(input { $0.provenanceState = .unchecked })
         #expect(unchecked.heroTitle == "encrypted to glm-5.2" && unchecked.heroSubtitle == ProvenanceUncheckedText.header)
     }
@@ -184,7 +202,8 @@ struct TrustVerdictHaltedChainTests {
 
     @Test func aPassBeforeTheFailingStepKeepsItsCheck() throws {
         let v = TrustVerdict.make(input { $0.attestationState = .degraded; $0.requiresConfirmation = true
-                                          $0.degradeIsHardFailure = true; $0.provenanceState = .stuck })
+                                          $0.degradeIsHardFailure = true; $0.provenanceState = .stuck
+                                          $0.listedEnclaves = .checked })
         let failAt = try #require(v.everydayClaims.firstIndex { $0.status == .fail })
         #expect(v.everydayClaims[failAt].id == "identity")
         #expect(v.everydayClaims.first { $0.id == "sealed" }?.status == .ok)

@@ -148,7 +148,7 @@ compares the live service against what your session saw.
 Every check above is a real check, and none of them add up to a proof that nobody can read
 your conversation. The gaps below are structural, not bugs:
 
-- **Only the first model enclave near.ai lists is verified.** near.ai's enclaves for a model share one key, so a sealed message can be opened by enclaves the app did not check. Found after 1.1.0; see the [changelog's known issues](CHANGELOG.md).
+- **Only the enclaves near.ai lists are verified.** Since 1.1.1 the app checks every model enclave near.ai lists for a model, and those enclaves share one key. An enclave near.ai's key service admits but near.ai doesn't list could open a sealed message too, and the app can't check which enclaves the key service admits. See the [changelog's known issues](CHANGELOG.md).
 
 - **The measured env list does not bound the proxy's environment.** The compose project and
   the per-deploy env overlay compose-manager applies are not in the attested action log, so

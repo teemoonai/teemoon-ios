@@ -1,0 +1,197 @@
+{
+ "fixtureClass": "composerimages",
+ "kitVersion": "0.7.0",
+ "sourceOfTruth": "teemoon-ios",
+ "spec": "docs/IMAGES.md §4d (composer images as one state machine, the maintainer, 2026-11-11; 21:30Z attach-sheet rule)",
+ "rule": "Every state x event cell gives the next state and its effects, in order. A cell left out of a platform's table is a test failure. Images leave the composer only by remove or a send; sendImages only when the model reads images.",
+ "states": {
+  "empty": "no image in the composer",
+  "attached": "one or more images in the composer"
+ },
+ "events": {
+  "tapPlus/sees": "+ on a model that reads images",
+  "tapPlus/blind": "+ on a model that can't see images",
+  "attachSheetChooseModel": "the attach sheet's \"choose an image-capable model\" (shown only on a model that can't see)",
+  "picked": "the camera or photo picker returns images (any model)",
+  "paste": "a paste carrying an image (any model)",
+  "removeOne": "remove x on one of several images",
+  "removeLast": "remove x on the only image",
+  "modelSwitched": "the model changes: a where-sheet pick, the chip, settings, a returned chat",
+  "tapWhereChip": "the where chip, from the composer",
+  "send/sees": "send, model reads images",
+  "send/blind": "send, model can't see images",
+  "alertChooseModel": "the send-refused alert's \"choose an image-capable model\"",
+  "sendWithoutImages": "the send-refused alert's \"send text only\" (shown only when there is text)",
+  "questionReturned": "a declined still-checking question comes back with its images (any time, even under a sheet)"
+ },
+ "effects": {
+  "openAttachSheet": "the attach sheet opens: take photo, choose photos, the footnote",
+  "openAttachSheet(cantSee)": "the same sheet with \"<model> can't see images.\" and \"choose an image-capable model\" at its top; take photo and choose photos stay enabled",
+  "closeAttachSheet": "the attach sheet closes first, so the where sheet never stacks on it",
+  "openWhere(readsImages)": "the where sheet opens at half size, tab all, reads images on (the user can turn it off); a pick returns to the composer",
+  "openWhere": "the where sheet opens as it does today: half size, tab all, no filter",
+  "attach": "the images join the composer with the arrival motion; past the limit only up to it, and the rest get the \"up to {n} images per message\" note (they never entered, so nothing leaves); a returned question keeps all of its images and shows the note",
+  "remove": "the image leaves the composer",
+  "removeAll": "every image leaves the composer, as part of that send",
+  "sendImages": "the message goes with its images",
+  "sendText": "the message goes with its text only",
+  "showRefusedAlert": "the alert: <model> can't see images / your message wasn't sent. pick a model that can[, or send just the text]. Buttons: choose model; send text only (only when there is text); cancel"
+ },
+ "cells": {
+  "empty + tapPlus/sees": {
+   "to": "empty",
+   "effects": [
+    "openAttachSheet"
+   ]
+  },
+  "empty + tapPlus/blind": {
+   "to": "empty",
+   "effects": [
+    "openAttachSheet(cantSee)"
+   ]
+  },
+  "empty + attachSheetChooseModel": {
+   "to": "empty",
+   "effects": [
+    "closeAttachSheet",
+    "openWhere(readsImages)"
+   ]
+  },
+  "empty + picked": {
+   "to": "attached",
+   "effects": [
+    "attach"
+   ]
+  },
+  "empty + paste": {
+   "to": "attached",
+   "effects": [
+    "attach"
+   ]
+  },
+  "empty + removeOne": {
+   "to": "empty",
+   "effects": []
+  },
+  "empty + removeLast": {
+   "to": "empty",
+   "effects": []
+  },
+  "empty + modelSwitched": {
+   "to": "empty",
+   "effects": []
+  },
+  "empty + tapWhereChip": {
+   "to": "empty",
+   "effects": [
+    "openWhere"
+   ]
+  },
+  "empty + send/sees": {
+   "to": "empty",
+   "effects": []
+  },
+  "empty + send/blind": {
+   "to": "empty",
+   "effects": []
+  },
+  "empty + alertChooseModel": {
+   "to": "empty",
+   "effects": []
+  },
+  "empty + sendWithoutImages": {
+   "to": "empty",
+   "effects": []
+  },
+  "empty + questionReturned": {
+   "to": "attached",
+   "effects": [
+    "attach"
+   ]
+  },
+  "attached + tapPlus/sees": {
+   "to": "attached",
+   "effects": [
+    "openAttachSheet"
+   ]
+  },
+  "attached + tapPlus/blind": {
+   "to": "attached",
+   "effects": [
+    "openAttachSheet(cantSee)"
+   ]
+  },
+  "attached + attachSheetChooseModel": {
+   "to": "attached",
+   "effects": [
+    "closeAttachSheet",
+    "openWhere(readsImages)"
+   ]
+  },
+  "attached + picked": {
+   "to": "attached",
+   "effects": [
+    "attach"
+   ]
+  },
+  "attached + paste": {
+   "to": "attached",
+   "effects": [
+    "attach"
+   ]
+  },
+  "attached + removeOne": {
+   "to": "attached",
+   "effects": [
+    "remove"
+   ]
+  },
+  "attached + removeLast": {
+   "to": "empty",
+   "effects": [
+    "remove"
+   ]
+  },
+  "attached + modelSwitched": {
+   "to": "attached",
+   "effects": []
+  },
+  "attached + tapWhereChip": {
+   "to": "attached",
+   "effects": [
+    "openWhere(readsImages)"
+   ]
+  },
+  "attached + send/sees": {
+   "to": "empty",
+   "effects": [
+    "sendImages"
+   ]
+  },
+  "attached + send/blind": {
+   "to": "attached",
+   "effects": [
+    "showRefusedAlert"
+   ]
+  },
+  "attached + alertChooseModel": {
+   "to": "attached",
+   "effects": [
+    "openWhere(readsImages)"
+   ]
+  },
+  "attached + sendWithoutImages": {
+   "to": "empty",
+   "effects": [
+    "removeAll",
+    "sendText"
+   ]
+  },
+  "attached + questionReturned": {
+   "to": "attached",
+   "effects": [
+    "attach"
+   ]
+  }
+ }
+}

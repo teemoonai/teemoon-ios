@@ -1,0 +1,1643 @@
+{
+  "fixtureClass": "reply-machine",
+  "kitVersion": "0.6.6",
+  "sourceOfTruth": "teemoon-ios",
+  "rule": "A reply (turn) has one explicit lifecycle. Every turn gets a generation id when it starts (send, retry, think harder, re-verify retry, auto resume); the chat has at most one live generation and the app one live reply. The transition table is the only writer of reply state and of Message.statusRaw. Any engine, gate or tool event whose generation is not the live one (a stale id, or a generation that already ended) changes nothing: ignore: stale generation. A plain turn writes its reply row with statusRaw=interrupted before the request goes out and rewrites it once, when it ends; a think-harder turn writes nothing until its outcome. A row still reading interrupted when no generation owns it (always so at launch) is a turn that did not finish: marker.didntFinish + retry, never an automatic re-ask after a launch. Markers are ids; their words are not decided here. Decided 2026-11-06.",
+  "persistedFields": {
+    "statusRaw": {
+      "type": "String?",
+      "schema": "TeemoonSchemaV3 Message.statusRaw (optional, lightweight V2->V3)",
+      "values": ["interrupted", "complete", "stopped", "cutOff", "failed", "decryptFailed"],
+      "nil": "complete (every row written before V3)",
+      "reloadMarker": {
+        "nil": null,
+        "complete": null,
+        "interrupted": "marker.didntFinish",
+        "stopped": "marker.stopped",
+        "cutOff": "marker.cutShort",
+        "failed": "marker.didntFinish",
+        "decryptFailed": "marker.decryptFailed"
+      }
+    },
+    "sentBeforeConfirmed": {
+      "type": "String?",
+      "schema": "TeemoonSchemaV3 Message.sentBeforeConfirmed (optional)",
+      "values": ["pending|<recordKey>", "failed|<recordKey>"],
+      "recordKey": "<attestation record fetchedAt, epoch ms>|<nonce> (Android: gatewayNonce, else gpuNonce)",
+      "nil": "the send went out over a confirmed record, or unsealed",
+      "rule": "Set when the gate lets a sealed request go before its attestation record is confirmed: pending = the record's verdicts were still pending (the user confirmed at the settle timeout); failed = the user sent anyway over a soft failure that kept the seal. Written on the question and on its reply row at gatePassed/confirm. The reply machine never changes it afterwards; the trust layer resolves it per record (sentBeforeConfirmedResolution). The E2EE claim (report, counters) counts a row only when it is nil."
+    }
+  },
+  "markers": {
+    "marker.didntFinish": "the turn did not finish (killed, background time ran out, GPU lost) or failed; shown with retry",
+    "marker.stopped": "the user stopped the turn or declined to send",
+    "marker.cutShort": "the reply is incomplete: length / content filter / on-device cap / stream closed without [DONE]",
+    "marker.decryptFailed": "a sealed field did not decrypt; nothing of the reply is shown"
+  },
+  "sentBeforeConfirmedResolution": {
+    "rule": "A trust-layer writer, not the reply machine. When the verdict of the record named by recordKey settles: pass rewrites every 'pending|<recordKey>' to nil; a hard fail rewrites it to 'failed|<recordKey>'. An unsettled or soft outcome changes nothing. Rows of other records, nil rows and 'failed|' rows are never touched. Losing the attestation capability (an unknown tier resolving to third-party) is not a verdict: it is unsettled, the mark stays pending and the reply is not counted as E2EE.",
+    "outcomes": ["pass", "hardFail", "unsettled"],
+    "marks": {
+      "pending": "mark.sentWhileChecking",
+      "failed": "mark.checkFailedAfterSend",
+      "nil": null
+    },
+    "vectors": [
+      {
+        "name": "pending-then-pass-clears-the-mark",
+        "rows": ["pending|1730851200000|n0", "pending|1730851300000|n1", null, "failed|1730851200000|n0"],
+        "settle": {
+          "recordKey": "1730851200000|n0",
+          "outcome": "pass"
+        },
+        "expect": [null, "pending|1730851300000|n1", null, "failed|1730851200000|n0"],
+        "marks": [null, "mark.sentWhileChecking", null, "mark.checkFailedAfterSend"]
+      },
+      {
+        "name": "pending-then-hard-fail-marks-the-reply",
+        "rows": ["pending|1730851200000|n0", "pending|1730851300000|n1", null, "failed|1730851200000|n0"],
+        "settle": {
+          "recordKey": "1730851200000|n0",
+          "outcome": "hardFail"
+        },
+        "expect": ["failed|1730851200000|n0", "pending|1730851300000|n1", null, "failed|1730851200000|n0"],
+        "marks": ["mark.checkFailedAfterSend", "mark.sentWhileChecking", null, "mark.checkFailedAfterSend"]
+      },
+      {
+        "name": "tier-change-to-third-party-keeps-pending",
+        "rows": ["pending|1730851200000|n0"],
+        "settle": {
+          "recordKey": "1730851200000|n0",
+          "outcome": "unsettled",
+          "cause": "attestationCapabilityLost"
+        },
+        "expect": ["pending|1730851200000|n0"],
+        "marks": ["mark.sentWhileChecking"],
+        "countsAsE2EE": [false]
+      },
+      {
+        "name": "unsettled-keeps-pending",
+        "rows": ["pending|1730851200000|n0"],
+        "settle": {
+          "recordKey": "1730851200000|n0",
+          "outcome": "unsettled"
+        },
+        "expect": ["pending|1730851200000|n0"],
+        "marks": ["mark.sentWhileChecking"]
+      }
+    ]
+  },
+  "composerReturn": {
+    "rule": "Where a returned question lands. Composer empty: it takes the question's text and images. Composer has a draft: text = question text + blank line + draft text; images = the question's, then the draft's not already among them (same bytes = same image). No image is ever dropped: over the composer's image limit every image is kept and the composer is over its limit (overLimit = count > limit): send is disabled and the composer shows its existing too-many-images note until enough images are removed. The same state follows a provider switch that lowers the limit. A whitespace-only draft counts as empty. Image bytes survive unchanged.",
+    "vectors": [
+      {
+        "name": "empty-composer-takes-the-question",
+        "question": {
+          "text": "what is this",
+          "images": ["a", "b"]
+        },
+        "draft": {
+          "text": "",
+          "images": []
+        },
+        "limit": 10,
+        "expect": {
+          "text": "what is this",
+          "images": ["a", "b"]
+        }
+      },
+      {
+        "name": "draft-goes-after-a-blank-line",
+        "question": {
+          "text": "what is this",
+          "images": ["a", "b"]
+        },
+        "draft": {
+          "text": "and this one",
+          "images": ["c"]
+        },
+        "limit": 10,
+        "expect": {
+          "text": "what is this\n\nand this one",
+          "images": ["a", "b", "c"]
+        }
+      },
+      {
+        "name": "same-image-once",
+        "question": {
+          "text": "q",
+          "images": ["a", "b"]
+        },
+        "draft": {
+          "text": "d",
+          "images": ["b", "c"]
+        },
+        "limit": 10,
+        "expect": {
+          "text": "q\n\nd",
+          "images": ["a", "b", "c"]
+        }
+      },
+      {
+        "name": "over-the-limit-keeps-every-image",
+        "question": {
+          "text": "q",
+          "images": ["a", "b", "c"]
+        },
+        "draft": {
+          "text": "d",
+          "images": ["d", "e", "f"]
+        },
+        "limit": 4,
+        "expect": {
+          "text": "q\n\nd",
+          "images": ["a", "b", "c", "d", "e", "f"],
+          "overLimit": true,
+          "sendDisabled": true
+        }
+      },
+      {
+        "name": "whitespace-draft-counts-as-empty",
+        "question": {
+          "text": "q",
+          "images": []
+        },
+        "draft": {
+          "text": "  \n ",
+          "images": []
+        },
+        "limit": 10,
+        "expect": {
+          "text": "q",
+          "images": []
+        }
+      }
+    ]
+  },
+  "states": {
+    "idle": {
+      "kind": "initial",
+      "doc": "the chat has no live reply and has not had one in this process"
+    },
+    "gating": {
+      "kind": "live",
+      "doc": "send accepted; the question is saved; prepareTurn and the send gate run; nothing on the wire yet"
+    },
+    "awaitingConfirm": {
+      "kind": "live",
+      "doc": "the gate asked the user (verdicts still pending at the settle timeout, or a soft state); nothing on the wire"
+    },
+    "requesting": {
+      "kind": "live",
+      "doc": "the request is out, or the on-device engine is loading/prefilling; no visible text since the last request began"
+    },
+    "streaming": {
+      "kind": "live",
+      "doc": "visible text has arrived for this generation"
+    },
+    "toolRunning": {
+      "kind": "live",
+      "doc": "a tool round (web search) is executing for this generation"
+    },
+    "complete": {
+      "kind": "terminal",
+      "persist": "kept",
+      "statusRaw": "complete",
+      "content": "textSoFar",
+      "marker": null,
+      "doc": "the model said it finished (finish_reason stop, or [DONE] with none) and there is visible text"
+    },
+    "stopped": {
+      "kind": "terminal",
+      "persist": "kept",
+      "statusRaw": "stopped",
+      "content": "textSoFar",
+      "marker": "marker.stopped",
+      "doc": "the user stopped it (stop button, or declined the gate's question); what was shown is kept"
+    },
+    "cutOff": {
+      "kind": "terminal",
+      "persist": "kept",
+      "statusRaw": "cutOff",
+      "content": "textSoFar",
+      "marker": "marker.cutShort",
+      "doc": "finish_reason length or content_filter, the on-device answer cap, or a stream that ended with neither [DONE] nor a finish_reason"
+    },
+    "failed": {
+      "kind": "terminal",
+      "persist": "kept",
+      "statusRaw": "failed",
+      "content": "empty",
+      "marker": null,
+      "doc": "an error, a gate refusal, or a finish with no visible text; in session the last-request card shows the error; the partial is not kept (as today)"
+    },
+    "decryptFailed": {
+      "kind": "terminal",
+      "persist": "kept",
+      "statusRaw": "decryptFailed",
+      "content": "empty",
+      "marker": "marker.decryptFailed",
+      "doc": "a sealed field (content, reasoning, tool name or arguments) did not decrypt; ciphertext is never shown or kept"
+    },
+    "interrupted": {
+      "kind": "terminal",
+      "persist": "kept",
+      "statusRaw": "interrupted",
+      "content": "textSoFar",
+      "marker": "marker.didntFinish",
+      "doc": "the turn could not finish: app killed, iOS ended background time, or the on-device engine lost the GPU in the background"
+    },
+    "restored": {
+      "kind": "terminal",
+      "persist": "untouched",
+      "statusRaw": null,
+      "content": null,
+      "marker": null,
+      "also": "a retry-family generation that ended before its request went out while the reply it would replace still has content",
+      "doc": "a think-harder generation that did not produce a reply: nothing was written, the old reply stands"
+    },
+    "discarded": {
+      "kind": "terminal",
+      "persist": "deleted",
+      "statusRaw": null,
+      "content": null,
+      "marker": null,
+      "doc": "the generation's row was deleted (retry of its question, or the chat was deleted mid-answer)"
+    },
+    "returned": {
+      "kind": "terminal",
+      "persist": "deleted",
+      "statusRaw": null,
+      "content": null,
+      "marker": null,
+      "doc": "the user declined the gate's question on a fresh send: the unsent question and its reply row are deleted and the question goes back to the composer (composerReturn); nothing persisted, no marker"
+    }
+  },
+  "initialState": "idle",
+  "terminalStates": ["complete", "stopped", "cutOff", "failed", "decryptFailed", "interrupted", "restored", "discarded", "returned"],
+  "restartEvents": ["send", "retry", "thinkHarder", "reverifyRetry", "autoResume", "launchRecovery"],
+  "events": {
+    "send": {
+      "category": "user",
+      "payload": ["generation", "place", "images"],
+      "doc": "the composer's send; carries the new generation id and how many images the question carries (default 0)"
+    },
+    "draftEdited": {
+      "category": "user",
+      "payload": [],
+      "doc": "the user typed in the composer; the draft belongs to the composer, no reply transition takes it"
+    },
+    "retry": {
+      "category": "user",
+      "payload": ["generation", "place", "replaces"],
+      "doc": "ask a question again; `replaces` = the generations whose rows follow the question and are deleted"
+    },
+    "thinkHarder": {
+      "category": "user",
+      "payload": ["generation", "place", "supersedes"],
+      "doc": "ask again at high effort; `supersedes` = the reply rows that stay until this generation's outcome"
+    },
+    "reverifyRetry": {
+      "category": "user",
+      "payload": ["generation", "place", "replaces", "captured"],
+      "doc": "the retry a re-verify schedules; `captured` = the chat's latest generation id when it was scheduled"
+    },
+    "autoResume": {
+      "category": "app",
+      "payload": ["generation", "place", "replaces"],
+      "doc": "raised on return to the foreground when this chat's resume is armed (on-device turn abandoned in the background)"
+    },
+    "gatePassed": {
+      "category": "gate",
+      "payload": ["generation", "sealed", "sentBeforeConfirmed"],
+      "doc": "the send gate let the request go; sentBeforeConfirmed is null unless the record was not confirmed"
+    },
+    "gateNeedsConfirm": {
+      "category": "gate",
+      "payload": ["generation"],
+      "doc": "the gate asks the user before sending (confirmPending / soft degrade)"
+    },
+    "gateWouldGoPlain": {
+      "category": "gate",
+      "payload": ["generation"],
+      "doc": "the turn started while the provider was attestable (attested or unknown tier) and, at the gate or at confirm, the send would now leave unsealed (no peer, or the tier resolved to third-party): nothing is sent"
+    },
+    "gateRefused": {
+      "category": "gate",
+      "payload": ["generation"],
+      "doc": "the gate refused (no key, unsealed send under an E2EE promise, hard evidence); nothing was sent"
+    },
+    "confirm": {
+      "category": "user",
+      "payload": ["generation", "sentBeforeConfirmed"],
+      "doc": "the user chose to send from the gate's question"
+    },
+    "decline": {
+      "category": "user",
+      "payload": ["generation", "trigger"],
+      "doc": "the user answered the gate's question without sending: trigger = wait | dontSend | dismiss | reverify (Re-verify in the alert answers the ask by declining it first); all behave the same. Never tied to whether the alert is still on screen. After a reverify decline of a retry-family turn the app keeps that retry pending: a later send anyway resends it as a new retry (the reply it replaces stays until that request goes out)"
+    },
+    "firstToken": {
+      "category": "engine",
+      "payload": ["generation", "text"],
+      "doc": "first visible text of the generation; the think-harder display swap happens here"
+    },
+    "token": {
+      "category": "engine",
+      "payload": ["generation", "text"],
+      "doc": "more visible text (delta)"
+    },
+    "toolRound": {
+      "category": "engine",
+      "payload": ["generation"],
+      "doc": "the model asked for a tool round"
+    },
+    "toolResult": {
+      "category": "engine",
+      "payload": ["generation", "sources"],
+      "doc": "a tool returned; `sources` = how many sources it adds to this generation"
+    },
+    "toolRoundEnded": {
+      "category": "engine",
+      "payload": ["generation"],
+      "doc": "the tool round is over; the follow-up request begins"
+    },
+    "finish": {
+      "category": "engine",
+      "payload": ["generation", "reason"],
+      "doc": "the stream ended with the last finish_reason seen: stop | length | contentFilter | none ([DONE] with no finish_reason); on-device cap = length"
+    },
+    "streamEndedWithoutDone": {
+      "category": "engine",
+      "payload": ["generation"],
+      "doc": "clean EOF with neither [DONE] nor any finish_reason; the transport must not invent a [DONE]"
+    },
+    "decryptFailed": {
+      "category": "engine",
+      "payload": ["generation", "field"],
+      "doc": "a sealed field failed to decrypt (content | reasoning | toolName | toolArguments)"
+    },
+    "error": {
+      "category": "engine",
+      "payload": ["generation", "kind"],
+      "doc": "the turn failed (network, HTTP, invalidEndpoint, imageRefused, ...)"
+    },
+    "engineAbandoned": {
+      "category": "engine",
+      "payload": ["generation", "reason"],
+      "doc": "the transport gave up on a decode (backgrounded | drainTimeout); never the reply's outcome by itself"
+    },
+    "engineLateCallback": {
+      "category": "engine",
+      "payload": ["generation", "kind"],
+      "doc": "any callback (sources, queries, toolEnded, success debug info, search offer) delivered after its generation ended"
+    },
+    "userStop": {
+      "category": "user",
+      "payload": [],
+      "doc": "the stop button"
+    },
+    "appBackgrounded": {
+      "category": "app",
+      "payload": [],
+      "doc": "the app left the foreground"
+    },
+    "backgroundTimeExpired": {
+      "category": "app",
+      "payload": [],
+      "doc": "iOS ended the background task (remote turn)"
+    },
+    "appKilled": {
+      "category": "app",
+      "payload": [],
+      "doc": "process death (kill, jetsam, crash); no code runs, nothing is written"
+    },
+    "launchRecovery": {
+      "category": "app",
+      "payload": [],
+      "doc": "on launch, a chat whose reply row reads interrupted is read back; idempotent, writes nothing"
+    },
+    "deleteChat": {
+      "category": "user",
+      "payload": [],
+      "doc": "the chat was deleted while its reply was live"
+    }
+  },
+  "staleRule": {
+    "engineEvents": "category engine or gate, or confirm/decline: ignored unless payload.generation == the live generation",
+    "reverifyRetry": "ignored unless payload.captured == the highest generation id this chat has started",
+    "noRow": "an event with no row for (state, event, when) changes nothing"
+  },
+  "ops": {
+    "newGeneration": "live = payload.generation; highest = max(highest, it); context = {place, supersedes: payload.supersedes ?? [], text: '', sources: 0, sentBeforeConfirmed: null}; resumeArmed = false",
+    "retireLive": "end the live generation first: a think harder or an unsent retry writes nothing; any other turn ends stopped (row = stopped, text so far)",
+    "deleteRows": "delete the rows of payload.replaces",
+    "writeLiveRow": "plain turn only (supersedes empty): row[live] = {statusRaw: interrupted, content: '', sources: 0, sentBeforeConfirmed: null}",
+    "returnQuestion": "userTurns -= 1; delete the question row; returned += live; the composer takes the question back (composerReturn)",
+    "persistQuestion": "userTurns += 1; context.images = payload.images ?? 0; the composer's draft is consumed",
+    "sendRequest": "an unsent retry first deletes its replaces rows and writes row[live] = {interrupted, '', 0, sentBeforeConfirmed}; then requests += {generation: live, images: context.images}",
+    "setSentBeforeConfirmed": "context.sentBeforeConfirmed = payload.sentBeforeConfirmed; copy to row[live] if it exists",
+    "appendText": "context.text += payload.text",
+    "appendSources": "context.sources += payload.sources",
+    "armResumeUnlessSupersedes": "resumeArmed = (supersedes is empty)",
+    "disarmResume": "resumeArmed = false",
+    "kill": "live = null; nothing is written (the process is gone; the store keeps what was last written)",
+    "end": "an unsent retry that is not restored first deletes its replaces rows. Then, by the target state's persist: kept -> row[live] = {statusRaw, content (textSoFar = context.text, empty = ''), sources: context.sources, sentBeforeConfirmed}; and for complete/cutOff of a think harder, delete the supersedes rows; untouched -> nothing; deleted -> delete row[live]. Then live = null"
+  },
+  "guards": {
+    "supersedes": "the live generation is a think harder (payload.supersedes was non-empty)",
+    "hasText": "context.text has non-whitespace characters",
+    "place": "payload.place of the live generation: remote | local",
+    "resumeArmed": "the chat's resume flag",
+    "reason": "payload.reason is one of the listed values",
+    "origin": "the event that started the live generation: send | retry | thinkHarder | reverifyRetry | autoResume",
+    "unsentRetry": "the live generation is a retry, re-verify retry or auto-resume whose request has not gone out",
+    "restorable": "unsentRetry, and a row it replaces has non-whitespace content and a statusRaw other than interrupted, failed or decryptFailed"
+  },
+  "transitions": [
+    {"from": "idle", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "idle", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "idle", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "idle", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "complete", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "complete", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "complete", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "complete", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "stopped", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "stopped", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "stopped", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "stopped", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "cutOff", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "cutOff", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "cutOff", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "cutOff", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "failed", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "failed", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "failed", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "failed", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "decryptFailed", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "decryptFailed", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "decryptFailed", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "decryptFailed", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "interrupted", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "interrupted", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "interrupted", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "interrupted", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "restored", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "restored", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "restored", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "restored", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "discarded", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "discarded", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "discarded", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "discarded", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "returned", "event": "send", "to": "gating", "ops": ["persistQuestion", "newGeneration", "writeLiveRow"], "effects": ["persist question with its images; the composer is cleared", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "returned", "event": "retry", "to": "gating", "ops": ["newGeneration"], "effects": ["new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "returned", "event": "thinkHarder", "to": "gating", "ops": ["newGeneration", "writeLiveRow"], "effects": ["old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "returned", "event": "reverifyRetry", "to": "gating", "ops": ["newGeneration"], "effects": ["only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "interrupted", "event": "autoResume", "when": {"resumeArmed": true}, "to": "gating", "ops": ["newGeneration"], "effects": ["ask again", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "interrupted", "event": "launchRecovery", "to": "interrupted", "ops": ["disarmResume"], "effects": ["show marker.didntFinish on the row", "offer retry", "never ask again by itself after a launch", "write nothing (replay-safe)"]},
+    {"from": "gating", "event": "send", "to": "gating", "ops": [], "effects": ["refuse: one live reply at a time; keep the draft and its images"]},
+    {"from": "gating", "event": "retry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "gating", "event": "thinkHarder", "to": "gating", "ops": ["retireLive", "newGeneration", "writeLiveRow"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "gating", "event": "reverifyRetry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "gating", "event": "userStop", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "write nothing; the superseded reply stands"]},
+    {"from": "gating", "event": "userStop", "when": {"restorable": true}, "to": "restored", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "nothing was sent; the earlier reply stands as it was, no marker"]},
+    {"from": "gating", "event": "userStop", "when": {"supersedes": false, "restorable": false}, "to": "stopped", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "an unsent retry first deletes the rows it replaces", "persist statusRaw=stopped", "persist content=text so far", "show marker.stopped"]},
+    {"from": "gating", "event": "appKilled", "when": {"supersedes": true}, "to": "restored", "ops": ["kill"], "effects": ["no code runs; nothing was sent, the store is as it was"]},
+    {"from": "gating", "event": "appKilled", "when": {"unsentRetry": true}, "to": "restored", "ops": ["kill"], "effects": ["no code runs; an unsent retry changed nothing on disk"]},
+    {"from": "gating", "event": "appKilled", "when": {"supersedes": false, "unsentRetry": false}, "to": "interrupted", "ops": ["kill"], "effects": ["no code runs", "write nothing; the row already reads interrupted"]},
+    {"from": "gating", "event": "deleteChat", "to": "discarded", "ops": ["end"], "effects": ["cancel the engine", "write nothing more for this chat"]},
+    {"from": "awaitingConfirm", "event": "send", "to": "awaitingConfirm", "ops": [], "effects": ["refuse: one live reply at a time; keep the draft and its images"]},
+    {"from": "awaitingConfirm", "event": "retry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "awaitingConfirm", "event": "thinkHarder", "to": "gating", "ops": ["retireLive", "newGeneration", "writeLiveRow"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "awaitingConfirm", "event": "reverifyRetry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "awaitingConfirm", "event": "userStop", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "write nothing; the superseded reply stands"]},
+    {"from": "awaitingConfirm", "event": "userStop", "when": {"restorable": true}, "to": "restored", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "nothing was sent; the earlier reply stands as it was, no marker"]},
+    {"from": "awaitingConfirm", "event": "userStop", "when": {"supersedes": false, "restorable": false}, "to": "stopped", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "an unsent retry first deletes the rows it replaces", "persist statusRaw=stopped", "persist content=text so far", "show marker.stopped"]},
+    {"from": "awaitingConfirm", "event": "appKilled", "when": {"supersedes": true}, "to": "restored", "ops": ["kill"], "effects": ["no code runs; nothing was sent, the store is as it was"]},
+    {"from": "awaitingConfirm", "event": "appKilled", "when": {"unsentRetry": true}, "to": "restored", "ops": ["kill"], "effects": ["no code runs; an unsent retry changed nothing on disk"]},
+    {"from": "awaitingConfirm", "event": "appKilled", "when": {"supersedes": false, "unsentRetry": false}, "to": "interrupted", "ops": ["kill"], "effects": ["no code runs", "write nothing; the row already reads interrupted"]},
+    {"from": "awaitingConfirm", "event": "deleteChat", "to": "discarded", "ops": ["end"], "effects": ["cancel the engine", "write nothing more for this chat"]},
+    {"from": "requesting", "event": "send", "to": "requesting", "ops": [], "effects": ["refuse: one live reply at a time; keep the draft and its images"]},
+    {"from": "requesting", "event": "retry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "requesting", "event": "thinkHarder", "to": "gating", "ops": ["retireLive", "newGeneration", "writeLiveRow"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "requesting", "event": "reverifyRetry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "requesting", "event": "userStop", "when": {"supersedes": false}, "to": "stopped", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "persist statusRaw=stopped", "persist content=text so far", "show marker.stopped"]},
+    {"from": "requesting", "event": "userStop", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "appKilled", "when": {"supersedes": false}, "to": "interrupted", "ops": ["kill"], "effects": ["no code runs", "write nothing; the row already reads interrupted"]},
+    {"from": "requesting", "event": "appKilled", "when": {"supersedes": true}, "to": "restored", "ops": ["kill"], "effects": ["no code runs", "write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "deleteChat", "to": "discarded", "ops": ["end"], "effects": ["cancel the engine", "write nothing more for this chat"]},
+    {"from": "streaming", "event": "send", "to": "streaming", "ops": [], "effects": ["refuse: one live reply at a time; keep the draft and its images"]},
+    {"from": "streaming", "event": "retry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "streaming", "event": "thinkHarder", "to": "gating", "ops": ["retireLive", "newGeneration", "writeLiveRow"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "streaming", "event": "reverifyRetry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "streaming", "event": "userStop", "when": {"supersedes": false}, "to": "stopped", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "persist statusRaw=stopped", "persist content=text so far", "show marker.stopped"]},
+    {"from": "streaming", "event": "userStop", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "appKilled", "when": {"supersedes": false}, "to": "interrupted", "ops": ["kill"], "effects": ["no code runs", "write nothing; the row already reads interrupted"]},
+    {"from": "streaming", "event": "appKilled", "when": {"supersedes": true}, "to": "restored", "ops": ["kill"], "effects": ["no code runs", "write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "deleteChat", "to": "discarded", "ops": ["end"], "effects": ["cancel the engine", "write nothing more for this chat"]},
+    {"from": "toolRunning", "event": "send", "to": "toolRunning", "ops": [], "effects": ["refuse: one live reply at a time; keep the draft and its images"]},
+    {"from": "toolRunning", "event": "retry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "toolRunning", "event": "thinkHarder", "to": "gating", "ops": ["retireLive", "newGeneration", "writeLiveRow"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "old reply rows (`supersedes`) stay until this generation's outcome", "new generation id; it is the chat's only live generation", "persist reply row statusRaw=interrupted, content empty, before the request (none for think harder)", "the live row is drawn by the streaming view, never as a saved (blank) reply; not indexed for search until it ends"]},
+    {"from": "toolRunning", "event": "reverifyRetry", "to": "gating", "ops": ["retireLive", "newGeneration"], "effects": ["cancel the live engine without awaiting it; the live generation ends (stopped, or restored if it was a think harder)", "only when `captured` is the chat's latest generation (else ignore: stale generation)", "new generation id; it is the chat's only live generation", "the rows after the question (`replaces`) stay as they are until the request goes out; then they are deleted and this reply row is written (statusRaw=interrupted)", "ended before the request went out: if a replaced reply still has content (and is not interrupted, failed or decryptFailed) it stands as it was (restored); otherwise the replaced rows go and this row takes the ending's status"]},
+    {"from": "toolRunning", "event": "userStop", "when": {"supersedes": false}, "to": "stopped", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "persist statusRaw=stopped", "persist content=text so far", "show marker.stopped"]},
+    {"from": "toolRunning", "event": "userStop", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["cancel the engine; do not await its drain", "write nothing; the superseded reply stands"]},
+    {"from": "toolRunning", "event": "appKilled", "when": {"supersedes": false}, "to": "interrupted", "ops": ["kill"], "effects": ["no code runs", "write nothing; the row already reads interrupted"]},
+    {"from": "toolRunning", "event": "appKilled", "when": {"supersedes": true}, "to": "restored", "ops": ["kill"], "effects": ["no code runs", "write nothing; the superseded reply stands"]},
+    {"from": "toolRunning", "event": "deleteChat", "to": "discarded", "ops": ["end"], "effects": ["cancel the engine", "write nothing more for this chat"]},
+    {"from": "gating", "event": "gatePassed", "to": "requesting", "ops": ["setSentBeforeConfirmed", "sendRequest"], "effects": ["send the request for this generation's question, with its images", "persist sentBeforeConfirmed on the question and the reply row"]},
+    {"from": "gating", "event": "gateNeedsConfirm", "to": "awaitingConfirm", "ops": [], "effects": ["show the gate's question"]},
+    {"from": "gating", "event": "gateRefused", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["nothing was sent", "write nothing; the superseded reply stands"]},
+    {"from": "gating", "event": "gateRefused", "when": {"restorable": true}, "to": "restored", "ops": ["end"], "effects": ["nothing was sent", "nothing was sent; the earlier reply stands as it was, no marker"]},
+    {"from": "gating", "event": "gateRefused", "when": {"supersedes": false, "restorable": false}, "to": "failed", "ops": ["end"], "effects": ["nothing was sent", "an unsent retry first deletes the rows it replaces", "persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "awaitingConfirm", "event": "confirm", "to": "requesting", "ops": ["setSentBeforeConfirmed", "sendRequest"], "effects": ["send the request for the gated question, with its images; never the composer's newer draft", "persist sentBeforeConfirmed on the question and the reply row"]},
+    {"from": "awaitingConfirm", "event": "decline", "when": {"origin": "send"}, "to": "returned", "ops": ["returnQuestion", "end"], "effects": ["nothing was sent", "effect returnQuestionToComposer: delete the question row and the reply row, merge the question's text and images into the composer (composerReturn)", "write no statusRaw", "show no marker"]},
+    {"from": "awaitingConfirm", "event": "decline", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": true}, "to": "restored", "ops": ["end"], "effects": ["nothing was sent; the earlier reply stands as it was, no marker"]},
+    {"from": "awaitingConfirm", "event": "decline", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": false}, "to": "stopped", "ops": ["end"], "effects": ["nothing was sent; nothing to restore: the replaced rows go", "persist statusRaw=stopped", "show marker.stopped"]},
+    {"from": "awaitingConfirm", "event": "decline", "when": {"origin": "thinkHarder"}, "to": "restored", "ops": ["end"], "effects": ["nothing was sent", "write nothing; the superseded reply stands"]},
+    {"from": "gating", "event": "gateWouldGoPlain", "when": {"origin": "send"}, "to": "returned", "ops": ["returnQuestion", "end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "effect returnQuestionToComposer: delete the question row and the reply row, merge the question into the composer", "write no statusRaw"]},
+    {"from": "gating", "event": "gateWouldGoPlain", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": true}, "to": "restored", "ops": ["end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "the earlier reply stands as it was, no marker"]},
+    {"from": "gating", "event": "gateWouldGoPlain", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": false}, "to": "stopped", "ops": ["end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "nothing to restore: the replaced rows go", "persist statusRaw=stopped", "show marker.stopped"]},
+    {"from": "gating", "event": "gateWouldGoPlain", "when": {"origin": "thinkHarder"}, "to": "restored", "ops": ["end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "write nothing; the superseded reply stands"]},
+    {"from": "awaitingConfirm", "event": "gateWouldGoPlain", "when": {"origin": "send"}, "to": "returned", "ops": ["returnQuestion", "end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "effect returnQuestionToComposer: delete the question row and the reply row, merge the question into the composer", "write no statusRaw"]},
+    {"from": "awaitingConfirm", "event": "gateWouldGoPlain", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": true}, "to": "restored", "ops": ["end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "the earlier reply stands as it was, no marker"]},
+    {"from": "awaitingConfirm", "event": "gateWouldGoPlain", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": false}, "to": "stopped", "ops": ["end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "nothing to restore: the replaced rows go", "persist statusRaw=stopped", "show marker.stopped"]},
+    {"from": "awaitingConfirm", "event": "gateWouldGoPlain", "when": {"origin": "thinkHarder"}, "to": "restored", "ops": ["end"], "effects": ["the send would leave unsealed after the turn started attestable: nothing is sent", "no new words: the next send meets the normal composer flow (its own 'send without encryption' choice)", "write nothing; the superseded reply stands"]},
+    {"from": "awaitingConfirm", "event": "gateRefused", "when": {"origin": "send"}, "to": "returned", "ops": ["returnQuestion", "end"], "effects": ["confirm re-read the gate and it blocks: nothing is sent", "show the existing hard refusal", "effect returnQuestionToComposer: delete the question row and the reply row, merge the question into the composer", "write no statusRaw"]},
+    {"from": "awaitingConfirm", "event": "gateRefused", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": true}, "to": "restored", "ops": ["end"], "effects": ["confirm re-read the gate and it blocks: nothing is sent", "show the existing hard refusal", "the earlier reply stands as it was, no marker"]},
+    {"from": "awaitingConfirm", "event": "gateRefused", "when": {"origin": ["retry", "reverifyRetry", "autoResume"], "restorable": false}, "to": "stopped", "ops": ["end"], "effects": ["confirm re-read the gate and it blocks: nothing is sent", "show the existing hard refusal", "nothing to restore: the replaced rows go", "persist statusRaw=stopped", "show marker.stopped"]},
+    {"from": "awaitingConfirm", "event": "gateRefused", "when": {"origin": "thinkHarder"}, "to": "restored", "ops": ["end"], "effects": ["confirm re-read the gate and it blocks: nothing is sent", "show the existing hard refusal", "write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "toolRound", "to": "toolRunning", "ops": [], "effects": ["show the searching chip"]},
+    {"from": "requesting", "event": "decryptFailed", "when": {"supersedes": false}, "to": "decryptFailed", "ops": ["end"], "effects": ["discard what decrypted so far; never show ciphertext", "persist statusRaw=decryptFailed", "persist content=empty", "show marker.decryptFailed"]},
+    {"from": "requesting", "event": "decryptFailed", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["discard what decrypted so far; never show ciphertext", "write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "error", "when": {"supersedes": false}, "to": "failed", "ops": ["end"], "effects": ["persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "requesting", "event": "error", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "appBackgrounded", "when": {"place": "remote"}, "to": "requesting", "ops": [], "effects": ["begin background work; the stream continues"]},
+    {"from": "requesting", "event": "appBackgrounded", "when": {"place": "local", "supersedes": false}, "to": "interrupted", "ops": ["armResumeUnlessSupersedes", "end"], "effects": ["iOS bars GPU work: abandon the decode", "arm resume for this chat (plain turns only)", "persist statusRaw=interrupted (unchanged)", "persist content=text so far", "show marker.didntFinish"]},
+    {"from": "requesting", "event": "appBackgrounded", "when": {"place": "local", "supersedes": true}, "to": "restored", "ops": ["armResumeUnlessSupersedes", "end"], "effects": ["iOS bars GPU work: abandon the decode", "arm resume for this chat (plain turns only)", "write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "backgroundTimeExpired", "when": {"place": "remote", "supersedes": false}, "to": "interrupted", "ops": ["end"], "effects": ["not a user stop: no auto resume", "persist statusRaw=interrupted (unchanged)", "persist content=text so far", "show marker.didntFinish"]},
+    {"from": "requesting", "event": "backgroundTimeExpired", "when": {"place": "remote", "supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["not a user stop: no auto resume", "write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "decryptFailed", "when": {"supersedes": false}, "to": "decryptFailed", "ops": ["end"], "effects": ["discard what decrypted so far; never show ciphertext", "persist statusRaw=decryptFailed", "persist content=empty", "show marker.decryptFailed"]},
+    {"from": "streaming", "event": "decryptFailed", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["discard what decrypted so far; never show ciphertext", "write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "error", "when": {"supersedes": false}, "to": "failed", "ops": ["end"], "effects": ["persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "streaming", "event": "error", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "appBackgrounded", "when": {"place": "remote"}, "to": "streaming", "ops": [], "effects": ["begin background work; the stream continues"]},
+    {"from": "streaming", "event": "appBackgrounded", "when": {"place": "local", "supersedes": false}, "to": "interrupted", "ops": ["armResumeUnlessSupersedes", "end"], "effects": ["iOS bars GPU work: abandon the decode", "arm resume for this chat (plain turns only)", "persist statusRaw=interrupted (unchanged)", "persist content=text so far", "show marker.didntFinish"]},
+    {"from": "streaming", "event": "appBackgrounded", "when": {"place": "local", "supersedes": true}, "to": "restored", "ops": ["armResumeUnlessSupersedes", "end"], "effects": ["iOS bars GPU work: abandon the decode", "arm resume for this chat (plain turns only)", "write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "backgroundTimeExpired", "when": {"place": "remote", "supersedes": false}, "to": "interrupted", "ops": ["end"], "effects": ["not a user stop: no auto resume", "persist statusRaw=interrupted (unchanged)", "persist content=text so far", "show marker.didntFinish"]},
+    {"from": "streaming", "event": "backgroundTimeExpired", "when": {"place": "remote", "supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["not a user stop: no auto resume", "write nothing; the superseded reply stands"]},
+    {"from": "toolRunning", "event": "toolResult", "to": "toolRunning", "ops": ["appendSources"], "effects": ["add the tool's sources to this generation"]},
+    {"from": "toolRunning", "event": "decryptFailed", "when": {"supersedes": false}, "to": "decryptFailed", "ops": ["end"], "effects": ["discard what decrypted so far; never show ciphertext", "persist statusRaw=decryptFailed", "persist content=empty", "show marker.decryptFailed"]},
+    {"from": "toolRunning", "event": "decryptFailed", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["discard what decrypted so far; never show ciphertext", "write nothing; the superseded reply stands"]},
+    {"from": "toolRunning", "event": "error", "when": {"supersedes": false}, "to": "failed", "ops": ["end"], "effects": ["persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "toolRunning", "event": "error", "when": {"supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["write nothing; the superseded reply stands"]},
+    {"from": "toolRunning", "event": "appBackgrounded", "when": {"place": "remote"}, "to": "toolRunning", "ops": [], "effects": ["begin background work; the stream continues"]},
+    {"from": "toolRunning", "event": "appBackgrounded", "when": {"place": "local", "supersedes": false}, "to": "interrupted", "ops": ["armResumeUnlessSupersedes", "end"], "effects": ["iOS bars GPU work: abandon the decode", "arm resume for this chat (plain turns only)", "persist statusRaw=interrupted (unchanged)", "persist content=text so far", "show marker.didntFinish"]},
+    {"from": "toolRunning", "event": "appBackgrounded", "when": {"place": "local", "supersedes": true}, "to": "restored", "ops": ["armResumeUnlessSupersedes", "end"], "effects": ["iOS bars GPU work: abandon the decode", "arm resume for this chat (plain turns only)", "write nothing; the superseded reply stands"]},
+    {"from": "toolRunning", "event": "backgroundTimeExpired", "when": {"place": "remote", "supersedes": false}, "to": "interrupted", "ops": ["end"], "effects": ["not a user stop: no auto resume", "persist statusRaw=interrupted (unchanged)", "persist content=text so far", "show marker.didntFinish"]},
+    {"from": "toolRunning", "event": "backgroundTimeExpired", "when": {"place": "remote", "supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["not a user stop: no auto resume", "write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "firstToken", "to": "streaming", "ops": ["appendText"], "effects": ["record time to first token", "think harder: swap the display to this generation"]},
+    {"from": "requesting", "event": "token", "to": "streaming", "ops": ["appendText"], "effects": ["show the text"]},
+    {"from": "streaming", "event": "token", "to": "streaming", "ops": ["appendText"], "effects": ["show the text"]},
+    {"from": "streaming", "event": "toolRound", "to": "toolRunning", "ops": [], "effects": ["show the searching chip"]},
+    {"from": "toolRunning", "event": "toolRoundEnded", "to": "requesting", "ops": [], "effects": ["send the follow-up request"]},
+    {"from": "requesting", "event": "finish", "when": {"reason": ["stop", "none"], "hasText": true}, "to": "complete", "ops": ["end"], "effects": ["persist statusRaw=complete", "think harder: delete the superseded rows, keep this one"]},
+    {"from": "requesting", "event": "finish", "when": {"reason": ["length", "contentFilter"], "hasText": true}, "to": "cutOff", "ops": ["end"], "effects": ["persist statusRaw=cutOff", "think harder: delete the superseded rows, keep this one"]},
+    {"from": "requesting", "event": "finish", "when": {"hasText": false, "supersedes": false}, "to": "failed", "ops": ["end"], "effects": ["an empty reply is a stated failure", "persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "requesting", "event": "finish", "when": {"hasText": false, "supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["an empty reply is a stated failure", "write nothing; the superseded reply stands"]},
+    {"from": "requesting", "event": "streamEndedWithoutDone", "when": {"hasText": true}, "to": "cutOff", "ops": ["end"], "effects": ["persist statusRaw=cutOff", "think harder: delete the superseded rows, keep this one"]},
+    {"from": "requesting", "event": "streamEndedWithoutDone", "when": {"hasText": false, "supersedes": false}, "to": "failed", "ops": ["end"], "effects": ["persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "requesting", "event": "streamEndedWithoutDone", "when": {"hasText": false, "supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "finish", "when": {"reason": ["stop", "none"], "hasText": true}, "to": "complete", "ops": ["end"], "effects": ["persist statusRaw=complete", "think harder: delete the superseded rows, keep this one"]},
+    {"from": "streaming", "event": "finish", "when": {"reason": ["length", "contentFilter"], "hasText": true}, "to": "cutOff", "ops": ["end"], "effects": ["persist statusRaw=cutOff", "think harder: delete the superseded rows, keep this one"]},
+    {"from": "streaming", "event": "finish", "when": {"hasText": false, "supersedes": false}, "to": "failed", "ops": ["end"], "effects": ["an empty reply is a stated failure", "persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "streaming", "event": "finish", "when": {"hasText": false, "supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["an empty reply is a stated failure", "write nothing; the superseded reply stands"]},
+    {"from": "streaming", "event": "streamEndedWithoutDone", "when": {"hasText": true}, "to": "cutOff", "ops": ["end"], "effects": ["persist statusRaw=cutOff", "think harder: delete the superseded rows, keep this one"]},
+    {"from": "streaming", "event": "streamEndedWithoutDone", "when": {"hasText": false, "supersedes": false}, "to": "failed", "ops": ["end"], "effects": ["persist statusRaw=failed", "persist content=empty", "show the last-request card"]},
+    {"from": "streaming", "event": "streamEndedWithoutDone", "when": {"hasText": false, "supersedes": true}, "to": "restored", "ops": ["end"], "effects": ["write nothing; the superseded reply stands"]}
+  ],
+  "vectors": [
+    {
+      "name": "G1/late-callbacks-after-stop",
+      "bug": "G1",
+      "summary": "the stopped turn's engine is still running; its sources and tool callbacks arrive after a new send and must not touch the new reply",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "toolRound", "generation": 1},
+        {"event": "toolResult", "generation": 1, "sources": 3},
+        {"event": "toolRoundEnded", "generation": 1},
+        {"event": "firstToken", "generation": 1, "text": "Part"},
+        {"event": "userStop"},
+        {"event": "send", "generation": 2, "place": "remote"},
+        {"event": "gatePassed", "generation": 2, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "engineLateCallback", "generation": 1, "kind": "sources"},
+        {"event": "toolResult", "generation": 1, "sources": 4},
+        {"event": "firstToken", "generation": 2, "text": "Fresh answer"},
+        {"event": "finish", "generation": 1, "reason": "stop"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [9, 10, 12],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "stopped", "content": "Part", "sources": 3, "sentBeforeConfirmed": null},
+          {"generation": 2, "statusRaw": "complete", "content": "Fresh answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G2/retry-overlap-keeps-the-new-turn-live",
+      "bug": "G2",
+      "summary": "retry while a reply streams: the old task's end must not clear the new turn's busy state (generatingThreadID)",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Old"},
+        {"event": "retry", "generation": 2, "place": "remote", "replaces": [1]},
+        {"event": "finish", "generation": 1, "reason": "stop"},
+        {"event": "gatePassed", "generation": 2, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 2, "text": "New"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "checkpoints": [
+        {"after": 4, "state": "gating", "live": 2}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [4],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 2, "statusRaw": "complete", "content": "New", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G2/think-harder-over-think-harder",
+      "bug": "G2",
+      "summary": "a second think harder while the first streams keeps superseding the original reply; one reply survives",
+      "given": [
+        {"generation": 0, "statusRaw": null, "content": "Original", "sources": 0, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "thinkHarder", "generation": 1, "place": "remote", "supersedes": [0]},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Deeper"},
+        {"event": "thinkHarder", "generation": 2, "place": "remote", "supersedes": [0]},
+        {"event": "token", "generation": 1, "text": " late"},
+        {"event": "gatePassed", "generation": 2, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 2, "text": "Deepest"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "checkpoints": [
+        {"after": 3, "state": "gating", "live": 2}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [4],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 2, "statusRaw": "complete", "content": "Deepest", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G3/killed-mid-turn-reads-didnt-finish",
+      "bug": "G3",
+      "summary": "kill mid-answer: the row written before the request still reads interrupted at launch; marker + retry, no auto re-ask, no orphan question",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Half an ans"},
+        {"event": "appKilled"},
+        {"event": "launchRecovery"},
+        {"event": "launchRecovery"}
+      ],
+      "expect": {
+        "state": "interrupted",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "interrupted", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.didntFinish"
+        }
+      }
+    },
+    {
+      "name": "G3/stopped-partial-is-saved-as-stopped",
+      "bug": "G3",
+      "summary": "a user stop keeps what was shown, saved as stopped, not as a normal reply",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Partial"},
+        {"event": "userStop"}
+      ],
+      "expect": {
+        "state": "stopped",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "stopped", "content": "Partial", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.stopped"
+        }
+      }
+    },
+    {
+      "name": "G3/config-error-is-not-a-reply",
+      "bug": "G3",
+      "summary": "an invalid server address used to be saved as the reply text; it is a failed turn with no content",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "error", "generation": 1, "kind": "invalidEndpoint"}
+      ],
+      "expect": {
+        "state": "failed",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "failed", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.didntFinish"
+        }
+      }
+    },
+    {
+      "name": "G3/empty-reply-is-failed",
+      "bug": "G3",
+      "summary": "a finish with no visible text is never saved as a blank reply",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "finish", "generation": 1, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "failed",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "failed", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G4/finish-length-is-cut-short",
+      "bug": "G4",
+      "summary": "finish_reason length keeps the text and marks it cut short",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "An essay that"},
+        {"event": "finish", "generation": 1, "reason": "length"}
+      ],
+      "expect": {
+        "state": "cutOff",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "cutOff", "content": "An essay that", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.cutShort"
+        }
+      }
+    },
+    {
+      "name": "G4/eof-without-done-is-cut-short",
+      "bug": "G4",
+      "summary": "a stream that closes with neither [DONE] nor a finish_reason is cut short; no synthetic [DONE]",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "The answer is"},
+        {"event": "streamEndedWithoutDone", "generation": 1}
+      ],
+      "expect": {
+        "state": "cutOff",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "cutOff", "content": "The answer is", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.cutShort"
+        }
+      }
+    },
+    {
+      "name": "G4/finish-stop-without-done-is-complete",
+      "bug": "G4",
+      "summary": "control: finish_reason stop then EOF without [DONE] is complete (the model said it finished)",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Done."},
+        {"event": "finish", "generation": 1, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "complete", "content": "Done.", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G5/reasoning-decrypt-failure-is-not-the-reply",
+      "bug": "G5",
+      "summary": "sealed reply whose reasoning does not decrypt and whose content is empty: never ciphertext as the reply",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": true, "sentBeforeConfirmed": null},
+        {"event": "decryptFailed", "generation": 1, "field": "reasoning"}
+      ],
+      "expect": {
+        "state": "decryptFailed",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "decryptFailed", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "sessionMarker": "marker.decryptFailed",
+        "markers": {
+          "1": "marker.decryptFailed"
+        }
+      }
+    },
+    {
+      "name": "G5/content-decrypt-failure-mid-stream",
+      "bug": "G5",
+      "summary": "a content chunk that does not decrypt after text arrived: the decrypted part is dropped too",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": true, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Sealed start"},
+        {"event": "decryptFailed", "generation": 1, "field": "content"}
+      ],
+      "expect": {
+        "state": "decryptFailed",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "decryptFailed", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "sessionMarker": "marker.decryptFailed",
+        "markers": {
+          "1": "marker.decryptFailed"
+        }
+      }
+    },
+    {
+      "name": "G6/reverify-retry-never-deletes-a-newer-turn",
+      "bug": "G6",
+      "summary": "a re-verify scheduled for turn 1 lands after the user sent turn 2; it is dropped instead of deleting turn 2",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gateRefused", "generation": 1},
+        {"event": "send", "generation": 2, "place": "remote"},
+        {"event": "gatePassed", "generation": 2, "sealed": true, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 2, "text": "Newer"},
+        {"event": "finish", "generation": 2, "reason": "stop"},
+        {"event": "reverifyRetry", "generation": 3, "place": "remote", "replaces": [1, 2], "captured": 1}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [6],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "failed", "content": "", "sources": 0, "sentBeforeConfirmed": null},
+          {"generation": 2, "statusRaw": "complete", "content": "Newer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G6/reverify-retry-of-the-latest-turn-runs",
+      "bug": "G6",
+      "summary": "control: with no newer turn the scheduled retry runs",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gateRefused", "generation": 1},
+        {"event": "reverifyRetry", "generation": 2, "place": "remote", "replaces": [1], "captured": 1},
+        {"event": "gatePassed", "generation": 2, "sealed": true, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 2, "text": "Now sealed"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 2, "statusRaw": "complete", "content": "Now sealed", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G7/cap-then-drain-timeout-is-cut-short-not-background",
+      "bug": "G7",
+      "summary": "on-device answer cap, then the native drain times out: cut short, no auto re-ask",
+      "events": [
+        {"event": "send", "generation": 1, "place": "local"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Looping"},
+        {"event": "finish", "generation": 1, "reason": "length"},
+        {"event": "engineAbandoned", "generation": 1, "reason": "drainTimeout"}
+      ],
+      "expect": {
+        "state": "cutOff",
+        "live": null,
+        "ignored": [4],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "cutOff", "content": "Looping", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G7/abandoned-decode-search-stays-out-of-the-next-turn",
+      "bug": "G7",
+      "summary": "backgrounded on-device turn is abandoned and resumed; the abandoned decode's web search lands during the resumed turn and is dropped",
+      "events": [
+        {"event": "send", "generation": 1, "place": "local"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Title line"},
+        {"event": "appBackgrounded"},
+        {"event": "autoResume", "generation": 2, "place": "local", "replaces": [1]},
+        {"event": "gatePassed", "generation": 2, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "toolResult", "generation": 1, "sources": 5},
+        {"event": "firstToken", "generation": 2, "text": "Full answer"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "checkpoints": [
+        {"after": 3, "state": "interrupted", "live": null, "resumeArmed": true}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [6],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 2, "statusRaw": "complete", "content": "Full answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G7/no-tool-round-after-stop",
+      "bug": "G7",
+      "summary": "a tool round the stopped decode asks for afterwards starts nothing",
+      "events": [
+        {"event": "send", "generation": 1, "place": "local"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Let me"},
+        {"event": "userStop"},
+        {"event": "toolRound", "generation": 1},
+        {"event": "toolRoundEnded", "generation": 1}
+      ],
+      "expect": {
+        "state": "stopped",
+        "live": null,
+        "ignored": [4, 5],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "stopped", "content": "Let me", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "G7/a-stopped-turns-late-tool-call-runs-nothing-in-the-next-turn",
+      "bug": "G7",
+      "summary": "a stopped on-device turn's decode asks for a tool round after the next turn started: ignored as stale, no search runs, the next turn's sources and chip stay unchanged",
+      "events": [
+        {"event": "send", "generation": 1, "place": "local"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "toolRound", "generation": 1},
+        {"event": "userStop"},
+        {"event": "send", "generation": 2, "place": "local"},
+        {"event": "gatePassed", "generation": 2, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "engineLateCallback", "generation": 1, "kind": "toolCall"},
+        {"event": "firstToken", "generation": 2, "text": "Answer"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [6],
+        "resumeArmed": false,
+        "requests": [
+          {"generation": 1, "images": 0},
+          {"generation": 2, "images": 0}
+        ],
+        "rows": [
+          {"generation": 1, "statusRaw": "stopped", "content": "", "sources": 0, "sentBeforeConfirmed": null},
+          {"generation": 2, "statusRaw": "complete", "content": "Answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/killed-in-background-does-not-auto-resume",
+      "bug": "G3",
+      "summary": "armed on-device resume does not survive the process; launch shows the marker and waits for the user",
+      "events": [
+        {"event": "send", "generation": 1, "place": "local"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Para"},
+        {"event": "appBackgrounded"},
+        {"event": "appKilled"},
+        {"event": "launchRecovery"}
+      ],
+      "expect": {
+        "state": "interrupted",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "interrupted", "content": "Para", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.didntFinish"
+        }
+      }
+    },
+    {
+      "name": "lifecycle/remote-background-time-expired-is-interrupted",
+      "bug": "G3",
+      "summary": "iOS ends the background task of a remote turn: interrupted, not a user stop, no auto resume",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Some"},
+        {"event": "appBackgrounded"},
+        {"event": "token", "generation": 1, "text": " more"},
+        {"event": "backgroundTimeExpired"}
+      ],
+      "expect": {
+        "state": "interrupted",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "interrupted", "content": "Some more", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.didntFinish"
+        }
+      }
+    },
+    {
+      "name": "lifecycle/send-while-live-keeps-the-draft",
+      "bug": "G2",
+      "summary": "a send while a reply is live is refused and the draft stays (Android cleared it)",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "send"},
+        {"event": "firstToken", "generation": 1, "text": "Ok"},
+        {"event": "finish", "generation": 1, "reason": "stop"}
+      ],
+      "checkpoints": [
+        {"after": 2, "state": "requesting", "live": 1}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "complete", "content": "Ok", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/send-anyway-answers-the-gated-question",
+      "bug": "G3",
+      "summary": "send a question with 2 images, the gate asks (still checking), the user types a newer draft, then sends anyway: the request answers the gated question with its images and the draft stays",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote", "images": 2},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "draftEdited"},
+        {"event": "confirm", "generation": 1, "sentBeforeConfirmed": "pending|1730851200000|n0"},
+        {"event": "firstToken", "generation": 1, "text": "A cat"},
+        {"event": "finish", "generation": 1, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [
+          {"generation": 1, "images": 2}
+        ],
+        "userTurns": 1,
+        "draft": "kept",
+        "rows": [
+          {"generation": 1, "statusRaw": "complete", "content": "A cat", "sources": 0, "sentBeforeConfirmed": "pending|1730851200000|n0"}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/retry-with-previous-reply-restores",
+      "bug": "G3",
+      "summary": "retry, the gate asks, the user declines: the reply they already had stands as it was",
+      "given": [
+        {"generation": 0, "statusRaw": "complete", "content": "Old answer", "sources": 2, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "retry", "generation": 1, "place": "remote", "replaces": [0]},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "decline", "generation": 1, "trigger": "dontSend"}
+      ],
+      "expect": {
+        "state": "restored",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "rows": [
+          {"generation": 0, "statusRaw": "complete", "content": "Old answer", "sources": 2, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/retry-after-failed-stops",
+      "bug": "G3",
+      "summary": "retry of a failed reply, then decline: nothing to restore, so the failed row goes and the retry reads stopped",
+      "given": [
+        {"generation": 0, "statusRaw": "failed", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "retry", "generation": 1, "place": "remote", "replaces": [0]},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "decline", "generation": 1, "trigger": "wait"}
+      ],
+      "expect": {
+        "state": "stopped",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "rows": [
+          {"generation": 1, "statusRaw": "stopped", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+        ],
+        "markers": {
+          "1": "marker.stopped"
+        }
+      }
+    },
+    {
+      "name": "lifecycle/reverify-with-reply-restores",
+      "bug": "G6",
+      "summary": "a re-verify retry of the latest turn is declined: its complete reply stands as it was",
+      "given": [
+        {"generation": 0, "statusRaw": "complete", "content": "Answer", "sources": 0, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "reverifyRetry", "generation": 1, "place": "remote", "replaces": [0], "captured": 0},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "decline", "generation": 1, "trigger": "dismiss"}
+      ],
+      "expect": {
+        "state": "restored",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "rows": [
+          {"generation": 0, "statusRaw": "complete", "content": "Answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/autoresume-after-interrupted-stops",
+      "bug": "G7",
+      "summary": "the auto re-ask of an interrupted on-device turn is declined: an interrupted partial is not a reply to restore",
+      "events": [
+        {"event": "send", "generation": 1, "place": "local"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Title line"},
+        {"event": "appBackgrounded"},
+        {"event": "autoResume", "generation": 2, "place": "local", "replaces": [1]},
+        {"event": "gateNeedsConfirm", "generation": 2},
+        {"event": "decline", "generation": 2, "trigger": "dontSend"}
+      ],
+      "expect": {
+        "state": "stopped",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [
+          {"generation": 1, "images": 0}
+        ],
+        "rows": [
+          {"generation": 2, "statusRaw": "stopped", "content": "", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/reverify-during-the-ask-never-wedges-the-chat",
+      "bug": "G3",
+      "summary": "Re-verify in the still-checking alert declines the held-back turn (its question returns to the composer); the chat is not left with a live turn, so the next send goes",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote", "images": 1},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "decline", "generation": 1, "trigger": "reverify"},
+        {"event": "send", "generation": 2, "place": "remote", "images": 1},
+        {"event": "gatePassed", "generation": 2, "sealed": true, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 2, "text": "Answer"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "returned": [1],
+        "userTurns": 1,
+        "requests": [
+          {"generation": 2, "images": 1}
+        ],
+        "rows": [
+          {"generation": 2, "statusRaw": "complete", "content": "Answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/reverify-on-a-retry-keeps-it-pending",
+      "bug": "G3",
+      "summary": "Re-verify on a held retry declines it (the reply the user had stands) and keeps the retry pending; a later send anyway resends it, and only then is the old reply replaced",
+      "given": [
+        {"generation": 0, "statusRaw": "complete", "content": "Old answer", "sources": 0, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "retry", "generation": 1, "place": "remote", "replaces": [0]},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "decline", "generation": 1, "trigger": "reverify"},
+        {"event": "retry", "generation": 2, "place": "remote", "replaces": [0]},
+        {"event": "gatePassed", "generation": 2, "sealed": true, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 2, "text": "New answer"},
+        {"event": "finish", "generation": 2, "reason": "stop"}
+      ],
+      "checkpoints": [
+        {"after": 2, "state": "restored", "live": null},
+        {"after": 3, "state": "gating", "live": 2}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [
+          {"generation": 2, "images": 0}
+        ],
+        "rows": [
+          {"generation": 2, "statusRaw": "complete", "content": "New answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/a-turn-started-attestable-never-goes-plain",
+      "bug": "G3",
+      "summary": "window A: the tier resolves to third-party between prepareTurn and the gate, with no ask; the send would leave unsealed, so nothing is sent and the question returns to the composer",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gateWouldGoPlain", "generation": 1}
+      ],
+      "expect": {
+        "state": "returned",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "returned": [1],
+        "userTurns": 0,
+        "requests": [],
+        "rows": []
+      }
+    },
+    {
+      "name": "lifecycle/confirm-for-a-sealed-send-never-goes-plain",
+      "bug": "G3",
+      "summary": "window B: the user agreed to send anyway (still encrypted), then the tier resolved to third-party; confirm re-reads and nothing is sent; the question returns",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "gateWouldGoPlain", "generation": 1}
+      ],
+      "expect": {
+        "state": "returned",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "returned": [1],
+        "userTurns": 0,
+        "requests": [],
+        "rows": []
+      }
+    },
+    {
+      "name": "lifecycle/a-retry-started-attestable-keeps-its-reply-instead-of-going-plain",
+      "bug": "G3",
+      "summary": "the same for a retry: nothing is sent and the reply the user had stands",
+      "given": [
+        {"generation": 0, "statusRaw": "complete", "content": "Old answer", "sources": 0, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "retry", "generation": 1, "place": "remote", "replaces": [0]},
+        {"event": "gateWouldGoPlain", "generation": 1}
+      ],
+      "expect": {
+        "state": "restored",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "rows": [
+          {"generation": 0, "statusRaw": "complete", "content": "Old answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/hard-verdict-while-awaiting-confirm-sends-nothing",
+      "bug": "G3",
+      "summary": "a hard verdict lands while the still-checking ask is up and the user taps send: confirm re-reads the gate, nothing is sent, the question returns to the composer",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote", "images": 2},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "gateRefused", "generation": 1}
+      ],
+      "expect": {
+        "state": "returned",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "returned": [1],
+        "userTurns": 0,
+        "requests": [],
+        "rows": []
+      }
+    },
+    {
+      "name": "lifecycle/hard-verdict-through-reverify-sends-nothing",
+      "bug": "G3",
+      "summary": "the same hard verdict reached through Re-verify: the ask is declined first, so nothing is sent and the question is back in the composer",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "decline", "generation": 1, "trigger": "reverify"}
+      ],
+      "expect": {
+        "state": "returned",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "returned": [1],
+        "userTurns": 0,
+        "requests": [],
+        "rows": []
+      }
+    },
+    {
+      "name": "lifecycle/hard-verdict-while-awaiting-confirm-restores-a-retry",
+      "bug": "G3",
+      "summary": "a retry asked to confirm, then a hard verdict: nothing is sent and the reply the user had stands",
+      "given": [
+        {"generation": 0, "statusRaw": "complete", "content": "Old answer", "sources": 0, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "retry", "generation": 1, "place": "remote", "replaces": [0]},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "gateRefused", "generation": 1}
+      ],
+      "expect": {
+        "state": "restored",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "rows": [
+          {"generation": 0, "statusRaw": "complete", "content": "Old answer", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/think-harder-stopped-restores-the-old-reply",
+      "bug": "G2",
+      "summary": "a think harder that is stopped writes nothing; the old reply stands",
+      "given": [
+        {"generation": 0, "statusRaw": null, "content": "Original", "sources": 0, "sentBeforeConfirmed": null}
+      ],
+      "events": [
+        {"event": "thinkHarder", "generation": 1, "place": "remote", "supersedes": [0]},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "Deeper"},
+        {"event": "userStop"}
+      ],
+      "expect": {
+        "state": "restored",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 0, "statusRaw": null, "content": "Original", "sources": 0, "sentBeforeConfirmed": null}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/delete-chat-mid-answer-writes-nothing",
+      "bug": "G3",
+      "summary": "deleting the chat mid-answer ends the generation and writes nothing (Android A4)",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": false, "sentBeforeConfirmed": null},
+        {"event": "firstToken", "generation": 1, "text": "x"},
+        {"event": "deleteChat"},
+        {"event": "finish", "generation": 1, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "discarded",
+        "live": null,
+        "ignored": [4],
+        "resumeArmed": false,
+        "rows": []
+      }
+    },
+    {
+      "name": "sentBeforeConfirmed/confirmed-while-pending",
+      "bug": "G3",
+      "summary": "the user confirmed a sealed send while the record's verdicts were pending: the reply carries pending|<recordKey>",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "confirm", "generation": 1, "sentBeforeConfirmed": "pending|1730851200000|n0"},
+        {"event": "firstToken", "generation": 1, "text": "Sealed"},
+        {"event": "finish", "generation": 1, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "complete", "content": "Sealed", "sources": 0, "sentBeforeConfirmed": "pending|1730851200000|n0"}
+        ]
+      }
+    },
+    {
+      "name": "sentBeforeConfirmed/sent-over-a-failed-soft-check",
+      "bug": "G3",
+      "summary": "send anyway (still encrypted) after the record's check failed softly: failed|<recordKey>",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote"},
+        {"event": "gatePassed", "generation": 1, "sealed": true, "sentBeforeConfirmed": "failed|1730851200000|n0"},
+        {"event": "firstToken", "generation": 1, "text": "Sealed"},
+        {"event": "finish", "generation": 1, "reason": "stop"}
+      ],
+      "expect": {
+        "state": "complete",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "rows": [
+          {"generation": 1, "statusRaw": "complete", "content": "Sealed", "sources": 0, "sentBeforeConfirmed": "failed|1730851200000|n0"}
+        ]
+      }
+    },
+    {
+      "name": "lifecycle/decline-wait-returns-the-question",
+      "bug": "G3",
+      "summary": "the gate asks (still checking) and the user picks wait: the unsent question and its reply row go, the question and its 2 images return to the composer beside the draft; nothing persisted, no marker",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote", "images": 2},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "draftEdited"},
+        {"event": "decline", "generation": 1, "trigger": "wait"}
+      ],
+      "expect": {
+        "state": "returned",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "userTurns": 0,
+        "draft": "kept",
+        "returned": [1],
+        "rows": []
+      }
+    },
+    {
+      "name": "lifecycle/decline-dont-send-returns-the-question",
+      "bug": "G3",
+      "summary": "the gate asks (still checking) and the user picks dontSend: the unsent question and its reply row go, the question and its 2 images return to the composer beside the draft; nothing persisted, no marker",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote", "images": 2},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "draftEdited"},
+        {"event": "decline", "generation": 1, "trigger": "dontSend"}
+      ],
+      "expect": {
+        "state": "returned",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "userTurns": 0,
+        "draft": "kept",
+        "returned": [1],
+        "rows": []
+      }
+    },
+    {
+      "name": "lifecycle/decline-dismiss-returns-the-question",
+      "bug": "G3",
+      "summary": "the gate asks (still checking) and the user picks dismiss: the unsent question and its reply row go, the question and its 2 images return to the composer beside the draft; nothing persisted, no marker",
+      "events": [
+        {"event": "send", "generation": 1, "place": "remote", "images": 2},
+        {"event": "gateNeedsConfirm", "generation": 1},
+        {"event": "draftEdited"},
+        {"event": "decline", "generation": 1, "trigger": "dismiss"}
+      ],
+      "expect": {
+        "state": "returned",
+        "live": null,
+        "ignored": [],
+        "resumeArmed": false,
+        "requests": [],
+        "userTurns": 0,
+        "draft": "kept",
+        "returned": [1],
+        "rows": []
+      }
+    }
+  ],
+  "platformNotes": [
+    {
+      "platform": "android",
+      "vectors": ["G7/abandoned-decode-search-stays-out-of-the-next-turn", "lifecycle/killed-in-background-does-not-auto-resume", "lifecycle/remote-background-time-expired-is-interrupted", "lifecycle/autoresume-after-interrupted-stops"],
+      "note": "on-device turns are not abandoned on background (a foreground service keeps the process alive and engine eviction waits for the turn); appBackgrounded/backgroundTimeExpired never fire; process death is appKilled"
+    }
+  ],
+  "engineCache": {
+    "rule": "G8: one generation counter (epoch) per cache; evict bumps it. A build that finishes under an older epoch releases its engine and is never inserted. A second request for the same key while a build is in flight joins it.",
+    "states": ["empty", "building", "resident"],
+    "events": ["build", "initialized", "evict"],
+    "transitions": [
+      {"from": "empty", "event": "build", "to": "building", "effects": ["start a build under the current epoch"]},
+      {"from": "building", "event": "build", "to": "building", "effects": ["join the in-flight build; never a second engine"]},
+      {"from": "building", "event": "evict", "to": "empty", "effects": ["epoch += 1; the in-flight build will be dropped"]},
+      {"from": "resident", "event": "evict", "to": "empty", "effects": ["epoch += 1; release the engine"]},
+      {"from": "building", "event": "initialized", "when": {"epochCurrent": true}, "to": "resident", "effects": ["insert the engine"]},
+      {"from": "empty", "event": "initialized", "when": {"epochCurrent": false}, "to": "empty", "effects": ["release the engine; never insert (ignore: stale epoch)"]},
+      {"from": "resident", "event": "build", "to": "resident", "effects": ["reuse the resident engine"]}
+    ],
+    "vectors": [
+      {
+        "name": "G8/evict-during-initialize-stays-evicted",
+        "bug": "G8",
+        "events": [
+          {"event": "build", "epoch": 0},
+          {"event": "evict"},
+          {"event": "initialized", "epoch": 0}
+        ],
+        "expect": {
+          "state": "empty",
+          "resident": 0,
+          "epoch": 1
+        }
+      },
+      {
+        "name": "G8/two-builds-one-engine",
+        "bug": "G8",
+        "events": [
+          {"event": "build", "epoch": 0},
+          {"event": "build", "epoch": 0},
+          {"event": "initialized", "epoch": 0}
+        ],
+        "expect": {
+          "state": "resident",
+          "resident": 1,
+          "epoch": 0
+        }
+      }
+    ]
+  }
+}

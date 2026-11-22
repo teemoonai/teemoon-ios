@@ -38,12 +38,16 @@ enum AuditedSealText {
 }
 
 /// The model enclave's everyday audit state, from the rows whose code can read the unlocked message, and
-/// the exposure summary of the first leaking page. Never read by the send gate.
+/// the exposure summary of the first leaking page; with a list, the worst across every listed key holder too (A5).
+/// Never read by the send gate.
 @MainActor
 enum ModelNodeAudit {
+    typealias Rollup = (state: EverydayAuditState, leaksExposure: String?)
+
     static func state(groups: [EnclaveGroup], hasAttestation: Bool,
                       chatPath: ChatPath.Result? = nil, runningSources: [ActionLogReading.Source] = [],
                       composeManager: ActionLogReading.ComposeManagerSeat? = nil,
+                      listed: ModelCandidates.Listed? = nil, listFailed: Bool = false, listedScopes: [TrustScope]? = nil,
                       audit: AuditIndex = .shared) -> (state: EverydayAuditState?, leaksExposure: String?) {
         guard hasAttestation, let group = groups.first(where: { $0.primary }) else { return (nil, nil) }
         let relevant = group.images.filter { $0.plaintextRole != nil || $0.kind == .local || $0.kind == .guestOS }
@@ -51,11 +55,40 @@ enum ModelNodeAudit {
         var urls = relevant.compactMap(\.auditURL)
         if let u = group.configAuditURL { urls.append(u) }
         if let u = group.recipe?.auditURL { urls.append(u) }
-        urls = onPath(urls, chatPath: chatPath, runningSources: runningSources, audit: audit)
+        var all = [rollup(urls, covered: relevant.allSatisfy { $0.auditURL != nil }, chatPath: chatPath,
+                          runningSources: runningSources, wholeHost: false, composeManager: composeManager, audit: audit)]
+        // A list that failed names no holder; a scope not in yet is not a review.
+        if listFailed { all.append((.incomplete, nil)) }
+        if let enclaves = listed?.enclaves, !enclaves.isEmpty {
+            let scopes = listedScopes?.count == enclaves.count ? listedScopes : nil
+            for (i, enclave) in enclaves.enumerated() {
+                all.append(listedState(enclave, scope: scopes?[i], audit: audit))
+            }
+        }
+        let worst = worst(all)
+        return (worst.state, worst.leaksExposure)
+    }
+
+    /// One listed enclave, scoped by everything its host runs: its measured compose, its guest OS and every running
+    /// revision must have a review. An off-path LEAKS page still drops out (`onPath`). nil scope: pending.
+    static func listedState(_ enclave: ModelCandidates.Enclave, scope: TrustScope?, audit: AuditIndex) -> Rollup {
+        guard let scope else { return (.incomplete, nil) }
+        let measured = enclave.result == .clean ? audit.measuredAuditURL(composeHash: enclave.composeHash) : nil
+        let os = enclave.osImageHash.flatMap { audit.osAuditURL(osImageHash: $0) }
+        let sources = scope.running.map(\.service.source)
+        let covered = measured != nil && os != nil && !scope.listedEvidenceAbsent
+            && sources.allSatisfy { audit.manifestAuditURL(path: $0.file, fileSHA256: $0.fileSHA256) != nil }
+        return rollup([measured, os].compactMap { $0 }, covered: covered, chatPath: scope.chatPath, runningSources: sources,
+                      wholeHost: true, composeManager: scope.composeManager, audit: audit)
+    }
+
+    /// The read enclave's computation, on one enclave's pages.
+    static func rollup(_ base: [URL], covered: Bool, chatPath: ChatPath.Result?, runningSources: [ActionLogReading.Source],
+                       wholeHost: Bool, composeManager: ActionLogReading.ComposeManagerSeat?, audit: AuditIndex) -> Rollup {
+        let urls = onPath(base, chatPath: chatPath, runningSources: runningSources, wholeHost: wholeHost, audit: audit)
         // A week-old index is no index for the everyday claim; the expert stamp still shows its age.
         guard audit.isFreshForEveryday else { return (.incomplete, nil) }
         let classes = urls.map { audit.verdictClass(for: $0) }
-        let covered = relevant.allSatisfy { $0.auditURL != nil }
         let managerUnreviewed = TrustScope.runningManagerUnreviewed(composeManager) {
             audit.imageAuditURL(image: "nearaidev/compose-manager", digest: "sha256:\($0)")
         }
@@ -64,15 +97,28 @@ enum ModelNodeAudit {
             ? urls.first { audit.verdictClass(for: $0) == .leaks }.flatMap(audit.exposureSummary(for:)) : nil
         return (state, exposure)
     }
+
+    /// leaks > incomplete > reviewedWithCaveat > reviewed; the first leaking enclave's sentence.
+    static func worst(_ all: [Rollup]) -> Rollup {
+        let order: [EverydayAuditState] = [.leaks, .incomplete, .reviewedWithCaveat, .reviewed]
+        let state = order.first { s in all.contains { $0.state == s } } ?? .incomplete
+        return (state, state == .leaks ? all.lazy.compactMap { $0.state == .leaks ? $0.leaksExposure : nil }.first : nil)
+    }
 }
 
 extension ModelNodeAudit {
     /// The pages that judge this chat (audit 2026-11-06, chat_path): add the pages of every revision and image on
     /// the path, and drop a recipe LEAKS page whose services the path never touches. Ambiguous: every running
     /// revision's page counts, so a leak anywhere on the CVM counts. A page without `services` always counts.
+    /// `wholeHost` (a listed enclave, A5): every running revision's page counts too, before the off-path filter.
     static func onPath(_ urls: [URL], chatPath: ChatPath.Result?, runningSources: [ActionLogReading.Source],
-                       audit: AuditIndex) -> [URL] {
+                       wholeHost: Bool = false, audit: AuditIndex) -> [URL] {
         var out = urls
+        if wholeHost {
+            for source in runningSources {
+                if let u = audit.manifestAuditURL(path: source.file, fileSHA256: source.fileSHA256) { out.append(u) }
+            }
+        }
         switch chatPath {
         case .path(let hops)?:
             for source in Set(hops.map(\.source)) {
@@ -149,6 +195,7 @@ struct TrustVerdict: Equatable {
         var e2eeKeyBound: Bool? = nil
         /// DCAP or NVIDIA still checking: the seal step reads checking, not proven.
         var hardwareChecksPending = false
+        var listedEnclaves: KeyCustodyCopy.Listed = .checking
         var provenanceState: StepState? = nil
         var provenanceDetail: String = ""
         var responseSigState: StepState? = nil
@@ -182,6 +229,17 @@ struct TrustVerdict: Equatable {
         statuses.indices.map { i in
             guard i + 1 < statuses.count, statuses[i] != .fail else { return false }
             return halted || [.fail, .notChecked].contains(statuses[i + 1])
+        }
+    }
+
+    /// The sealed step's mark, everyday row and expert "bound" node alike.
+    /// Never green beside a listed-enclaves sentence that says otherwise; .alert is the ladder's soft couldn't-check.
+    static func sealedStatus(hardwareChecksPending: Bool, listed: KeyCustodyCopy.Listed) -> TrustClaim.Status {
+        switch listed {
+        case .checked: hardwareChecksPending ? .pending : .ok
+        case .checking: .pending
+        case .listFailed, .unfinished: .alert
+        case .failed: .fail
         }
     }
 
@@ -269,9 +327,10 @@ struct TrustVerdict: Equatable {
         if input.unpublishedButSealed, input.auditState != .leaks {
             return "encrypted to \(label) — one image unpublished"
         }
-        // "only it can read this" only over a reviewed build whose code was checked (trust-leaks-wording).
+        // The enclave-key tail only over a reviewed build whose code was checked (trust-leaks-wording).
         guard input.auditState == .reviewed, input.provenanceState != .unchecked else { return "encrypted to \(label)" }
-        return "encrypted to \(label) — only it can read this"
+        // The possessive goes on the model, never the quant ("GLM-5.1 · AWQ's enclave key").
+        return "encrypted to \(input.modelName)'s enclave key" + (input.quant.map { " · \($0)" } ?? "")
     }
 
     private static func heroSubtitle(_ input: Input, paused: Bool) -> String {
@@ -297,7 +356,7 @@ struct TrustVerdict: Equatable {
             return "your message is still sealed to \(input.modelName)'s hardware key. one running image has no published attestation — see the ladder."
         }
         guard input.auditState == .reviewed else { return AuditedSealText.notReviewed }
-        return "only you and \(input.modelName)'s sealed hardware can read this chat."
+        return "sealed to \(input.modelName)'s enclave key. near.ai's key service decides which secure enclaves hold it."
     }
 
     private static func everydayClaims(_ input: Input) -> [TrustClaim] {
@@ -309,9 +368,10 @@ struct TrustVerdict: Equatable {
 
         switch input.e2eeKeyBound {
         case .some(true):
-            nodes.append(TrustClaim(id: "sealed", status: input.hardwareChecksPending ? .pending : .ok,
-                title: "sealed so only \(input.modelName) can open it",
-                detail: "before anything leaves \(input.deviceBoundary) it's locked to a key that lives inside \(input.modelName)'s sealed chip and never comes out — not \(input.providerDisplayName), not the network, nobody else can open it."))
+            nodes.append(TrustClaim(id: "sealed",
+                status: sealedStatus(hardwareChecksPending: input.hardwareChecksPending, listed: input.listedEnclaves),
+                title: "sealed to \(input.modelName)'s enclave key",
+                detail: KeyCustodyCopy.sealedDetail(device: input.deviceBoundary, model: input.modelName, listed: input.listedEnclaves)))
         case .some(false):
             nodes.append(TrustClaim(id: "sealed", status: .fail,
                 title: "couldn't seal this chat",
@@ -319,7 +379,7 @@ struct TrustVerdict: Equatable {
         case .none:
             nodes.append(TrustClaim(id: "sealed", status: .pending,
                 title: "sealing this chat to \(input.modelName)",
-                detail: "locking it to a key only \(input.modelName)'s sealed chip holds…"))
+                detail: KeyCustodyCopy.sealingPending(model: input.modelName)))
         }
 
         switch input.provenanceState {
@@ -354,16 +414,16 @@ struct TrustVerdict: Equatable {
             case .some(.stuck):
                 nodes.append(TrustClaim(id: "signed", status: .fail,
                     title: "a reply didn't come back signed",
-                    detail: "one answer didn't carry a valid signature from \(input.modelName)'s sealed chip."))
+                    detail: KeyCustodyCopy.replySignatureFailed(model: input.modelName)))
             case .some(.done):
                 nodes.append(TrustClaim(id: "signed", status: .ok,
                     title: "every reply comes back signed by \(input.modelName)",
-                    detail: "each answer carries a signature only \(input.modelName)'s sealed chip can make, so you know it really came from the model."))
+                    detail: KeyCustodyCopy.replySigned(model: input.modelName)))
             case .some(.live), .some(.pending), .some(.unchecked), .none:
                 nodes.append(TrustClaim(id: "signed", status: verifying ? .pending : .ok,
                     title: verifying ? "checking each reply's signature" : "every reply comes back signed by \(input.modelName)",
                     detail: verifying ? "still confirming — not yet green."
-                                      : "each answer carries a signature only \(input.modelName)'s sealed chip can make, so you know it really came from the model."))
+                                      : KeyCustodyCopy.replySigned(model: input.modelName)))
             }
         }
 

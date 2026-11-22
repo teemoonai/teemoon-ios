@@ -1,0 +1,53 @@
+{
+ "about": "Trust scope (d), the launcher child -> index lookup. Temporary: removed once near.ai attests the child. Vectors beside expected.json's `launcher` entry (audit's, unchanged); iOS LauncherIndexRuleVectorTests reads this file.",
+ "child": "079a14b41deb11e0e27f9b69648e8b3d89bd6fb9ccf6071643b8f447fa415085",
+ "index_digest": "91fdff3cfa3543d72656b2368c7d8a0a83d95a0f1087378c897aa1537acdba56",
+ "index_file": "launcher-index-91fdff3c.json",
+ "attestation_file": "launcher-index-attestation-91fdff3c.json",
+ "attestation_source": "GET https://api.github.com/repos/nearai/compose-manager/attestations/sha256:91fdff3cfa3543d72656b2368c7d8a0a83d95a0f1087378c897aa1537acdba56, unauthenticated, 2026-11-07 (HTTP 200, 1 attestation)",
+ "outcomes": {
+  "verified": "the child counts as verified, with the index attestation's repository, ref and commit",
+  "unpublished": "the clean-404 result the child gets today (orange, not red)",
+  "refused": "negative evidence: the index attestation verifies but is not from the builder",
+  "inconclusive": "transient, like GitHub not answering (T2b): never unpublished, never verified"
+ },
+ "failure_reasons": {
+  "about": "ImageProvenance.failureReason per reason kind, verbatim (approved 2026-11-07). identityNotTrusted is the verifier's out-of-org refusal (sigstore.json); identityNotThisBuild is rule a's in-org refusal. fetchTransient is one reason kind (inconclusive, T2b) worded by where the outage was.",
+  "identityNotTrusted": "signed by an identity outside near.ai\u2019s org",
+  "identityNotThisBuild": "signed inside near.ai, but not by this image\u2019s build",
+  "fetchTransient_gitHub": "couldn\u2019t reach GitHub (rate-limited or offline)",
+  "fetchTransient_dockerHub": "couldn\u2019t reach Docker Hub (rate-limited or offline)"
+ },
+ "rule_a_signer": {
+  "repository": "https://github.com/nearai/compose-manager",
+  "workflow_identity": "https://github.com/nearai/compose-manager/.github/workflows/build.yml@refs/heads/master",
+  "source_ref": "refs/heads/master",
+  "source_commit_of_attestation_file": "8e07c3583909c9ab9da94d883e87add1ae90832d",
+  "cases": [
+   {"name": "the builder", "repository": "https://github.com/nearai/compose-manager", "workflow_identity": "https://github.com/nearai/compose-manager/.github/workflows/build.yml@refs/heads/master", "source_ref": "refs/heads/master", "expect": "verified"},
+   {"name": "same repo, another branch", "repository": "https://github.com/nearai/compose-manager", "workflow_identity": "https://github.com/nearai/compose-manager/.github/workflows/build.yml@refs/heads/dev", "source_ref": "refs/heads/dev", "expect": "refused", "reason": "identityNotThisBuild"},
+   {"name": "same repo, another workflow", "repository": "https://github.com/nearai/compose-manager", "workflow_identity": "https://github.com/nearai/compose-manager/.github/workflows/other.yml@refs/heads/master", "source_ref": "refs/heads/master", "expect": "refused", "reason": "identityNotThisBuild"},
+   {"name": "another near.ai repo (org-level trust is not enough)", "repository": "https://github.com/nearai/cvm-compose-files", "workflow_identity": "https://github.com/nearai/cvm-compose-files/.github/workflows/build.yml@refs/heads/master", "source_ref": "refs/heads/master", "expect": "refused", "reason": "identityNotThisBuild"}
+  ]
+ },
+ "rule_b_child_linux_amd64": {
+  "note": "index bytes are index_file transformed, re-hashed so rule c passes and only rule b decides",
+  "cases": [
+   {"name": "as pinned", "transform": "none", "expect": "verified"},
+   {"name": "child listed only for linux/arm64", "transform": "child_platform_arm64", "expect": "unpublished"},
+   {"name": "child listed only as an attestation-manifest", "transform": "child_as_attestation_manifest", "expect": "unpublished"},
+   {"name": "another child", "transform": "child_digest_last_hex_to_0", "expect": "unpublished"}
+  ]
+ },
+ "rule_c_bytes_hash": {
+  "cases": [
+   {"name": "as pinned", "transform": "none", "expect": "verified"},
+   {"name": "one trailing space, digest unchanged", "transform": "append_space", "expect": "unpublished"}
+  ]
+ },
+ "rule_d_registry_no_answer": {
+  "cases": [
+   {"name": "Docker Hub token endpoint 503", "registry": "down", "expect": "inconclusive", "reason": "fetchTransient_dockerHub"}
+  ]
+ }
+}

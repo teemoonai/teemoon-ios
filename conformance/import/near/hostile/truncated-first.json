@@ -1,0 +1,76 @@
+[
+  {
+    "id": "conv_lisbon",
+    "created_at": 1760000000,
+    "metadata": {
+      "title": "Two days in Lisbon",
+      "pinned_at": "2026-09-01T10:00:00Z"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "msg_u1",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000000,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "What should I see in Lisbon in two days?"
+          }
+        ],
+        "metadata": {
+          "author_id": "user_0001",
+          "author_name": "Sample Person"
+        }
+      },
+      {
+        "type": "reasoning",
+        "id": "rs_1",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000001,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "content": "Thinking about the request.",
+        "summary": ""
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_1",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000001,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "action": {
+          "type": "search",
+          "query": "lisbon two day itinerary"
+        }
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_2",
+        "response_id": "resp_l1",
+        "next_response_ids": [
+          "resp_l2"
+        ],
+        "created_at": 1760000002,
+        "status": "completed",
+        "model": "zai-org/GLM-5.3-Flash",
+        "previous_response_id": "resp_outside_lisbon",
+        "action": {
+          "type": "search",
+    

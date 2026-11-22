@@ -27,7 +27,7 @@ extension Provider {
         endpoint:             "https://cloud-api.near.ai/v1/chat/completions",
         model:                "z-ai/glm-5.3-flash",   // the E2EE flagship near.ai still serves (5.2 retired 2026-09-12)
         supportsModelBrowsing: true,
-        presetDescription:    "open models running inside attested enclaves encrypted to the llm model, so the operator can't read your chats. teemoon checks the proof on the device.",
+        presetDescription:    "open models running inside attested secure enclaves. for its attested models, your chats are sealed to the model's enclave key, and teemoon checks the proof on the device.",
         // cloud.near.ai CTAs ("Get an API key") land here; app.near.ai redirects to marketing.
         signupURL:            "https://cloud.near.ai/signin"
     )

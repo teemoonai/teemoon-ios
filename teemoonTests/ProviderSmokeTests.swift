@@ -31,10 +31,10 @@ struct ProviderSmokeTests {
         try await smoke(p, apiKey: key)
     }
 
-    @Test @MainActor func fireworksGptOss120B() async throws {
+    /// The preset's model: a pinned id goes stale when Fireworks retires it (gpt-oss-120b, 404 on 2026-11-22).
+    @Test @MainActor func fireworksPresetModel() async throws {
         guard let key = hostHomeFile(".FIREWORKS_API_KEY") else { return }
         var p = Provider.fireworks
-        p.model = "accounts/fireworks/models/gpt-oss-120b"
         p.extraParams = ["max_tokens": "32"]
         try await smoke(p, apiKey: key)
     }
@@ -42,7 +42,7 @@ struct ProviderSmokeTests {
     @Test @MainActor func grokBuild() async throws {
         guard let key = hostHomeFile(".XAI_API_KEY") else { return }
         var p = Provider.grok
-        p.model = "grok-build-0.1"
+        p.model = Provider.grok.model   // the preset's own fallback, kept on xAI's live list; grok-build-0.1 was retired 2026-11
         p.extraParams = ["max_tokens": "32"]
         try await smoke(p, apiKey: key)
     }

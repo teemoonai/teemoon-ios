@@ -79,7 +79,7 @@ import Testing
                     providers: store, session: session, llm: llm)
         for _ in 0..<250 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
         try #require(vm.hardwareConfirmRequested, "precondition: the gate asked")
-        session.rememberConfirmation(pending: true)
+        session.rememberConfirmation(pending: true, answering: .verification)
         vm.generate(currentThread: &thread, modelContext: container.mainContext, settings: AppSettings(),
                     providers: store, session: session, llm: llm, acceptedDegrade: true)
         for _ in 0..<250 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }

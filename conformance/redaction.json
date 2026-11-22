@@ -1,0 +1,70 @@
+{
+  "fixtureClass" : "redaction",
+  "kitVersion" : "0.5.5",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "authHeaderNames" : [
+      "x-portkey-key"
+    ],
+    "cases" : [
+      {
+        "expected" : "Bearer ••••…wxyz",
+        "input" : "Bearer sk-live-abcdef1234567890wxyz",
+        "kind" : "header",
+        "name" : "Authorization",
+        "note" : "a standard header"
+      },
+      {
+        "expected" : "••••…zzzz",
+        "input" : "pk-custom-9999999999zzzz",
+        "kind" : "header",
+        "name" : "X-Portkey-Key",
+        "note" : "a provider's own auth header name, value not a stored key"
+      },
+      {
+        "expected" : "contains ••••…wxyz",
+        "input" : "contains sk-live-abcdef1234567890wxyz",
+        "kind" : "header",
+        "name" : "x-echo",
+        "note" : "an unknown header whose value carries a stored key"
+      },
+      {
+        "expected" : "application/json",
+        "input" : "application/json",
+        "kind" : "header",
+        "name" : "Content-Type",
+        "note" : "an ordinary header"
+      },
+      {
+        "expected" : "https://api.example.com/v1/models?q=1&tok=••••…wxyz",
+        "input" : "https://api.example.com/v1/models?q=1&tok=sk-live-abcdef1234567890wxyz",
+        "kind" : "url",
+        "note" : "a query value carrying a stored key under an ordinary name"
+      },
+      {
+        "expected" : "{\"error\":{\"message\":\"Incorrect API key provided: ••••…wxyz\",\"code\":\"invalid_api_key\"}}",
+        "input" : "{\"error\":{\"message\":\"Incorrect API key provided: sk-live-abcdef1234567890wxyz\",\"code\":\"invalid_api_key\"}}",
+        "kind" : "text",
+        "note" : "a 401 body that echoes the key"
+      },
+      {
+        "expected" : "token ••••…eyQ1 and again ••••…eyQ1.",
+        "input" : "token BSAbrave0000000000keyQ1 and again BSAbrave0000000000keyQ1.",
+        "kind" : "text",
+        "note" : "the Brave key in a tool result, twice"
+      },
+      {
+        "expected" : "HTTP 401 unauthorized",
+        "input" : "HTTP 401 unauthorized",
+        "kind" : "text",
+        "note" : "text with no key is unchanged"
+      }
+    ],
+    "rule" : "On the copy path a credential keeps its scheme and its last four characters: \"Bearer ••••…wxyz\"; a secret under 8 characters is \"••••\". A header is a credential when its name is authorization, x-subscription-token, x-api-key or api-key, when its name is a provider's configured auth header name, or when its value contains a stored key. A URL query value is masked when its name is credential-shaped or it contains a stored key. All copied text has every stored key (8+ characters, longest first) replaced by its mask.",
+    "storedSecrets" : [
+      "sk-live-abcdef1234567890wxyz",
+      "BSAbrave0000000000keyQ1",
+      "short"
+    ]
+  }
+}

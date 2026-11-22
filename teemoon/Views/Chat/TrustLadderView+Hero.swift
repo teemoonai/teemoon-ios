@@ -36,13 +36,7 @@ extension TrustLadderView {
     }
 
     var heroColor: Color {
-        // A published LEAKS review demotes a green hero to advisory: the
-        // cryptographic seal still passes (so never red — red is positive
-        // evidence of an integrity break), but "only it can read this" cannot
-        // render green over a review that found the operator's logs get a
-        // copy. Audit `incomplete` deliberately does NOT touch the hero:
-        // absence of review is not evidence against the seal, and the gray
-        // chain node already carries it.
+        // A LEAKS review or unchecked code demotes green to orange, never red (the seal still passes); `incomplete` doesn't.
         if summary.headerSeverity == .ok, modelNodeAuditState == .leaks { return .orange }
         if summary.headerSeverity == .ok, summary.provenanceState == .unchecked { return .orange }
         switch summary.headerSeverity {
@@ -77,7 +71,7 @@ extension TrustLadderView {
 
     func chainSection(_ proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("how your words reach \(modelName) and come back — with no one else able to read them")
+            Text("how your words reach \(modelName), sealed to its enclave key")
                 .font(.subheadline).fontWeight(.semibold)
                 .fixedSize(horizontal: false, vertical: true)
             ChainRailView(nodes: chainNodes, rung: rung, onJump: { node in
@@ -94,6 +88,7 @@ extension TrustLadderView {
                 }
             })
         }
+        .id("chain")
     }
 
     /// The plaintext→model chain. Two curated shapes disclosed by rung — the
@@ -138,7 +133,10 @@ extension TrustLadderView {
         ModelNodeAudit.state(groups: enclaveGroups, hasAttestation: session.attestation != nil,
                              chatPath: session.trustScope?.chatPath,
                              runningSources: session.trustScope?.running.map(\.service.source) ?? [],
-                             composeManager: session.trustScope?.composeManager)
+                             composeManager: session.trustScope?.composeManager,
+                             listed: session.attestation?.modelCandidates,
+                             listFailed: session.attestation?.modelCandidatesListFailed == true,
+                             listedScopes: session.listedTrustScopes)
     }
     var modelNodeAuditState: EverydayAuditState? { modelNodeAudit.state }
 
@@ -163,7 +161,7 @@ extension TrustLadderView {
                 value: "ed25519:\(key.hexString.prefix(12))…",
                 copyValue: key.hexString,
                 everydayTitle: "\(DeviceNoun.subject) locks this chat to \(modelName)",
-                everydayDetail: "before anything leaves your device, it's sealed so only \(modelName) can open it."))
+                everydayDetail: "before anything leaves your device, it's sealed to \(modelName)'s enclave key."))
         } else {
             nodes.append(ChainNode(id: "target", status: verifying ? .pending : .fail,
                 title: "encryption target · Ed25519 public key",
@@ -178,11 +176,12 @@ extension TrustLadderView {
         // quote's report_data.
         switch summary.e2eeKeyBound {
         case .some(true):
-            nodes.append(ChainNode(id: "bound", status: summary.hardwareChecksPending ? .pending : .ok,
+            nodes.append(ChainNode(id: "bound",
+                status: TrustVerdict.sealedStatus(hardwareChecksPending: summary.hardwareChecksPending, listed: summary.listedEnclaves),
                 title: "key bound in the model's TDX quote",
-                detail: "that public key sits in `report_data` of \(modelName)'s hardware quote — the private half never leaves the enclave. no one else (gateway, operator, near.ai) can decrypt.",
-                everydayTitle: "only \(modelName) holds the key",
-                everydayDetail: "the key to open your chat lives inside \(modelName)'s sealed chip and never leaves it — not near.ai, not the network, nobody else can read your message."))
+                detail: KeyCustodyCopy.keyInQuoteExpert(model: modelName, listed: summary.listedEnclaves),
+                everydayTitle: KeyCustodyCopy.keyHeldEverydayTitle,
+                everydayDetail: KeyCustodyCopy.keyHeldEveryday(listed: summary.listedEnclaves)))
         case .some(false) where summary.keyInUnverifiedQuote:
             nodes.append(ChainNode(id: "bound", status: .fail,
                 title: "key in report_data, but the quote didn't verify",
@@ -254,13 +253,7 @@ extension TrustLadderView {
                 everydayDetail: "checking the software against its published source…"))
         }
 
-        // NB: no standalone "only <model> can decrypt" node here (matches Claude
-        // Design). Confidentiality is stated once at its evidence — the
-        // key-binding node above ("no one else … can decrypt") — and named
-        // per-row in the known-code section (the "sees your message" capsules +
-        // group caption). A separate chain node repeated the same claim without
-        // new evidence, so it's intentionally absent. The "known code ↓" jump is
-        // preserved on the `source` node above.
+        // No standalone "who can decrypt" node: the key-binding node above states custody once, at its evidence.
 
         // The return trip — every reply comes back signed. Chain terminus,
         // carrying the enclave signing address you can recover any reply against.
@@ -276,7 +269,7 @@ extension TrustLadderView {
                 nodes.append(ChainNode(id: "signed", status: verifying ? .pending : .ok,
                     title: verifying ? "checking each reply's signature" : "every reply comes back signed",
                     detail: verifying ? "recovering each reply to the enclave signing key…"
-                                      : "each reply is signed by a key that never leaves the enclave — recover any message to check it yourself.",
+                                      : KeyCustodyCopy.replySignedExpert,
                     value: "\(addr.prefix(6))…\(addr.suffix(4))",
                     copyValue: addr))
             }

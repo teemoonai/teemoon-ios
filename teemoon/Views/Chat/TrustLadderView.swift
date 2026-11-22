@@ -3,10 +3,9 @@
 //  teemoon
 //
 //  The "who can read this?" screen — the SwiftUI port of Direction D (trust
-//  ladder). It answers one load-bearing question — "my plaintext is reachable
-//  only by a specific, known model, and no one else holds the key" — and backs
-//  it with a connected chain of evidence, disclosed at the reader's chosen rung
-//  (everyday / expert).
+//  ladder). It answers one load-bearing question — "what is my message sealed
+//  to, and who holds that key" — and backs it with a connected chain of
+//  evidence, disclosed at the reader's chosen rung (everyday / expert).
 //
 //  The chain is disclosed at two rungs: `everydayChain` is a curated five-node
 //  story (your message → sealed to the model → it's the real published model →
@@ -60,11 +59,9 @@ struct TrustLadderView: View {
 
     init(initialRung: TrustRung? = nil, initialScroll: String? = nil, showsRungPicker: Bool = true) {
         self.showsRungPicker = showsRungPicker
-        #if os(iOS)
+        #if os(iOS) && DEBUG
         _rung = State(initialValue: initialRung ?? DesignTour.initialRung ?? .everyday)
         #else
-        // DesignTour is the iOS capture harness — `simctl launch` flags. Its
-        // absence changes nothing a user sees; the default rung is the same.
         _rung = State(initialValue: initialRung ?? .everyday)
         #endif
         self.initialScroll = initialScroll
@@ -79,11 +76,12 @@ struct TrustLadderView: View {
             gatewayTrustResponseCount: session.gatewayTrustResponseCount,
             attestationFetchFailed: session.attestationFetchFailed, imageProvenance: session.imageProvenance,
             dcapVerification: session.dcapVerification, nrasVerification: session.gpuAttestation,
+            listedTrustScopes: session.listedTrustScopes,
             tlsAttestation: session.tlsAttestation,
             modelLayerVerification: session.modelLayerVerification,
             degradeIsHardFailure: session.degradeIsHardFailure,
             e2eeIntact: session.e2eeBindingIntact,
-            provenanceInconclusive: session.provenanceInconclusive)
+            provenanceInconclusive: session.provenanceInconclusive, deadlinePassed: session.deadlinePassed)
     }
 
     /// Everyday claims live on `TrustVerdict`. This view renders them.
@@ -100,6 +98,7 @@ struct TrustLadderView: View {
             isSelfHosted: isSelfHosted,
             e2eeKeyBound: summary.e2eeKeyBound,
             hardwareChecksPending: summary.hardwareChecksPending,
+            listedEnclaves: summary.listedEnclaves,
             provenanceState: summary.provenanceState,
             provenanceDetail: summary.provenanceDetail,
             responseSigState: summary.responseSigState,
@@ -233,7 +232,7 @@ struct TrustLadderView: View {
                 // fetch the audit index so digest-gated "audit" links can
                 // appear on known-code rows (no entry -> no link, fail closed)
                 AuditIndex.shared.loadIfNeeded()
-                #if os(iOS)
+                #if os(iOS) && DEBUG
                 let target = DesignTour.scrollTarget ?? initialScroll ?? (DesignTour.scrollToBottom ? "known code" : nil)
                 #else
                 let target = initialScroll

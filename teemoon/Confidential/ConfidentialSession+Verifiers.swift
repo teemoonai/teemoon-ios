@@ -156,13 +156,20 @@ extension ConfidentialSession {
         }
     }
 
+    /// The record's DCAP verdicts and its trust scopes, on one DCAP pass: a quote both ask about goes to Intel once.
+    func verifyQuotes(for record: AttestationRecord) {
+        let dcap = dcapService.forOneRecord()
+        verifyDCAP(for: record, using: dcap)
+        verifyTrustScope(for: record, using: dcap)
+    }
+
     /// Runs real DCAP verification over the record's quotes (async, off the
     /// attestation fetch — it needs Intel PCS collateral). Fail-closed: a
     /// hard failure degrades the security state via `attestationState`.
-    func verifyDCAP(for record: AttestationRecord) {
+    func verifyDCAP(for record: AttestationRecord, using dcap: DCAPService? = nil) {
         dcapTask?.cancel()
         dcapVerification = nil
-        let service = dcapService
+        let service = dcap ?? dcapService
         dcapTask = Task { [weak self] in
             let result = await service.verify(record: record)
             guard !Task.isCancelled else { return }
@@ -175,16 +182,29 @@ extension ConfidentialSession {
 
     /// Trust scope for the GPU node's report. Always answers once started (an unreadable report reads as not
     /// bound and no boot log), or `verdictsPending` would wait on it forever.
-    func verifyTrustScope(for record: AttestationRecord) {
+    func verifyTrustScope(for record: AttestationRecord, using dcap: DCAPService? = nil) {
         trustScopeTask?.cancel()
         trustScope = nil
         trustScopeTask = nil
-        guard let json = record.gpuNodeReportJSON, let quote = record.gpuIntelQuote, !quote.isEmpty else { return }
-        let service = dcapService
+        listedTrustScopeTask?.cancel()
+        listedTrustScopes = nil
+        listedTrustScopeTask = nil
+        let service = dcap ?? dcapService
         let pairs = runningPairCheck
-        let nonce = record.gpuNonce
-        let host = record.gpuNodeHost
         let now = UInt64(record.fetchedAt.timeIntervalSince1970)
+        let host = record.gpuNodeHost
+        // Every listed enclave holds the sealed key: each gets the read enclave's trust scope (A4).
+        if let listed = record.modelCandidates, !listed.enclaves.isEmpty {
+            listedTrustScopeTask = Task { [weak self] in
+                let scopes = await ModelCandidates.trustScopes(listed, dcap: { await service.verify(quoteHex: $0, label: $1, nowSecs: now) },
+                                                               pairs: pairs, host: host)
+                guard !Task.isCancelled else { return }
+                self?.listedTrustScopes = scopes
+                if scopes.contains(where: \.hardBreak) { logger.warning("[trust-scope] listed enclave hard break — degrading session") }
+            }
+        }
+        guard let json = record.gpuNodeReportJSON, let quote = record.gpuIntelQuote, !quote.isEmpty else { return }
+        let nonce = record.gpuNonce
         trustScopeTask = Task { [weak self] in
             let node = await service.verify(quoteHex: quote, label: "gpu", nowSecs: now)
             let scope = await TrustScope.run(reportJSON: json, nodeQuoteHex: quote, nonceHex: nonce,
@@ -204,16 +224,38 @@ extension ConfidentialSession {
         gpuAttestation = nil
         // A cancelled handle left here reads as pending in `verdictsPending` for the new record's whole life.
         nrasTask = nil
-        guard let payload = record.nvidiaPayload, !payload.isEmpty else {
-            if record.modelIntelQuote?.isEmpty == false { gpuAttestation = .inconclusive(NRASVerification.evidenceAbsent) }
+        let payload = record.nvidiaPayload.flatMap { $0.isEmpty ? nil : $0 }
+        let modelAbsent = payload == nil && record.modelIntelQuote?.isEmpty == false
+        // Every enclave near.ai lists holds the sealed key, so each one's GPU evidence is checked like the model leg's.
+        let listed = record.modelCandidates?.enclaves.map(\.nvidiaPayload) ?? []
+        let listNonce = record.modelCandidates?.nonce
+        guard payload != nil || !listed.isEmpty else {
+            if modelAbsent { gpuAttestation = .inconclusive(NRASVerification.evidenceAbsent) }
             return
         }
         let service = nrasService
         let nonce = record.modelNonce
         nrasTask = Task { [weak self] in
-            let result = await service.verify(payloadJSON: payload, expectedNonceHex: nonce)
+            let results = await withTaskGroup(of: (Int, NRASVerification).self) { group in
+                if let payload { group.addTask { (0, await service.verify(payloadJSON: payload, expectedNonceHex: nonce)) } }
+                for (i, p) in listed.enumerated() {
+                    group.addTask {
+                        guard let p, !p.isEmpty else { return (i + 1, .listedInconclusive(nvidia: NRASVerification.evidenceAbsent)) }
+                        // A listed enclave's rejection or couldn't-check names the listed enclaves, never the read one (A10).
+                        let verdict = await service.verify(payloadJSON: p, expectedNonceHex: listNonce)
+                        switch verdict {
+                        case .failed(let why): return (i + 1, .listedFailed(nvidia: why))
+                        case .inconclusive(let why): return (i + 1, .listedInconclusive(nvidia: why))
+                        default: return (i + 1, verdict)
+                        }
+                    }
+                }
+                var out: [(Int, NRASVerification)] = []
+                for await r in group { out.append(r) }
+                return out.sorted { $0.0 < $1.0 }.map(\.1)
+            }
             guard !Task.isCancelled else { return }
-            self?.gpuAttestation = result
+            self?.gpuAttestation = NRASVerification.worst((modelAbsent ? [.inconclusive(NRASVerification.evidenceAbsent)] : []) + results)
         }
     }
 

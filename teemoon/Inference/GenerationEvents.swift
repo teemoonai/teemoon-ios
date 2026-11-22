@@ -88,5 +88,7 @@ final class LockedBox<Value>: @unchecked Sendable {
         get { lock.withLock { _value } }
         set { lock.withLock { _value = newValue } }
     }
+    /// Read and write under one lock.
+    func withValue<R>(_ body: (inout Value) -> R) -> R { lock.withLock { body(&_value) } }
 }
 

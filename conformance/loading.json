@@ -1,0 +1,247 @@
+{
+  "fixtureClass" : "loading",
+  "kitVersion" : "0.5.6",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "cases" : [
+      {
+        "cachePresent" : true,
+        "imageCapable" : true,
+        "name" : "resident-engine-no-load",
+        "note" : "the engine was already loaded: only the thinking clock",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "line" : "thinking…"
+          },
+          {
+            "atMs" : 999,
+            "line" : "thinking…"
+          },
+          {
+            "atMs" : 1000,
+            "line" : "thinking… 1s"
+          },
+          {
+            "atMs" : 5400,
+            "line" : "thinking… 5s"
+          }
+        ]
+      },
+      {
+        "cachePresent" : false,
+        "imageCapable" : true,
+        "loadEndsAtMs" : 61000,
+        "loadStartMs" : 200,
+        "name" : "image-first-load",
+        "note" : "no cache: the images line from the load's start to its end, then the clock from the send",
+        "probes" : [
+          {
+            "atMs" : 100,
+            "line" : "thinking…"
+          },
+          {
+            "atMs" : 200,
+            "line" : "preparing the model for images… this happens once"
+          },
+          {
+            "atMs" : 3200,
+            "line" : "preparing the model for images… this happens once"
+          },
+          {
+            "atMs" : 60999,
+            "line" : "preparing the model for images… this happens once"
+          },
+          {
+            "atMs" : 61000,
+            "line" : "thinking… 61s"
+          }
+        ]
+      },
+      {
+        "cachePresent" : true,
+        "imageCapable" : true,
+        "loadEndsAtMs" : 2800,
+        "loadStartMs" : 0,
+        "name" : "image-cached-quick",
+        "note" : "cached, done under 3 s: no loading line at all",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "line" : "thinking…"
+          },
+          {
+            "atMs" : 2799,
+            "line" : "thinking… 2s"
+          },
+          {
+            "atMs" : 2800,
+            "line" : "thinking… 2s"
+          },
+          {
+            "atMs" : 4000,
+            "line" : "thinking… 4s"
+          }
+        ]
+      },
+      {
+        "cachePresent" : true,
+        "imageCapable" : true,
+        "loadEndsAtMs" : 8000,
+        "loadStartMs" : 500,
+        "name" : "image-cached-slow",
+        "note" : "cached but slow: the plain loading line from 3 s after the load's start",
+        "probes" : [
+          {
+            "atMs" : 3499,
+            "line" : "thinking… 3s"
+          },
+          {
+            "atMs" : 3500,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 7999,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 8000,
+            "line" : "thinking… 8s"
+          }
+        ]
+      },
+      {
+        "cachePresent" : true,
+        "imageCapable" : true,
+        "loadEndsAtMs" : 40000,
+        "loadStartMs" : 0,
+        "name" : "image-rebuild-before-3s",
+        "note" : "a cache rewritten 1.2 s in: straight to the images line, never the loading line",
+        "probes" : [
+          {
+            "atMs" : 1199,
+            "line" : "thinking… 1s"
+          },
+          {
+            "atMs" : 1200,
+            "line" : "preparing the model for images… this happens once"
+          },
+          {
+            "atMs" : 3000,
+            "line" : "preparing the model for images… this happens once"
+          },
+          {
+            "atMs" : 40000,
+            "line" : "thinking… 40s"
+          }
+        ],
+        "rebuildSeenAtMs" : 1200
+      },
+      {
+        "cachePresent" : true,
+        "imageCapable" : true,
+        "loadEndsAtMs" : 30000,
+        "loadStartMs" : 0,
+        "name" : "image-rebuild-after-3s",
+        "note" : "rebuild seen 5 s in: the loading line first, then the images line to the end",
+        "probes" : [
+          {
+            "atMs" : 3000,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 4999,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 5000,
+            "line" : "preparing the model for images… this happens once"
+          },
+          {
+            "atMs" : 29999,
+            "line" : "preparing the model for images… this happens once"
+          }
+        ],
+        "rebuildSeenAtMs" : 5000
+      },
+      {
+        "cachePresent" : false,
+        "imageCapable" : false,
+        "loadEndsAtMs" : 23000,
+        "loadStartMs" : 0,
+        "name" : "text-only-first-load",
+        "note" : "not image-capable: a first load never shows the images line",
+        "probes" : [
+          {
+            "atMs" : 2999,
+            "line" : "thinking… 2s"
+          },
+          {
+            "atMs" : 3000,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 22999,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 23000,
+            "line" : "thinking… 23s"
+          }
+        ]
+      },
+      {
+        "cachePresent" : true,
+        "imageCapable" : false,
+        "loadEndsAtMs" : 20000,
+        "loadStartMs" : 0,
+        "name" : "text-only-rebuild",
+        "note" : "not image-capable, cache rewritten: still only the loading line after 3 s",
+        "probes" : [
+          {
+            "atMs" : 1000,
+            "line" : "thinking… 1s"
+          },
+          {
+            "atMs" : 3000,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 20000,
+            "line" : "thinking… 20s"
+          }
+        ],
+        "rebuildSeenAtMs" : 1000
+      },
+      {
+        "cachePresent" : true,
+        "imageCapable" : true,
+        "loadEndsAtMs" : 4000,
+        "loadStartMs" : -2500,
+        "name" : "queued-behind-a-load",
+        "note" : "the load started before the send (pre-warm): 3 s counts from the load's start, so negative",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "line" : "thinking…"
+          },
+          {
+            "atMs" : 499,
+            "line" : "thinking…"
+          },
+          {
+            "atMs" : 500,
+            "line" : "loading the model…"
+          },
+          {
+            "atMs" : 4000,
+            "line" : "thinking… 4s"
+          }
+        ]
+      }
+    ],
+    "harness" : "For each probe, line(atMs, case) must equal the probe's line exactly.",
+    "quietMs" : 3000,
+    "rule" : "Times are ms from the send. Outside a load (before loadStartMs, from loadEndsAtMs on, or no load at all) the line is the thinking clock counted from the send: \"thinking…\" under 1 s, else \"thinking… Ns\" with N = floor(atMs / 1000). During a load, a load is a rebuild when no cache for the current bundle existed at its start, or from the moment a cache file is created or rewritten during it (rebuildSeenAtMs). An image-capable rebuild shows \"preparing the model for images… this happens once\" from that moment to the load's end. Any other load shows the thinking clock until quietMs after loadStartMs, then \"loading the model…\". \"Cache present for this bundle\" is each platform's own test; only the bool is shared."
+  }
+}

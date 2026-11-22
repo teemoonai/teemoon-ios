@@ -7,6 +7,7 @@
 //  gave the tools a new order on every send and the second send cached 0.
 //
 
+import CryptoKit
 import Foundation
 import Testing
 @testable import teemoon
@@ -91,6 +92,17 @@ struct ConformanceRequestBytesTests {
         let escaped = String(decoding: try JSONSerialization.data(withJSONObject: [lastShared]), as: UTF8.self).dropFirst().dropLast()
         #expect(String(decoding: two[..<v.commonPrefixBytes], as: UTF8.self).contains(escaped))
         #expect(v.turn1Body.contains(ConformanceRequestVectors.fixedDay), "the tool's date is fixed in the fixture")
+    }
+
+    /// 1.1.1 touches the request path only to arm a sealed model (HTTPTransport, after the body is built), so the
+    /// chat request must be 1.1.0's bytes: the sha256 of tf/1.1.0-62's conformance/requests.json bodies.
+    @Test func theRequestBytesAre110s() async throws {
+        let v = try await ConformanceRequestVectors.requests()
+        func sha(_ s: String) -> String { SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined() }
+        #expect(v.turn1Body.utf8.count == 2538)
+        #expect(sha(v.turn1Body) == "eb18cab3f5efce4d73b650c5958004e54ed6bf59c596df0c4425cfc042d887a2")
+        #expect(v.turn2Body.utf8.count == 2714)
+        #expect(sha(v.turn2Body) == "fa14ca7bb484851f9ed69e4d4228d8081cb582efba9522f0986caada3b4ef34f")
     }
 
     @Test func theCommittedFixtureMatchesProduction() async throws {

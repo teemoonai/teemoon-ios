@@ -78,6 +78,8 @@ struct AttestationSummary {
     var dcapVerification: RecordDCAPVerification? = nil
     /// NVIDIA NRAS outcome for the record's GPU evidence (nil = pending).
     var nrasVerification: NRASVerification? = nil
+    /// Trust scope for each listed enclave (nil = pending or no list).
+    var listedTrustScopes: [TrustScope]? = nil
     /// teemoon's separate TLS probe of the model node's direct host, not the chat's gateway connection (nil = pending).
     var tlsAttestation: TLSAttestation? = nil
     /// Verdict of the model-layer (inner) compose hash check (nil = pending /
@@ -104,6 +106,8 @@ struct AttestationSummary {
     var e2eeIntact: Bool = false
     /// `ConfidentialSession.provenanceInconclusive`: the code check settled without an answer.
     var provenanceInconclusive: Bool = false
+    /// `ConfidentialSession.deadlinePassed`: a listed check still missing then reads "couldn't finish", never "checking".
+    var deadlinePassed: Bool = false
     /// `ModelNodeAudit`: "only you … can read" is said only over a reviewed build (trust-leaks-wording).
     var auditState: EverydayAuditState? = nil
     var leaksExposure: String? = nil
@@ -177,7 +181,7 @@ struct AttestationSummary {
                 if auditState == .leaks, let leaksExposure { return "\(AuditedSealText.leaksLead) \(leaksExposure)" }
                 if provenanceState == .unchecked { return ProvenanceUncheckedText.header }
                 guard auditState == .reviewed else { return AuditedSealText.notReviewed }
-                return "only you and the attested TEE hardware can read these messages."
+                return "sealed to the attested enclave key. near.ai's key service decides which enclaves hold it."
             }
         case .degraded:
             if degradeIsHardFailure {
@@ -303,6 +307,10 @@ struct AttestationSummary {
         attestation?.e2eeKeyInModelReportData == true && attestation?.modelQuoteVerification?.isVerified == false
     }
 
+    /// The enclaves near.ai lists for the model, as the key-custody lines word them (A7).
+    var listedEnclaves: KeyCustodyCopy.Listed { KeyCustodyCopy.listed(record: attestation, dcap: dcapVerification, gpu: nrasVerification,
+                                                                       scopes: listedTrustScopes, deadlinePassed: deadlinePassed) }
+
     /// DCAP or NVIDIA hasn't answered: the seal can't be claimed yet, however the key binding reads (Q4).
     var hardwareChecksPending: Bool {
         [dcapState, nrasState].contains { $0 == .live || $0 == .pending }
@@ -323,7 +331,14 @@ struct AttestationSummary {
     }
 
     /// The expert card's GPU row is NVIDIA's result in every state; never the GPU node's Intel TDX line.
-    var gpuRowDetail: String { nrasDetail }
+    /// A listed enclave's rejection or couldn't-check keeps NVIDIA's own reason here, and only here.
+    var gpuRowDetail: String {
+        if case .listedFailed(let nvidia)? = nrasVerification { return "\(nrasDetail) \(nvidia)" }
+        if case .listedInconclusive(let nvidia)? = nrasVerification {
+            return "\(nrasDetail) \(nvidia == NRASVerification.evidenceAbsent ? Self.noNVIDIAEvidence : nvidia)"
+        }
+        return nrasDetail
+    }
 
     /// Response ECDSA signature — true if all verified, false if any mismatch, nil if no data yet.
     /// Gateway-trust-only responses surface the row (data exists) but never turn it green
@@ -460,8 +475,8 @@ struct AttestationSummary {
         switch nrasVerification {
         case .verified: return .done
         // An unreachable NVIDIA couldn't check (orange); only a rejection is red (near-send-gate-rule).
-        case .failed: return .stuck
-        case .inconclusive: return .unchecked
+        case .failed, .listedFailed: return .stuck
+        case .inconclusive, .listedInconclusive: return .unchecked
         case nil: return state == .verifying ? .live : .pending
         }
     }
@@ -491,6 +506,8 @@ struct AttestationSummary {
         case .verified: return "NVIDIA confirmed genuine attested GPUs for this request"
         case .inconclusive(NRASVerification.evidenceAbsent): return Self.noNVIDIAEvidence
         case .failed(let reason), .inconclusive(let reason): return reason
+        case .listedInconclusive: return KeyCustodyCopy.listedSentence(.unfinished)
+        case .listedFailed: return ListedEnclaveReason.enclaveFailed
         case nil: return "Checking GPU evidence with NVIDIA…"
         }
     }
@@ -653,16 +670,16 @@ struct AttestationSummary {
                     : "The model runs inside its own attested enclave"),
             row("Encryption key bound to TEE", e2eeKeyBound,
                 detail: e2eeKeyBound == false ? "Ed25519 key not in model TDX report_data"
-                    : "The key was generated inside that enclave"),
+                    : "The key is in that enclave's hardware quote"),
             row("Signing key bound to hardware", keyBoundToHardware,
                 detail: keyBoundToHardware == false ? "Address not in TDX report_data"
-                    : "The response-signing key lives in the enclave"),
+                    : "The response-signing key is in that enclave's hardware quote"),
             row("Response signatures", responseSigState, detail: responseSigDetail),
         ].compactMap { $0 }
         let st = pillarState(checks)
         let line: String
         switch st {
-        case .verified:  line = "Messages are end-to-end encrypted to this specific enclave — only it can read them."
+        case .verified:  line = "Messages are end-to-end encrypted to this enclave's key. near.ai's key service can give that key to other enclaves; teemoon checks the ones near.ai lists."
         case .attention: line = privacyAttentionLine
         case .checking:  line = "Establishing the encrypted channel to the model enclave…"
         }
@@ -686,7 +703,7 @@ struct AttestationSummary {
     /// existing E2EE fail detail where it's meaningful.
     private var privacyAttentionLine: String {
         if attestation?.modelEd25519PubKey == nil {
-            return "Encryption to the model is unavailable right now — messages use TLS to the verified enclave."
+            return "Encryption to the model is unavailable right now — messages go to near.ai's gateway over ordinary TLS, not sealed to the model."
         }
         if lastRequestUsedE2EE == false, let reason = lastE2EEFailReason { return reason }
         return "The model’s encryption could not be fully verified."
@@ -719,7 +736,9 @@ struct AttestationSummary {
         switch nrasVerification {
         case .verified:              return "NVIDIA verdict PASS · evidence nonce matched"
         case .failed(let why):       return "failed — \(why)"
+        case .listedFailed:          return "failed — \(ListedEnclaveReason.enclaveFailed)"
         case .inconclusive(let why): return "couldn't complete — \(why)"
+        case .listedInconclusive:    return "couldn't complete — \(KeyCustodyCopy.listedSentence(.unfinished))"
         case nil:                    return nil
         }
     }

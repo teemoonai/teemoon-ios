@@ -1,0 +1,178 @@
+{
+  "fixtureClass" : "errorcopy",
+  "kitVersion" : "0.5.5",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "catchAll" : "something went wrong talking to {provider}. the details are below.",
+    "network" : [
+      {
+        "answerStarted" : false,
+        "line" : "{provider} took too long to answer. try again.",
+        "note" : "no answer before the request timed out",
+        "selfHosted" : false,
+        "urlErrorCode" : -1001
+      },
+      {
+        "answerStarted" : true,
+        "line" : "{provider} stopped partway through the answer. try again.",
+        "note" : "the stream stalled after text was shown (the stall watchdog)",
+        "selfHosted" : false,
+        "urlErrorCode" : -1001
+      },
+      {
+        "answerStarted" : false,
+        "line" : "no connection, so nothing was sent. try again when you're online.",
+        "note" : "no internet",
+        "selfHosted" : false,
+        "urlErrorCode" : -1009
+      },
+      {
+        "answerStarted" : false,
+        "line" : "no connection, so nothing was sent. try again when you're online.",
+        "note" : "mobile data off for the app",
+        "selfHosted" : false,
+        "urlErrorCode" : -1020
+      },
+      {
+        "answerStarted" : true,
+        "line" : "the connection dropped before {provider} finished. try again.",
+        "note" : "the connection dropped mid-answer",
+        "selfHosted" : false,
+        "urlErrorCode" : -1005
+      },
+      {
+        "answerStarted" : false,
+        "line" : "the connection dropped before {provider} finished. try again.",
+        "note" : "the connection dropped before any text",
+        "selfHosted" : false,
+        "urlErrorCode" : -1005
+      },
+      {
+        "answerStarted" : false,
+        "line" : "can't reach {provider}. check your connection and try again.",
+        "note" : "unknown host, cloud",
+        "selfHosted" : false,
+        "urlErrorCode" : -1003
+      },
+      {
+        "answerStarted" : false,
+        "line" : "can't reach {provider}. check your connection and try again.",
+        "note" : "refused, cloud",
+        "selfHosted" : false,
+        "urlErrorCode" : -1004
+      },
+      {
+        "answerStarted" : false,
+        "line" : "can't reach {provider}. check your connection and try again.",
+        "note" : "DNS failed, cloud",
+        "selfHosted" : false,
+        "urlErrorCode" : -1006
+      },
+      {
+        "answerStarted" : false,
+        "line" : "can't reach {provider}. is it on and on this network?",
+        "note" : "unknown host, home server",
+        "selfHosted" : true,
+        "urlErrorCode" : -1003
+      },
+      {
+        "answerStarted" : false,
+        "line" : "can't reach {provider}. is it on and on this network?",
+        "note" : "refused, home server",
+        "selfHosted" : true,
+        "urlErrorCode" : -1004
+      },
+      {
+        "answerStarted" : false,
+        "line" : "can't reach {provider}. is it on and on this network?",
+        "note" : "DNS failed, home server",
+        "selfHosted" : true,
+        "urlErrorCode" : -1006
+      },
+      {
+        "answerStarted" : false,
+        "line" : "couldn't open a secure connection to {provider}, so nothing was sent.",
+        "note" : "TLS handshake failed",
+        "selfHosted" : false,
+        "urlErrorCode" : -1200
+      },
+      {
+        "answerStarted" : false,
+        "line" : "couldn't open a secure connection to {provider}, so nothing was sent.",
+        "note" : "untrusted certificate",
+        "selfHosted" : false,
+        "urlErrorCode" : -1202
+      },
+      {
+        "answerStarted" : false,
+        "line" : "couldn't open a secure connection to {provider}, so nothing was sent.",
+        "note" : "certificate has a bad date",
+        "selfHosted" : false,
+        "urlErrorCode" : -1201
+      },
+      {
+        "answerStarted" : false,
+        "line" : "couldn't open a secure connection to {provider}, so nothing was sent.",
+        "note" : "certificate has an unknown root",
+        "selfHosted" : false,
+        "urlErrorCode" : -1203
+      },
+      {
+        "answerStarted" : false,
+        "line" : "couldn't open a secure connection to {provider}, so nothing was sent.",
+        "note" : "certificate not yet valid",
+        "selfHosted" : false,
+        "urlErrorCode" : -1204
+      },
+      {
+        "answerStarted" : false,
+        "line" : "something went wrong talking to {provider}. the details are below.",
+        "note" : "anything else",
+        "selfHosted" : false,
+        "urlErrorCode" : -1011
+      },
+      {
+        "answerStarted" : false,
+        "line" : "{provider} took too long to answer. try again.",
+        "note" : "a timeout on a home server is still a timeout",
+        "selfHosted" : true,
+        "urlErrorCode" : -1001
+      }
+    ],
+    "rule" : "A URLError is classified by its code: timedOut (before any answer) and timedOut after part of the answer was shown are different lines; notConnectedToInternet and dataNotAllowed are offline; networkConnectionLost is a dropped connection; cannotFindHost, cannotConnectToHost and dnsLookupFailed are unreachable, worded for a home server when the provider is self-hosted; secureConnectionFailed and the certificate codes are an insecure connection. Any other failure that is not already a worded error shows the catch-all, with the details on the card below it.",
+    "status" : [
+      {
+        "line" : "{provider} rejected the request (http 401). your api key may be invalid or missing.",
+        "status" : 401
+      },
+      {
+        "line" : "{provider} has no credits, or the balance is too low (http 402). add credits, then retry.",
+        "status" : 402
+      },
+      {
+        "line" : "{provider} denied access (http 403). your api key may not have permission for this model.",
+        "status" : 403
+      },
+      {
+        "line" : "{provider} endpoint not found (http 404). check the server address in settings → places & keys.",
+        "status" : 404
+      },
+      {
+        "line" : "{provider} rejected the request format (http 422). the model name may be invalid.",
+        "status" : 422
+      },
+      {
+        "line" : "{provider} rate limit reached (http 429). try again in a moment.",
+        "status" : 429
+      },
+      {
+        "line" : "{provider} server error (http 503). the service may be down for a moment.",
+        "status" : 503
+      },
+      {
+        "line" : "{provider} returned an error (http 418).",
+        "status" : 418
+      }
+    ]
+  }
+}

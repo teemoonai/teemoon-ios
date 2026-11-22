@@ -24,6 +24,23 @@ actor RunningPairCheck {
     }
 
     static let repo = "nearai/cvm-compose-files"
+    /// GitHub fetches one action log may make (one `TrustScope.run`): about twice the 99 compose files the largest
+    /// live log named (2026-11-20 capture, RunningPairBudgetTests). Over it a file is couldn't-check, never a pass.
+    static let fetchBudget = 200
+
+    /// Fetches left for one action log; its concurrent fetches share it.
+    final class Budget: Sendable {
+        private let left: LockedBox<Int>
+        init(_ fetches: Int = RunningPairCheck.fetchBudget) { left = LockedBox(fetches) }
+        /// One fetch, or false once spent.
+        func take() -> Bool {
+            left.withValue { n in
+                guard n > 0 else { return false }
+                n -= 1
+                return true
+            }
+        }
+    }
 
     private let session: URLSession
     private let defaults: UserDefaults
@@ -42,22 +59,22 @@ actor RunningPairCheck {
         URL(string: "https://raw.githubusercontent.com/\(repo)/\(source.commit)/\(source.file)")
     }
 
-    func check(_ source: ActionLogReading.Source) async -> Outcome {
-        await resolve(source, needBody: false).outcome
+    func check(_ source: ActionLogReading.Source, budget: Budget = Budget()) async -> Outcome {
+        await resolve(source, needBody: false, budget: budget).outcome
     }
 
     /// A whole-file entry's services, read from the file at its commit once its hash checks. nil when it
     /// can't be read or doesn't match; the pair check then says which. The log pins no hash on a down, so a
     /// down's file is read at its commit unhashed, as audit's tool does: it only retires, never lists.
-    func serviceNames(_ source: ActionLogReading.Source) async -> [String]? {
+    func serviceNames(_ source: ActionLogReading.Source, budget: Budget = Budget()) async -> [String]? {
         let key = Self.key(source)
         if let names = (defaults.dictionary(forKey: Self.namesKey) as? [String: [String]])?[key] { return names }
         let body: Data
         if source.fileSHA256.isEmpty {
-            guard let url = Self.url(for: source), let (data, status) = await fetch(url), status == 200 else { return nil }
+            guard let url = Self.url(for: source), let (data, status) = await fetch(url, budget: budget), status == 200 else { return nil }
             body = data
         } else {
-            guard case (.verified, let data?) = await resolve(source, needBody: true) else { return nil }
+            guard case (.verified, let data?) = await resolve(source, needBody: true, budget: budget) else { return nil }
             body = data
         }
         guard let text = String(data: body, encoding: .utf8) else { return nil }
@@ -69,9 +86,9 @@ actor RunningPairCheck {
     }
 
     /// Every whole-file source at once, before the walk.
-    func serviceNames(for sources: [ActionLogReading.Source]) async -> [ActionLogReading.Source: [String]] {
+    func serviceNames(for sources: [ActionLogReading.Source], budget: Budget) async -> [ActionLogReading.Source: [String]] {
         await withTaskGroup(of: (ActionLogReading.Source, [String]?).self) { group in
-            for source in sources { group.addTask { (source, await self.serviceNames(source)) } }
+            for source in sources { group.addTask { (source, await self.serviceNames(source, budget: budget)) } }
             var out: [ActionLogReading.Source: [String]] = [:]
             for await (source, names) in group { out[source] = names }
             return out
@@ -82,12 +99,12 @@ actor RunningPairCheck {
     private var bodies: [String: Data] = [:]
 
     /// The running revisions' files, hash-checked, for the chat path. Missing entries couldn't be read.
-    func bodies(for sources: [ActionLogReading.Source]) async -> [ActionLogReading.Source: String] {
+    func bodies(for sources: [ActionLogReading.Source], budget: Budget) async -> [ActionLogReading.Source: String] {
         await withTaskGroup(of: (ActionLogReading.Source, String?).self) { group in
             for source in Set(sources) {
                 group.addTask {
                     if let data = await self.cachedBody(source) { return (source, String(data: data, encoding: .utf8)) }
-                    guard case (.verified, let data?) = await self.resolve(source, needBody: true) else { return (source, nil) }
+                    guard case (.verified, let data?) = await self.resolve(source, needBody: true, budget: budget) else { return (source, nil) }
                     return (source, String(data: data, encoding: .utf8))
                 }
             }
@@ -103,14 +120,14 @@ actor RunningPairCheck {
     private static func key(_ s: ActionLogReading.Source) -> String { "\(s.commit)|\(s.file)|\(s.fileSHA256)" }
 
     /// The outcome, and the body when this call fetched it. A cached outcome comes back without one.
-    private func resolve(_ source: ActionLogReading.Source, needBody: Bool) async -> (outcome: Outcome, body: Data?) {
+    private func resolve(_ source: ActionLogReading.Source, needBody: Bool, budget: Budget) async -> (outcome: Outcome, body: Data?) {
         let key = Self.key(source)
         if !needBody, let cached = (defaults.dictionary(forKey: Self.cacheKey) as? [String: String])?[key],
            let outcome = Outcome(rawValue: cached) {
             return (outcome, nil)
         }
         guard let url = Self.url(for: source),
-              let (data, status) = await fetch(url) else { return (.inconclusive, nil) }
+              let (data, status) = await fetch(url, budget: budget) else { return (.inconclusive, nil) }
         let outcome: Outcome
         switch status {
         case 200:
@@ -127,8 +144,9 @@ actor RunningPairCheck {
         return (outcome, data)
     }
 
-    /// The body and status, or nil when the deadline passed first or the request failed.
-    private func fetch(_ url: URL) async -> (Data, Int)? {
+    /// The body and status, or nil when the deadline passed first, the request failed or the log's budget is spent.
+    private func fetch(_ url: URL, budget: Budget) async -> (Data, Int)? {
+        guard budget.take() else { return nil }
         let session = self.session
         let timeout = self.timeout
         return await withTaskGroup(of: (Data, Int)?.self) { group in
@@ -147,11 +165,11 @@ actor RunningPairCheck {
     }
 
     /// Option A: every pair at once, each fetched once; past the cap, "not fetched". Order is kept.
-    func check(pairs: (check: [ActionLogReading.Source], notFetched: [ActionLogReading.Source]))
+    func check(pairs: (check: [ActionLogReading.Source], notFetched: [ActionLogReading.Source]), budget: Budget = Budget())
         async -> [(ActionLogReading.Source, Outcome)] {
         let outcomes = await withTaskGroup(of: (Int, Outcome).self) { group in
             for (i, source) in pairs.check.enumerated() {
-                group.addTask { (i, await self.check(source)) }
+                group.addTask { (i, await self.check(source, budget: budget)) }
             }
             var byIndex: [Int: Outcome] = [:]
             for await (i, outcome) in group { byIndex[i] = outcome }

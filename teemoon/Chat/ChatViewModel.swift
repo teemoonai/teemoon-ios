@@ -434,10 +434,22 @@ final class ChatViewModel {
         }
     }
 
+    /// The ask the send gate shows now. ChatView draws it on every redraw and its buttons carry this kind, so the kind
+    /// a tap answers is the ask on screen at the tap.
+    func e2eeAsk(session: ConfidentialSession) -> E2EEAsk {
+        session.e2eeAskTierDowngrade ?? E2EEAsk.make(
+            hardFailure: session.degradeIsHardFailure,
+            pendingAsk: hardwareConfirmRequested ? pendingAskKind : nil,
+            provenanceUnchecked: session.provenanceUncheckedAsks, softButSealed: session.softButSealed,
+            provenanceBlocked: session.provenanceBlockedButE2EEIntact, cause: session.e2eeDegradedReason,
+            deadlinePassed: session.deadlinePassed, enclaveListFailed: session.enclaveListFailedAsks)
+    }
+
     /// "send anyway": the held-back turn first, then a pending retry, else the composer as it is now.
-    func sendAnyway(currentThread: inout Thread?, modelContext: ModelContext, settings: AppSettings,
-                    providers: ProviderStore, session: ConfidentialSession, llm: ChatGeneration) {
-        session.rememberConfirmation(pending: hardwareConfirmRequested || session.sendPending)
+    /// `answering`: the kind of the ask the user tapped on, not the one the session would show now.
+    func sendAnyway(answering ask: E2EEAsk.Kind, currentThread: inout Thread?, modelContext: ModelContext,
+                    settings: AppSettings, providers: ProviderStore, session: ConfidentialSession, llm: ChatGeneration) {
+        session.rememberConfirmation(pending: hardwareConfirmRequested || session.sendPending, answering: ask)
         if let thread = currentThread, heldBackTurn(in: thread) != nil {
             generate(currentThread: &currentThread, modelContext: modelContext, settings: settings, providers: providers,
                      session: session, llm: llm, acceptedDegrade: true)

@@ -51,6 +51,9 @@ struct TrustScope: Equatable, Sendable {
     /// A running file that doesn't match its pinned hash.
     var runningMismatch: Bool { running.contains { $0.outcome == .mismatch } }
 
+    /// A listed enclave's log teemoon couldn't check: no compose-manager quote, or no boot log. Soft, never clean (A4).
+    var listedEvidenceAbsent: Bool { binding == .notBound || boot == .absent }
+
     /// Fail closed, like a replayed quote: the send is blocked.
     var hardBreak: Bool {
         if case .mismatch = binding { return true }
@@ -145,15 +148,21 @@ struct TrustScope: Equatable, Sendable {
         }
         // (c)
         if let actions {
-            let sources = Set(ActionLogReading.wholeFileSources(actions: actions) + ActionLogReading.upRevisionSources(actions: actions))
-            let names = await pairs.serviceNames(for: Array(sources))
-            let services = ActionLogReading.runningServices(actions: actions) { names[$0] }
-            let outcomes = await pairs.check(pairs: ActionLogReading.pairsToCheck(services))
-            let texts = binding == .bound ? await pairs.bodies(for: services.map(\.source)) : [:]
-            (scope.running, scope.chatPath) = runningSection(actions: actions, services: services, names: names, texts: texts,
-                                                             outcomes: outcomes, model: report["model_name"] as? String,
-                                                             host: binding == .bound ? host : nil)
+            (scope.running, scope.chatPath) = await running(actions: actions, bound: binding == .bound,
+                                                            model: report["model_name"] as? String, host: host, pairs: pairs)
         }
         return scope
+    }
+
+    /// (c): the compose files one action log names, every fetch out of one budget for that log.
+    static func running(actions: [[String: Any]], bound: Bool, model: String?, host: String?, pairs: RunningPairCheck,
+                        budget: RunningPairCheck.Budget = .init()) async -> ([RunningRow], ChatPath.Result?) {
+        let sources = Set(ActionLogReading.wholeFileSources(actions: actions) + ActionLogReading.upRevisionSources(actions: actions))
+        let names = await pairs.serviceNames(for: Array(sources), budget: budget)
+        let services = ActionLogReading.runningServices(actions: actions) { names[$0] }
+        let outcomes = await pairs.check(pairs: ActionLogReading.pairsToCheck(services), budget: budget)
+        let texts = bound ? await pairs.bodies(for: services.map(\.source), budget: budget) : [:]
+        return runningSection(actions: actions, services: services, names: names, texts: texts,
+                              outcomes: outcomes, model: model, host: bound ? host : nil)
     }
 }

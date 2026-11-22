@@ -261,7 +261,7 @@ final class UseCaseJourneysTests: XCTestCase {
         XCTAssertTrue((ProductE2E.composer(app).value as? String ?? "").contains("hello-anyway"), "don't send lost the draft")
         app.buttons["chat.send"].tap()
         XCTAssertTrue(dialog.waitForExistence(timeout: 10), "the second send did not ask")
-        let bypass = app.buttons["send unencrypted"].firstMatch
+        let bypass = app.buttons["send without encryption"].firstMatch
         XCTAssertTrue(bypass.waitForExistence(timeout: 5),
                       "a soft degrade offered no way to send: \(dialog.buttons.allElementsBoundByIndex.map(\.label))")
         bypass.tap()

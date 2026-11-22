@@ -145,10 +145,9 @@ extension ConfidentialSession {
     func adopt(_ record: AttestationRecord, for provider: Provider) {
         attestation = record
         verifyImageProvenance(for: record)
-        verifyDCAP(for: record)
+        verifyQuotes(for: record)
         verifyGPU(for: record)
         verifyTLS(for: provider)
-        verifyTrustScope(for: record)
     }
 
     /// Resets all attestation-derived display state on a provider/model switch
@@ -164,6 +163,8 @@ extension ConfidentialSession {
         tlsTask?.cancel(); tlsTask = nil
         trustScopeTask?.cancel(); trustScopeTask = nil
         trustScope = nil
+        listedTrustScopeTask?.cancel(); listedTrustScopeTask = nil
+        listedTrustScopes = nil
         attestation = nil
         noConfidentialEndpoint = false
         directHostMissing = false

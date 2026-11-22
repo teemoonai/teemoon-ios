@@ -407,7 +407,8 @@ struct ConfidentialSessionTests {
         func sealed(_ pending: Bool) -> TrustClaim? {
             TrustVerdict.make(.init(attestationState: .verifying, requiresConfirmation: false, degradeIsHardFailure: false,
                                     mismatchedResponseCount: 0, modelName: "m", quant: nil, providerDisplayName: "near.ai",
-                                    isLocal: false, isSelfHosted: false, e2eeKeyBound: true, hardwareChecksPending: pending))
+                                    isLocal: false, isSelfHosted: false, e2eeKeyBound: true, hardwareChecksPending: pending,
+                                    listedEnclaves: .checked))
                 .everydayClaims.first { $0.id == "sealed" }
         }
         #expect(sealed(true)?.status == .pending && sealed(false)?.status == .ok)
@@ -693,7 +694,7 @@ struct ConfidentialSessionTests {
     }
 
     /// The provenance-blocked-but-E2EE-intact discriminator drives the honest
-    /// send alert ("still encrypted — code unverified" vs "send unencrypted").
+    /// send alert ("still encrypted — code unverified" vs "send without encryption").
     /// It must be true exactly when provenance is the only blocking failure
     /// over an established E2EE binding (node-lottery 404 case), and false
     /// whenever provenance is fine or E2EE itself isn't established.

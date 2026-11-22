@@ -1,0 +1,433 @@
+{
+  "fixtureClass" : "catalogs",
+  "kitVersion" : "0.5.7",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "fireworks" : {
+      "models" : "{\n  \"models\": [\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"PRECISION_UNSPECIFIED\",\n        \"modelType\": \"deepseek_v4\",\n        \"moe\": true,\n        \"parameterCount\": \"284000000000\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 1048576,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-04-24T04:09:07.488210Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"DeepSeek-V4-Flash is a streamlined open-source Mixture-of-Experts model optimized for fast, cost-efficient inference while preserving strong reasoning and coding performance at 1M token context scale. It leverages the same hybrid attention innovations as Pro but is tuned for lower latency and higher throughput in real-time applications. It delivers near-Pro reasoning quality under sufficient compute budget, making it ideal for interactive agents and high-volume production workloads.\",\n      \"displayName\": \"DeepSeek-V4-Flash\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/deepseek-v4-flash\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": true,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 131072,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": true\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"PRECISION_UNSPECIFIED\",\n        \"modelType\": \"deepseek_v4\",\n        \"moe\": true,\n        \"parameterCount\": \"1600000000000\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 1048576,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-04-24T04:08:37.326161Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"DeepSeek-V4-Pro is a flagship open-source Mixture-of-Experts model designed for frontier reasoning, advanced coding, and long-context intelligence at scale (up to 1M tokens). It introduces a hybrid attention architecture that dramatically improves long-context efficiency while reducing KV and compute overhead, along with stability and training enhancements for deep multi-step reasoning. It represents a top-tier open-source system for complex agentic workflows, high-precision reasoning, and demanding production workloads.\",\n      \"displayName\": \"DeepSeek-V4-Pro\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/deepseek-v4-pro\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": false\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"FP8\",\n        \"modelType\": \"glm_moe_dsa\",\n        \"moe\": true,\n        \"parameterCount\": \"743911218432\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 202752,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-03-27T19:21:31.913585Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"GLM-5.1 is Z.ai's next-generation flagship model built for agentic engineering, with stronger coding capabilities and sustained performance over long-horizon tasks with hundreds of iteration rounds. It's a 754B-parameter MoE model\",\n      \"displayName\": \"GLM 5.1\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/zai-org/GLM-5.1-FP8\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/glm-5p1\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": true,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": true,\n      \"supportsImageInput\": false,\n      \"supportsLora\": true,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": true\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"BF16\",\n        \"modelType\": \"glm_moe_dsa\",\n        \"moe\": true,\n        \"parameterCount\": \"743911218432\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 1048576,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-06-16T17:18:13.939706Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"GLM-5.2 introduces a robust 1M-token context and advanced, multi-effort coding capabilities to significantly enhance performance on long-horizon tasks. Its new IndexShare architecture and improved MTP layer simultaneously boost efficiency by reducing per-token FLOPs and increasing speculative decoding lengths.\",\n      \"displayName\": \"GLM 5.2\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/zai-org/GLM-5.2\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/glm-5p2\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": true\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"FP4\",\n        \"modelType\": \"gpt_oss\",\n        \"moe\": true,\n        \"parameterCount\": \"116829156672\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 131072,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2025-08-04T22:13:20.599550Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"Welcome to the gpt-oss series, OpenAI's open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases. gpt-oss-120b is used for production, general purpose, high reasoning use-cases that fits into a single H100 GPU.\",\n      \"displayName\": \"OpenAI gpt-oss-120b\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/openai/gpt-oss-120b\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/gpt-oss-120b\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": true,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": true,\n      \"useTrainingV2\": false\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"FP4\",\n        \"modelType\": \"gpt_oss\",\n        \"moe\": true,\n        \"parameterCount\": \"20914757184\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 131072,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2025-08-04T22:11:06.445132Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"Welcome to the gpt-oss series, OpenAI's open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases. gpt-oss-20b is used for lower latency, and local or specialized use-cases.\",\n      \"displayName\": \"OpenAI gpt-oss-20b\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/openai/gpt-oss-20b\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/gpt-oss-20b\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": true,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"INTERNAL\",\n        \"message\": \"Internal error occurred, please contact the Fireworks AI team at https://discord.gg/fireworks-ai\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": false,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 131072,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": true,\n      \"useTrainingV2\": false\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"FP8\",\n        \"modelType\": \"kimi_k25\",\n        \"moe\": true,\n        \"parameterCount\": \"1028542417904\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": true,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 262144,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-04-17T19:54:54.434998Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"Kimi K2.6 is an open-source, native multimodal agentic model that advances practical capabilities in long-horizon coding, coding-driven design, proactive autonomous execution, and swarm-based task orchestration.\",\n      \"displayName\": \"Kimi K2.6\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/moonshotai/Kimi-K2.6\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/kimi-k2p6\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": true,\n      \"rlLoraTunable\": true,\n      \"rlTunable\": true,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": true,\n      \"supervisedLoraTunable\": true,\n      \"supportsImageInput\": true,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": true,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": true,\n      \"useTrainingV2\": true\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"FP8\",\n        \"modelType\": \"kimi_k25\",\n        \"moe\": true,\n        \"parameterCount\": \"1028542417904\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 262144,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-06-12T17:00:00.491288Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"Kimi K2.7 Code is a coding-focused agentic model built upon Kimi K2.6. With substantial improvements on real-world long-horizon coding tasks, it strengthens end-to-end task completion across complex software engineering workflows while improving token efficiency, reducing thinking-token usage by approximately 30% compared with Kimi K2.6.\",\n      \"displayName\": \"Kimi K2.7 Code\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/moonshotai/Kimi-K2.7-Code\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/kimi-k2p7-code\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": true,\n      \"rlLoraTunable\": true,\n      \"rlTunable\": true,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": true,\n      \"supervisedLoraTunable\": true,\n      \"supportsImageInput\": true,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": true,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": true\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"FP8\",\n        \"modelType\": \"minimax_m2\",\n        \"moe\": true,\n        \"parameterCount\": \"228689764864\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 196608,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-04-11T00:27:05.887619Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"Mixture-of-Experts language model. M2.7 is capable of building complex agent harnesses and completing highly elaborate productivity tasks, leveraging Agent Teams, complex Skills, and dynamic tool search.\",\n      \"displayName\": \"MiniMax M2.7\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/MiniMaxAI/MiniMax-M2.7\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/minimax-m2p7\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": false\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"PRECISION_UNSPECIFIED\",\n        \"modelType\": \"minimax_m3_vl\",\n        \"moe\": true,\n        \"parameterCount\": \"428000000000\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 512000,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-06-11T21:52:28.589913Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"MiniMax-M3 is a native multimodal model with 1M context running ~428B parameters and ~23B activated parameters. It brings native multimodality. enabling deeper semantic fusion across text, image, and video. M3 also introduces MiniMax Sparse Attention (MSA) to improve long context efficiency, achieving frontier-level performance across long-horizon agentic benchmarks, excelling in both coding and cowork.\",\n      \"displayName\": \"Minimax M3\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/MiniMaxAI/MiniMax-M3\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/minimax-m3\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": true,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": true\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"PRECISION_UNSPECIFIED\",\n        \"modelType\": \"nemotron_h\",\n        \"moe\": true,\n        \"parameterCount\": \"549000000000\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 262144,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-06-02T15:48:46.182132Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"Nemotron-3-Ultra-550B-A55B-NVFP4 is a frontier-scale large language model (LLM) trained by NVIDIA, designed to deliver strong agentic, reasoning, and conversational capabilities. It is optimized for the most demanding workloads, including complex multi-step agents, long-context analysis, and high-accuracy reasoning over code, math, and science. The model employs a hybrid Latent Mixture-of-Experts (LatentMoE) architecture, utilizing interleaved Mamba-2 and MoE layers, along with select Attention layers. Like the Super model, the Ultra model incorporates Multi-Token Prediction (MTP) layers for faster text generation and improved quality, and it is trained using an NVFP4 pre-training recipe to maximize compute efficiency. The model has 55B active parameters and 550B parameters in total.\",\n      \"displayName\": \"NVIDIA Nemotron 3 Ultra NVFP4\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4\",\n      \"importedFrom\": \"\",\n      \"kind\": \"HF_BASE_MODEL\",\n      \"name\": \"accounts/fireworks/models/nemotron-3-ultra-nvfp4\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 65536,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": false\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"BF16\",\n        \"modelType\": \"qwen3\",\n        \"moe\": false,\n        \"parameterCount\": \"8188515328\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 40960,\n      \"conversationConfig\": {\n        \"style\": \"jinja\",\n        \"system\": \"\",\n        \"template\": \"{%- if tools %}\\n    {{- '<|im_start|>system\\\\n' }}\\n    {%- if messages[0]['role'] == 'system' %}\\n        {{- messages[0]['content'] }}\\n    {%- else %}\\n        {{- 'You are a helpful assistant.' }}\\n    {%- endif %}\\n    {{- \\\"\\\\n\\\\n# Tools\\\\n\\\\nYou may call one or more functions to assist with the user query.\\\\n\\\\nYou are provided with function signatures within <tools></tools> XML tags:\\\\n<tools>\\\" }}\\n    {%- for tool in tools %}\\n        {{- \\\"\\\\n\\\" }}\\n        {{- tool | tojson }}\\n    {%- endfor %}\\n    {{- \\\"\\\\n</tools>\\\\n\\\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\\\n<tool_call>\\\\n{\\\\\\\"name\\\\\\\": <function-name>, \\\\\\\"arguments\\\\\\\": <args-json-object>}\\\\n</tool_call><|im_end|>\\\\n\\\" }}\\n{%- else %}\\n    {%- if messages[0]['role'] == 'system' %}\\n        {{- '<|im_start|>system\\\\n' + messages[0]['content'] + '<|im_end|>\\\\n' }}\\n    {%- else %}\\n        {{- '<|im_start|>system\\\\nYou are a helpful assistant.<|im_end|>\\\\n' }}\\n    {%- endif %}\\n{%- endif %}\\n{%- for message in messages %}\\n    {%- if (message.role == \\\"user\\\") or (message.role == \\\"system\\\" and not loop.first) or (message.role == \\\"assistant\\\" and not message.tool_calls) %}\\n        {{- '<|im_start|>' + message.role + '\\\\n' + message.content + '<|im_end|>' + '\\\\n' }}\\n    {%- elif message.role == \\\"assistant\\\" %}\\n        {{- '<|im_start|>' + message.role }}\\n        {%- if message.content %}\\n            {{- '\\\\n' + message.content }}\\n        {%- endif %}\\n        {%- for tool_call in message.tool_calls %}\\n            {%- if tool_call.function is defined %}\\n                {%- set tool_call = tool_call.function %}\\n            {%- endif %}\\n            {{- '\\\\n<tool_call>\\\\n{\\\"name\\\": \\\"' }}\\n            {{- tool_call.name }}\\n            {{- '\\\", \\\"arguments\\\": ' }}\\n            {{- tool_call.arguments | tojson }}\\n            {{- '}\\\\n</tool_call>' }}\\n        {%- endfor %}\\n        {{- '<|im_end|>\\\\n' }}\\n    {%- elif message.role == \\\"tool\\\" %}\\n        {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != \\\"tool\\\") %}\\n            {{- '<|im_start|>user' }}\\n        {%- endif %}\\n        {{- '\\\\n<tool_response>\\\\n' }}\\n        {{- message.content }}\\n        {{- '\\\\n</tool_response>' }}\\n        {%- if loop.last or (messages[loop.index0 + 1].role != \\\"tool\\\") %}\\n            {{- '<|im_end|>\\\\n' }}\\n        {%- endif %}\\n    {%- endif %}\\n{%- endfor %}\\n{%- if add_generation_prompt %}\\n    {{- '<|im_start|>assistant\\\\n' }}\\n{%- endif %}\\n\"\n      },\n      \"createTime\": \"2025-08-20T16:24:50.233084Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"The Qwen3 Embedding 8B model is the latest proprietary model of the Qwen family, specifically designed for text embedding tasks. This model inherits the exceptional multilingual capabilities, long-text understanding, and reasoning skills building upon the dense foundational models of the Qwen3 series. The model represents significant advancements in multiple text embedding tasks including text retrieval, code retrieval, text classification, text clustering.\",\n      \"displayName\": \"Qwen3 Embedding 8B\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/Qwen/Qwen3-Embedding-8B\",\n      \"importedFrom\": \"\",\n      \"kind\": \"EMBEDDING_MODEL\",\n      \"name\": \"accounts/fireworks/models/qwen3-embedding-8b\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": false,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 131072,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": false\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"CHECKPOINT_FORMAT_UNSPECIFIED\",\n        \"defaultPrecision\": \"PRECISION_UNSPECIFIED\",\n        \"modelType\": \"\",\n        \"moe\": false,\n        \"parameterCount\": \"0\",\n        \"supportsFireattention\": false,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 0\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 0,\n      \"conversationConfig\": {\n        \"style\": \"\",\n        \"system\": \"\",\n        \"template\": \"\"\n      },\n      \"createTime\": \"2026-06-09T20:20:19.253468Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"Qwen 3.7 Plus is Alibaba's latest flagship closed model, available exclusively through Fireworks AI outside of Alibaba's own infrastructure. For dedicated instances or fine-tuning, please contact the Fireworks AI team.\",\n      \"displayName\": \"Qwen3.7 Plus\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"https://huggingface.co/Qwen/\",\n      \"importedFrom\": \"\",\n      \"kind\": \"CUSTOM_MODEL\",\n      \"name\": \"accounts/fireworks/models/qwen3p7-plus\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": true,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": true,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 0,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": true\n    },\n    {\n      \"baseModelDetails\": {\n        \"checkpointFormat\": \"HUGGINGFACE\",\n        \"defaultPrecision\": \"BF16\",\n        \"modelType\": \"qwen3\",\n        \"moe\": false,\n        \"parameterCount\": \"8188548096\",\n        \"supportsFireattention\": true,\n        \"supportsMtp\": false,\n        \"tunable\": false,\n        \"worldSize\": 1\n      },\n      \"calibrated\": false,\n      \"cluster\": \"\",\n      \"contextLength\": 40960,\n      \"conversationConfig\": {\n        \"style\": \"jinja\",\n        \"system\": \"\",\n        \"template\": \"{%- if tools %}\\n    {{- '<|im_start|>system\\\\n' }}\\n    {%- if messages[0].role == 'system' %}\\n        {{- messages[0].content + '\\\\n\\\\n' }}\\n    {%- endif %}\\n    {{- \\\"# Tools\\\\n\\\\nYou may call one or more functions to assist with the user query.\\\\n\\\\nYou are provided with function signatures within <tools></tools> XML tags:\\\\n<tools>\\\" }}\\n    {%- for tool in tools %}\\n        {{- \\\"\\\\n\\\" }}\\n        {{- tool | tojson }}\\n    {%- endfor %}\\n    {{- \\\"\\\\n</tools>\\\\n\\\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\\\n<tool_call>\\\\n{\\\\\\\"name\\\\\\\": <function-name>, \\\\\\\"arguments\\\\\\\": <args-json-object>}\\\\n</tool_call><|im_end|>\\\\n\\\" }}\\n{%- else %}\\n    {%- if messages[0].role == 'system' %}\\n        {{- '<|im_start|>system\\\\n' + messages[0].content + '<|im_end|>\\\\n' }}\\n    {%- endif %}\\n{%- endif %}\\n{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}\\n{%- for message in messages[::-1] %}\\n    {%- set index = (messages|length - 1) - loop.index0 %}\\n    {%- if ns.multi_step_tool and message.role == \\\"user\\\" and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}\\n        {%- set ns.multi_step_tool = false %}\\n        {%- set ns.last_query_index = index %}\\n    {%- endif %}\\n{%- endfor %}\\n{%- for message in messages %}\\n    {%- if (message.role == \\\"user\\\") or (message.role == \\\"system\\\" and not loop.first) %}\\n        {{- '<|im_start|>' + message.role + '\\\\n' + message.content + '<|im_end|>' + '\\\\n' }}\\n    {%- elif message.role == \\\"assistant\\\" %}\\n        {%- set content = message.content %}\\n        {%- set reasoning_content = '' %}\\n        {%- if message.reasoning_content is defined and message.reasoning_content is not none %}\\n            {%- set reasoning_content = message.reasoning_content %}\\n        {%- else %}\\n            {%- if '</think>' in message.content %}\\n                {%- set content = message.content.split('</think>')[-1].lstrip('\\\\n') %}\\n                {%- set reasoning_content = message.content.split('</think>')[0].rstrip('\\\\n').split('<think>')[-1].lstrip('\\\\n') %}\\n            {%- endif %}\\n        {%- endif %}\\n        {%- if loop.index0 > ns.last_query_index %}\\n            {%- if loop.last or (not loop.last and reasoning_content) %}\\n                {{- '<|im_start|>' + message.role + '\\\\n<think>\\\\n' + reasoning_content.strip('\\\\n') + '\\\\n</think>\\\\n\\\\n' + content.lstrip('\\\\n') }}\\n            {%- else %}\\n                {{- '<|im_start|>' + message.role + '\\\\n' + content }}\\n            {%- endif %}\\n        {%- else %}\\n            {{- '<|im_start|>' + message.role + '\\\\n' + content }}\\n        {%- endif %}\\n        {%- if message.tool_calls %}\\n            {%- for tool_call in message.tool_calls %}\\n                {%- if (loop.first and content) or (not loop.first) %}\\n                    {{- '\\\\n' }}\\n                {%- endif %}\\n                {%- if tool_call.function %}\\n                    {%- set tool_call = tool_call.function %}\\n                {%- endif %}\\n                {{- '<tool_call>\\\\n{\\\"name\\\": \\\"' }}\\n                {{- tool_call.name }}\\n                {{- '\\\", \\\"arguments\\\": ' }}\\n                {%- if tool_call.arguments is string %}\\n                    {{- tool_call.arguments }}\\n                {%- else %}\\n                    {{- tool_call.arguments | tojson }}\\n                {%- endif %}\\n                {{- '}\\\\n</tool_call>' }}\\n            {%- endfor %}\\n        {%- endif %}\\n        {{- '<|im_end|>\\\\n' }}\\n    {%- elif message.role == \\\"tool\\\" %}\\n        {%- if loop.first or (messages[loop.index0 - 1].role != \\\"tool\\\") %}\\n            {{- '<|im_start|>user' }}\\n        {%- endif %}\\n        {{- '\\\\n<tool_response>\\\\n' }}\\n        {{- message.content }}\\n        {{- '\\\\n</tool_response>' }}\\n        {%- if loop.last or (messages[loop.index0 + 1].role != \\\"tool\\\") %}\\n            {{- '<|im_end|>\\\\n' }}\\n        {%- endif %}\\n    {%- endif %}\\n{%- endfor %}\\n{%- if add_generation_prompt %}\\n    {{- '<|im_start|>assistant\\\\n' }}\\n    {%- if enable_thinking is defined and enable_thinking is false %}\\n        {{- '<think>\\\\n\\\\n</think>\\\\n\\\\n' }}\\n    {%- endif %}\\n{%- endif %}\"\n      },\n      \"createTime\": \"2025-10-07T19:24:05.905021Z\",\n      \"defaultDraftModel\": \"\",\n      \"defaultDraftTokenCount\": 0,\n      \"defaultSamplingParams\": {},\n      \"deployedModelRefs\": [],\n      \"deprecationDate\": null,\n      \"description\": \"significant advancements in multiple text embedding and ranking tasks, including text retrieval, code retrieval, text classification, text clustering, and bitext mining\",\n      \"displayName\": \"Qwen3 Reranker 8B\",\n      \"encryptionState\": \"ENCRYPTION_STATE_UNSPECIFIED\",\n      \"fineTuningJob\": \"\",\n      \"githubUrl\": \"\",\n      \"huggingFaceUrl\": \"\",\n      \"importedFrom\": \"\",\n      \"kind\": \"EMBEDDING_MODEL\",\n      \"name\": \"accounts/fireworks/models/qwen3-reranker-8b\",\n      \"peftDetails\": {\n        \"baseModel\": \"\",\n        \"baseModelType\": \"\",\n        \"mergeAddonModelName\": \"\",\n        \"r\": 0,\n        \"targetModules\": []\n      },\n      \"public\": true,\n      \"rlFullParameterTunable\": false,\n      \"rlLoraTunable\": false,\n      \"rlTunable\": false,\n      \"serverlessModes\": [],\n      \"snapshotType\": \"FULL_SNAPSHOT\",\n      \"state\": \"READY\",\n      \"status\": {\n        \"code\": \"OK\",\n        \"message\": \"\"\n      },\n      \"supervisedFullParameterTunable\": false,\n      \"supervisedLoraTunable\": false,\n      \"supportsImageInput\": false,\n      \"supportsLora\": false,\n      \"supportsServerless\": true,\n      \"supportsTools\": false,\n      \"teftDetails\": null,\n      \"trainingContextLength\": 131072,\n      \"tunable\": false,\n      \"updateTime\": \"2026-07-26T00:32:15.026645Z\",\n      \"useHfApplyChatTemplate\": false,\n      \"useTrainingV2\": false\n    }\n  ],\n  \"nextPageToken\": \"\",\n  \"totalSize\": 14\n}\n",
+      "rows" : [
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "1M",
+          "displayName" : "GLM 5.2",
+          "huggingFaceURL" : "https://huggingface.co/zai-org/GLM-5.2",
+          "id" : "accounts/fireworks/models/glm-5p2",
+          "isNew" : true,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/glm-5p2",
+          "price" : "",
+          "summary" : "GLM-5.2 introduces a robust 1M-token context and advanced, multi-effort coding capabilities to significantly enhance performance on long-horizon tasks. Its new IndexShare architecture and improved MTP layer simultaneously boost efficiency by reducing per-token FLOPs and increasing speculative decoding lengths.",
+          "vendor" : "Z.ai"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "202k",
+          "displayName" : "GLM 5.1",
+          "huggingFaceURL" : "https://huggingface.co/zai-org/GLM-5.1-FP8",
+          "id" : "accounts/fireworks/models/glm-5p1",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/glm-5p1",
+          "price" : "",
+          "summary" : "GLM-5.1 is Z.ai's next-generation flagship model built for agentic engineering, with stronger coding capabilities and sustained performance over long-horizon tasks with hundreds of iteration rounds. It's a 754B-parameter MoE model",
+          "vendor" : "Z.ai"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "262k",
+          "displayName" : "Kimi K2.7 Code",
+          "huggingFaceURL" : "https://huggingface.co/moonshotai/Kimi-K2.7-Code",
+          "id" : "accounts/fireworks/models/kimi-k2p7-code",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/kimi-k2p7-code",
+          "price" : "",
+          "summary" : "Kimi K2.7 Code is a coding-focused agentic model built upon Kimi K2.6. With substantial improvements on real-world long-horizon coding tasks, it strengthens end-to-end task completion across complex software engineering workflows while improving token efficiency, reducing thinking-token usage by approximately 30% compared with Kimi K2.6.",
+          "vendor" : "Moonshot"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "262k",
+          "displayName" : "Kimi K2.6",
+          "huggingFaceURL" : "https://huggingface.co/moonshotai/Kimi-K2.6",
+          "id" : "accounts/fireworks/models/kimi-k2p6",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/kimi-k2p6",
+          "price" : "",
+          "summary" : "Kimi K2.6 is an open-source, native multimodal agentic model that advances practical capabilities in long-horizon coding, coding-driven design, proactive autonomous execution, and swarm-based task orchestration.",
+          "vendor" : "Moonshot"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "512k",
+          "displayName" : "Minimax M3",
+          "huggingFaceURL" : "https://huggingface.co/MiniMaxAI/MiniMax-M3",
+          "id" : "accounts/fireworks/models/minimax-m3",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/minimax-m3",
+          "price" : "$0.30/$1.20",
+          "summary" : "MiniMax-M3 is a native multimodal model with 1M context running ~428B parameters and ~23B activated parameters. It brings native multimodality. enabling deeper semantic fusion across text, image, and video. M3 also introduces MiniMax Sparse Attention (MSA) to improve long context efficiency, achieving frontier-level performance across long-horizon agentic benchmarks, excelling in both coding and cowork.",
+          "vendor" : "MiniMax"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "196k",
+          "displayName" : "MiniMax M2.7",
+          "huggingFaceURL" : "https://huggingface.co/MiniMaxAI/MiniMax-M2.7",
+          "id" : "accounts/fireworks/models/minimax-m2p7",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/minimax-m2p7",
+          "price" : "",
+          "summary" : "Mixture-of-Experts language model. M2.7 is capable of building complex agent harnesses and completing highly elaborate productivity tasks, leveraging Agent Teams, complex Skills, and dynamic tool search.",
+          "vendor" : "MiniMax"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "",
+          "displayName" : "Qwen3.7 Plus",
+          "huggingFaceURL" : "https://huggingface.co/Qwen/",
+          "id" : "accounts/fireworks/models/qwen3p7-plus",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/qwen3p7-plus",
+          "price" : "",
+          "summary" : "Qwen 3.7 Plus is Alibaba's latest flagship closed model, available exclusively through Fireworks AI outside of Alibaba's own infrastructure. For dedicated instances or fine-tuning, please contact the Fireworks AI team.",
+          "vendor" : "Qwen"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "262k",
+          "displayName" : "Nemotron 3 Ultra",
+          "huggingFaceURL" : "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+          "id" : "accounts/fireworks/models/nemotron-3-ultra-nvfp4",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/nemotron-3-ultra-nvfp4",
+          "price" : "",
+          "summary" : "Nemotron-3-Ultra-550B-A55B-NVFP4 is a frontier-scale large language model (LLM) trained by NVIDIA, designed to deliver strong agentic, reasoning, and conversational capabilities. It is optimized for the most demanding workloads, including complex multi-step agents, long-context analysis, and high-accuracy reasoning over code, math, and science. The model employs a hybrid Latent Mixture-of-Experts (LatentMoE) architecture, utilizing interleaved Mamba-2 and MoE layers, along with select Attention layers. Like the Super model, the Ultra model incorporates Multi-Token Prediction (MTP) layers for faster text generation and improved quality, and it is trained using an NVFP4 pre-training recipe to maximize compute efficiency. The model has 55B active parameters and 550B parameters in total.",
+          "vendor" : "NVIDIA"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "1M",
+          "displayName" : "DeepSeek V4 Flash",
+          "huggingFaceURL" : "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
+          "id" : "accounts/fireworks/models/deepseek-v4-flash",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/deepseek-v4-flash",
+          "price" : "",
+          "summary" : "DeepSeek-V4-Flash is a streamlined open-source Mixture-of-Experts model optimized for fast, cost-efficient inference while preserving strong reasoning and coding performance at 1M token context scale. It leverages the same hybrid attention innovations as Pro but is tuned for lower latency and higher throughput in real-time applications. It delivers near-Pro reasoning quality under sufficient compute budget, making it ideal for interactive agents and high-volume production workloads.",
+          "vendor" : "DeepSeek"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "1M",
+          "displayName" : "DeepSeek V4 Pro",
+          "huggingFaceURL" : "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro",
+          "id" : "accounts/fireworks/models/deepseek-v4-pro",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/deepseek-v4-pro",
+          "price" : "",
+          "summary" : "DeepSeek-V4-Pro is a flagship open-source Mixture-of-Experts model designed for frontier reasoning, advanced coding, and long-context intelligence at scale (up to 1M tokens). It introduces a hybrid attention architecture that dramatically improves long-context efficiency while reducing KV and compute overhead, along with stability and training enhancements for deep multi-step reasoning. It represents a top-tier open-source system for complex agentic workflows, high-precision reasoning, and demanding production workloads.",
+          "vendor" : "DeepSeek"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "131k",
+          "displayName" : "gpt oss 120b",
+          "huggingFaceURL" : "https://huggingface.co/openai/gpt-oss-120b",
+          "id" : "accounts/fireworks/models/gpt-oss-120b",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/gpt-oss-120b",
+          "price" : "",
+          "summary" : "Welcome to the gpt-oss series, OpenAI's open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases. gpt-oss-120b is used for production, general purpose, high reasoning use-cases that fits into a single H100 GPU.",
+          "vendor" : "OpenAI"
+        },
+        {
+          "capabilities" : [
+
+          ],
+          "contextWindow" : "131k",
+          "displayName" : "gpt oss 20b",
+          "huggingFaceURL" : "https://huggingface.co/openai/gpt-oss-20b",
+          "id" : "accounts/fireworks/models/gpt-oss-20b",
+          "isNew" : false,
+          "modelPageURL" : "https://app.fireworks.ai/models/fireworks/gpt-oss-20b",
+          "price" : "",
+          "summary" : "Welcome to the gpt-oss series, OpenAI's open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases. gpt-oss-20b is used for lower latency, and local or specialized use-cases.",
+          "vendor" : "OpenAI"
+        }
+      ]
+    },
+    "lmstudio" : {
+      "models" : "{\n  \"data\": [\n    {\n      \"id\": \"gemma-4-e4b-it-qat@q2_k_xl\",\n      \"object\": \"model\",\n      \"type\": \"vlm\",\n      \"publisher\": \"unsloth\",\n      \"arch\": \"gemma4\",\n      \"compatibility_type\": \"gguf\",\n      \"quantization\": \"Q2_K_XL\",\n      \"state\": \"not-loaded\",\n      \"max_context_length\": 131072,\n      \"capabilities\": [\n        \"tool_use\"\n      ]\n    },\n    {\n      \"id\": \"gemma-4-e4b-it-qat@q4_k_xl\",\n      \"object\": \"model\",\n      \"type\": \"vlm\",\n      \"publisher\": \"unsloth\",\n      \"arch\": \"gemma4\",\n      \"compatibility_type\": \"gguf\",\n      \"quantization\": \"Q4_K_XL\",\n      \"state\": \"not-loaded\",\n      \"max_context_length\": 131072,\n      \"capabilities\": [\n        \"tool_use\"\n      ]\n    },\n    {\n      \"id\": \"qwen2.5-7b-instruct\",\n      \"object\": \"model\",\n      \"type\": \"llm\",\n      \"publisher\": \"bartowski\",\n      \"arch\": \"qwen2\",\n      \"compatibility_type\": \"gguf\",\n      \"quantization\": \"Q4_K_M\",\n      \"state\": \"not-loaded\",\n      \"max_context_length\": 32768,\n      \"capabilities\": [\n        \"tool_use\"\n      ]\n    },\n    {\n      \"id\": \"text-embedding-nomic-embed-text-v1.5\",\n      \"object\": \"model\",\n      \"type\": \"embeddings\",\n      \"publisher\": \"nomic-ai\",\n      \"arch\": \"nomic-bert\",\n      \"compatibility_type\": \"gguf\",\n      \"quantization\": \"Q4_K_M\",\n      \"state\": \"not-loaded\",\n      \"max_context_length\": 2048\n    }\n  ],\n  \"object\": \"list\"\n}",
+      "rows" : [
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "128k · Q2_K_XL",
+          "displayName" : "gemma-4-e4b-it-qat",
+          "id" : "gemma-4-e4b-it-qat@q2_k_xl",
+          "isNew" : false,
+          "price" : "",
+          "vendor" : "Google"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "128k · Q4_K_XL",
+          "displayName" : "gemma-4-e4b-it-qat",
+          "id" : "gemma-4-e4b-it-qat@q4_k_xl",
+          "isNew" : false,
+          "price" : "",
+          "vendor" : "Google"
+        },
+        {
+          "capabilities" : [
+            "tools"
+          ],
+          "contextWindow" : "32k · Q4_K_M",
+          "displayName" : "qwen2.5-7b-instruct",
+          "id" : "qwen2.5-7b-instruct",
+          "isNew" : false,
+          "price" : "",
+          "vendor" : "Qwen"
+        }
+      ]
+    },
+    "nearTiers" : [
+      {
+        "attested" : true,
+        "claimsE2EE" : true,
+        "id" : "z-ai/glm-5.3-flash",
+        "listSeen" : true,
+        "tier" : "teeOwn"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : true,
+        "id" : "deepseek-ai/DeepSeek-V4-Flash",
+        "listSeen" : true,
+        "tier" : "teeOwn"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : true,
+        "id" : "Qwen/Qwen3.6-27B-FP8",
+        "listSeen" : true,
+        "tier" : "teeOwn"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : true,
+        "id" : "openai/gpt-oss-120b",
+        "listSeen" : true,
+        "tier" : "teeOwn"
+      },
+      {
+        "attested" : false,
+        "claimsE2EE" : false,
+        "id" : "x-ai/grok-4.6",
+        "listSeen" : true,
+        "tier" : "proxied"
+      },
+      {
+        "attested" : false,
+        "claimsE2EE" : false,
+        "id" : "anthropic/claude-sonnet-5",
+        "listSeen" : true,
+        "ownedBy" : "nearai",
+        "tier" : "proxied"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : false,
+        "id" : "acme/brand-new-model-1",
+        "listSeen" : true,
+        "tier" : "unknown"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : false,
+        "id" : "brand-new-model-2",
+        "listSeen" : true,
+        "tier" : "unknown"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : true,
+        "id" : "acme/brand-new-model-1",
+        "listSeen" : true,
+        "ownedBy" : "nearai",
+        "tier" : "teeOwn"
+      },
+      {
+        "attested" : false,
+        "claimsE2EE" : false,
+        "id" : "acme/brand-new-model-3",
+        "listSeen" : true,
+        "ownedBy" : "attested 3p",
+        "tier" : "teeThirdParty"
+      },
+      {
+        "attested" : false,
+        "claimsE2EE" : false,
+        "id" : "acme/brand-new-model-4",
+        "listSeen" : true,
+        "ownedBy" : "acme",
+        "tier" : "proxied"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : false,
+        "id" : "z-ai/glm-5.3-flash",
+        "listSeen" : false,
+        "tier" : "unknown"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : false,
+        "id" : "deepseek-ai/DeepSeek-V4-Flash",
+        "listSeen" : false,
+        "tier" : "unknown"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : false,
+        "id" : "Qwen/Qwen3.6-27B-FP8",
+        "listSeen" : false,
+        "tier" : "unknown"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : false,
+        "id" : "openai/gpt-oss-120b",
+        "listSeen" : false,
+        "tier" : "unknown"
+      },
+      {
+        "attested" : false,
+        "claimsE2EE" : false,
+        "id" : "x-ai/grok-4.6",
+        "listSeen" : false,
+        "tier" : "proxied"
+      },
+      {
+        "attested" : true,
+        "claimsE2EE" : false,
+        "id" : "acme/brand-new-model-1",
+        "listSeen" : false,
+        "tier" : "unknown"
+      }
+    ],
+    "pinnedNow" : "2026-07-29T00:00:00Z",
+    "xai" : {
+      "languageModels" : "{\"models\":[{\"id\":\"grok-4.20-0309-non-reasoning\",\"fingerprint\":\"fp_10fa260003\",\"created\":1773014400,\"object\":\"model\",\"owned_by\":\"xai\",\"version\":\"1.0\",\"input_modalities\":[\"text\",\"image\"],\"output_modalities\":[\"text\"],\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"search_price\":0,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000,\"aliases\":[\"grok-4.20-non-reasoning\",\"grok-4.20-non-reasoning-latest\",\"grok-4.20-beta-non-reasoning\",\"grok-4.20-beta-latest-non-reasoning\",\"grok-4.20-experimental-beta-0304-non-reasoning\",\"grok-4.20-experimental-beta-non-reasoning-latest\",\"grok-4.20-beta-0309-non-reasoning\",\"grok-4.20-non-reasoning-gv2\"]},{\"id\":\"grok-4.20-0309-reasoning\",\"fingerprint\":\"fp_1dda2a4993\",\"created\":1773014400,\"object\":\"model\",\"owned_by\":\"xai\",\"version\":\"1.0\",\"input_modalities\":[\"text\",\"image\"],\"output_modalities\":[\"text\"],\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"search_price\":0,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000,\"aliases\":[\"grok-4.20-reasoning-latest\",\"grok-4.20\",\"grok-4.20-reasoning\",\"grok-4.20-0309\",\"grok-4.20-beta-0309-reasoning\",\"grok-4.20-beta\",\"grok-4.20-beta-0309\",\"grok-4.20-beta-latest\",\"grok-4.20-beta-latest-reasoning\",\"grok-4.20-beta-reasoning\",\"grok-4.20-experimental-beta-0304-reasoning\",\"grok-4.20-experimental-beta-0304\",\"grok-4.20-experimental-beta-reasoning-latest\",\"grok-4.20-experimental-beta-latest\",\"grok-4.20-reasoning-gv2\"]},{\"id\":\"grok-4.20-multi-agent-0309\",\"fingerprint\":\"fp_7122cad792\",\"created\":1773014400,\"object\":\"model\",\"owned_by\":\"xai\",\"version\":\"1.0\",\"input_modalities\":[\"text\",\"image\"],\"output_modalities\":[\"text\"],\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"search_price\":0,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000,\"aliases\":[\"grok-4.20-multi-agent\",\"grok-4.20-multi-agent-latest\",\"grok-4.20-multi-agent-beta-latest\",\"grok-4.20-multi-agent-experimental-beta-0304\",\"grok-4.20-multi-agent-experimental-beta-latest\",\"grok-4.20-multi-agent-beta-0309\"]},{\"id\":\"grok-4.3\",\"fingerprint\":\"fp_44ca41bbe0\",\"created\":1776384000,\"object\":\"model\",\"owned_by\":\"xai\",\"version\":\"1.0\",\"input_modalities\":[\"text\",\"image\"],\"output_modalities\":[\"text\"],\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"search_price\":0,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000,\"aliases\":[\"grok-4.3-latest\",\"grok-latest\"]},{\"id\":\"grok-4.5\",\"fingerprint\":\"fp_c9ed311582\",\"created\":1782691200,\"object\":\"model\",\"owned_by\":\"xai\",\"version\":\"1.0\",\"input_modalities\":[\"text\",\"image\"],\"output_modalities\":[\"text\"],\"prompt_text_token_price\":20000,\"cached_prompt_text_token_price\":3000,\"prompt_image_token_price\":20000,\"completion_text_token_price\":60000,\"search_price\":0,\"prompt_text_token_price_long_context\":40000,\"cached_prompt_text_token_price_long_context\":6000,\"completion_text_token_price_long_context\":120000,\"long_context_threshold\":200000,\"aliases\":[\"grok-4.5-latest\",\"grok-build-latest\"]},{\"id\":\"grok-build-0.1\",\"fingerprint\":\"fp_474f27e4d9\",\"created\":1776297600,\"object\":\"model\",\"owned_by\":\"xai\",\"version\":\"1.0\",\"input_modalities\":[\"text\",\"image\"],\"output_modalities\":[\"text\"],\"prompt_text_token_price\":10000,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":10000,\"completion_text_token_price\":20000,\"search_price\":0,\"prompt_text_token_price_long_context\":20000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":40000,\"long_context_threshold\":200000,\"aliases\":[\"grok-code-fast-1\",\"grok-code-fast\",\"grok-code-fast-1-0825\"]}]}",
+      "models" : "{\"data\":[{\"id\":\"grok-4.20-0309-non-reasoning\",\"aliases\":[\"grok-4.20-non-reasoning\",\"grok-4.20-non-reasoning-latest\",\"grok-4.20-beta-non-reasoning\",\"grok-4.20-beta-latest-non-reasoning\",\"grok-4.20-experimental-beta-0304-non-reasoning\",\"grok-4.20-experimental-beta-non-reasoning-latest\",\"grok-4.20-beta-0309-non-reasoning\",\"grok-4.20-non-reasoning-gv2\"],\"context_length\":1000000,\"created\":1773014400,\"object\":\"model\",\"owned_by\":\"xai\",\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000},{\"id\":\"grok-4.20-0309-reasoning\",\"aliases\":[\"grok-4.20-reasoning-latest\",\"grok-4.20\",\"grok-4.20-reasoning\",\"grok-4.20-0309\",\"grok-4.20-beta-0309-reasoning\",\"grok-4.20-beta\",\"grok-4.20-beta-0309\",\"grok-4.20-beta-latest\",\"grok-4.20-beta-latest-reasoning\",\"grok-4.20-beta-reasoning\",\"grok-4.20-experimental-beta-0304-reasoning\",\"grok-4.20-experimental-beta-0304\",\"grok-4.20-experimental-beta-reasoning-latest\",\"grok-4.20-experimental-beta-latest\",\"grok-4.20-reasoning-gv2\"],\"context_length\":1000000,\"created\":1773014400,\"object\":\"model\",\"owned_by\":\"xai\",\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000},{\"id\":\"grok-4.20-multi-agent-0309\",\"aliases\":[\"grok-4.20-multi-agent\",\"grok-4.20-multi-agent-latest\",\"grok-4.20-multi-agent-beta-latest\",\"grok-4.20-multi-agent-experimental-beta-0304\",\"grok-4.20-multi-agent-experimental-beta-latest\",\"grok-4.20-multi-agent-beta-0309\"],\"context_length\":1000000,\"created\":1773014400,\"object\":\"model\",\"owned_by\":\"xai\",\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000},{\"id\":\"grok-4.3\",\"aliases\":[\"grok-4.3-latest\",\"grok-latest\"],\"context_length\":1000000,\"created\":1776384000,\"object\":\"model\",\"owned_by\":\"xai\",\"prompt_text_token_price\":12500,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":12500,\"completion_text_token_price\":25000,\"prompt_text_token_price_long_context\":25000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":50000,\"long_context_threshold\":200000},{\"id\":\"grok-4.5\",\"aliases\":[\"grok-4.5-latest\",\"grok-build-latest\"],\"context_length\":500000,\"created\":1782691200,\"object\":\"model\",\"owned_by\":\"xai\",\"prompt_text_token_price\":20000,\"cached_prompt_text_token_price\":3000,\"prompt_image_token_price\":20000,\"completion_text_token_price\":60000,\"prompt_text_token_price_long_context\":40000,\"cached_prompt_text_token_price_long_context\":6000,\"completion_text_token_price_long_context\":120000,\"long_context_threshold\":200000},{\"id\":\"grok-build-0.1\",\"aliases\":[\"grok-code-fast-1\",\"grok-code-fast\",\"grok-code-fast-1-0825\"],\"context_length\":256000,\"created\":1776297600,\"object\":\"model\",\"owned_by\":\"xai\",\"prompt_text_token_price\":10000,\"cached_prompt_text_token_price\":2000,\"prompt_image_token_price\":10000,\"completion_text_token_price\":20000,\"prompt_text_token_price_long_context\":20000,\"cached_prompt_text_token_price_long_context\":4000,\"completion_text_token_price_long_context\":40000,\"long_context_threshold\":200000},{\"id\":\"grok-imagine-image\",\"aliases\":[\"grok-imagine-image-2026-03-02\"],\"context_length\":8000,\"created\":1769558400,\"object\":\"model\",\"owned_by\":\"xai\",\"image_price\":200000000},{\"id\":\"grok-imagine-image-quality\",\"aliases\":[\"grok-imagine-image-quality-20260403\",\"grok-imagine-image-quality-latest\",\"grok-imagine-image-pro\"],\"context_length\":8000,\"created\":1775174400,\"object\":\"model\",\"owned_by\":\"xai\",\"image_price\":500000000},{\"id\":\"grok-imagine-video\",\"aliases\":[],\"created\":1769558400,\"object\":\"model\",\"owned_by\":\"xai\"},{\"id\":\"grok-imagine-video-1.5\",\"aliases\":[\"grok-imagine-video-1.5-preview\",\"grok-imagine-video-1.5-2026-05-30\"],\"created\":1779840000,\"object\":\"model\",\"owned_by\":\"xai\"}],\"object\":\"list\"}",
+      "rows" : [
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "500k",
+          "displayName" : "Grok 4.5",
+          "id" : "grok-4.5",
+          "isNew" : true,
+          "modelPageURL" : "https://docs.x.ai/developers/models/grok-4.5",
+          "price" : "$2.00/$6.00",
+          "vendor" : "xAI"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "1M",
+          "displayName" : "Grok 4.3",
+          "id" : "grok-4.3",
+          "isNew" : false,
+          "modelPageURL" : "https://docs.x.ai/developers/models/grok-4.3",
+          "price" : "$1.25/$2.50",
+          "vendor" : "xAI"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "256k",
+          "displayName" : "Grok Build 0.1",
+          "id" : "grok-build-0.1",
+          "isNew" : false,
+          "modelPageURL" : "https://docs.x.ai/developers/models/grok-build-0.1",
+          "price" : "$1.00/$2.00",
+          "vendor" : "xAI"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "1M",
+          "displayName" : "Grok 4.20 Non Reasoning",
+          "id" : "grok-4.20-0309-non-reasoning",
+          "isNew" : false,
+          "modelPageURL" : "https://docs.x.ai/developers/models/grok-4.20-0309-non-reasoning",
+          "price" : "$1.25/$2.50",
+          "vendor" : "xAI"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "1M",
+          "displayName" : "Grok 4.20 Reasoning",
+          "id" : "grok-4.20-0309-reasoning",
+          "isNew" : false,
+          "modelPageURL" : "https://docs.x.ai/developers/models/grok-4.20-0309-reasoning",
+          "price" : "$1.25/$2.50",
+          "vendor" : "xAI"
+        },
+        {
+          "capabilities" : [
+            "tools",
+            "vision"
+          ],
+          "contextWindow" : "1M",
+          "displayName" : "Grok 4.20 Multi Agent",
+          "id" : "grok-4.20-multi-agent-0309",
+          "isNew" : false,
+          "modelPageURL" : "https://docs.x.ai/developers/models/grok-4.20-multi-agent-0309",
+          "price" : "$1.25/$2.50",
+          "vendor" : "xAI"
+        }
+      ]
+    }
+  }
+}

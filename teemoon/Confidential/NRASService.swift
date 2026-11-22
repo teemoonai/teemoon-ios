@@ -33,22 +33,39 @@ enum NRASVerification: Equatable, Sendable {
     /// NVIDIA rejected the evidence, the nonce didn't echo, or the evidence or NVIDIA's answer is malformed
     /// (near-gate-nvidia-tls-split). HARD: blocks.
     case failed(String)
+    /// A listed enclave's rejection (A10): hard, reads the A10 line everywhere; only the expert GPU row adds NVIDIA's own.
+    case listedFailed(nvidia: String)
     /// An outage, or teemoon's own fault (`teemoonFault`). Soft: asks, never blocks.
     case inconclusive(String)
+    /// A listed enclave's couldn't-check (A10): soft, reads A7's unfinished line; only the expert GPU row adds NVIDIA's.
+    case listedInconclusive(nvidia: String)
 
     /// trust-verifier-error's approved line, for a check that failed inside teemoon.
     static let teemoonFault = "this check failed inside teemoon, so it proves nothing."
     /// A near.ai model node that answered without GPU evidence (gpu_evidence_required): couldn't check, never verified.
     static let evidenceAbsent = "the model's hardware attestation is unavailable."
 
+    /// The record's GPU verdict over the model leg and every listed enclave: any failure, else any couldn't-check, else
+    /// verified; nil with nothing to read. In input order, so the reason shown is stable. The read enclave's own
+    /// couldn't-check beats a listed one's.
+    static func worst(_ results: [NRASVerification]) -> NRASVerification? {
+        results.first(where: \.isHardFailure) ?? results.first { if case .inconclusive = $0 { return true }; return false }
+            ?? results.first { if case .listedInconclusive = $0 { return true }; return false }
+            ?? (results.isEmpty ? nil : .verified)
+    }
+
     var isVerified: Bool { self == .verified }
     /// Drives the red, blocking tier. `.inconclusive` is soft (confirm-to-proceed), never hard.
-    var isHardFailure: Bool { if case .failed = self { return true }; return false }
+    var isHardFailure: Bool {
+        switch self { case .failed, .listedFailed: true; case .verified, .inconclusive, .listedInconclusive: false }
+    }
     /// Any non-verified, non-pending outcome — both degrade the session.
     var isUnverified: Bool { self != .verified }
     var reason: String? {
         switch self {
         case .failed(let s), .inconclusive(let s): return s
+        case .listedInconclusive: return KeyCustodyCopy.listedSentence(.unfinished)
+        case .listedFailed: return ListedEnclaveReason.enclaveFailed
         case .verified: return nil
         }
     }

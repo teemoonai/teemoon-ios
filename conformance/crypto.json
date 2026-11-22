@@ -1,0 +1,128 @@
+{
+  "fixtureClass" : "crypto",
+  "kitVersion" : "0.5.5",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "e2eeEnvelope" : [
+      {
+        "derivedKey" : "1f69bdf345df3f53f621eabfb15940041746157432876a3e5d35ac41977db628",
+        "ephemeralX25519PrivateKey" : "f8cf1f7965566d76ec874f7acfb2d40fda868a68722e3d9929856883aab12d7a",
+        "ephemeralX25519PublicKey" : "3ffaf014e4ad0d6f7c94ee696dac31e07d9ef59cacb7e361d30bbea5274b1a7d",
+        "hkdfInfoUTF8" : "ed25519_encryption",
+        "hkdfSalt" : "",
+        "nonce" : "000102030405060708090a0b0c0d0e0f1011121314151617",
+        "note" : "near.ai v2 envelope: ephemeral_pub(32) || nonce(24) || ciphertext || tag",
+        "plaintextUTF8" : "the quick brown fox jumps over the lazy dog",
+        "recipientX25519PrivateKey" : "18872c7d6a154a75c5f24412ef5aa31f197acaa33e2ae22a17b0c796b5a9ec55",
+        "recipientX25519PublicKey" : "c758cc62fd0bf6361a1ed43a9b684e289f60cea7891a986e006acc668ee34561",
+        "wireFormat" : "3ffaf014e4ad0d6f7c94ee696dac31e07d9ef59cacb7e361d30bbea5274b1a7d000102030405060708090a0b0c0d0e0f101112131415161724da982ef262f2c20d73236a874d8cae12a0946234477bc4074e738f6465d3285a2ed82e7af771c72e04a9136a072424047070ec2866907713f31b"
+      }
+    ],
+    "ecrecover" : [
+      {
+        "expectedAddress" : "0xbb4d2e7ffe98eefcd9690e2139be41e92b95e333",
+        "note" : "production near.ai signature over the response text",
+        "personalSignDigest" : "e26bfc37522d869652296392a1b3a19174c434ff0b8aa91fa6576a7bcca8153a",
+        "signature" : "0xe34ae9a9cc331fd7fa6d110bbd8874467b326fe460dbe141e182f3897e608c081f98e803d4ca623e38992c5cd87b9d08b01221553a34af4327945ca0d177e2351c",
+        "text" : "zai-org/GLM-5.1-FP8:345e3263b35e64964dca3cd81f3ee1dc73c545373e720ebd566c0107c159631f:a71820b9c52087d0268a029b892a42afb1ba20faa84ba230536030c93b848f24"
+      },
+      {
+        "expectedAddress" : "0x1e93192ccbf8c4f6c3dc295d69a59c7fe369bb76",
+        "note" : "tampered text — recovers a DIFFERENT address, never the signer",
+        "personalSignDigest" : "6caa30f73a9bb7788995f082f73c46a54c782519fc0e503b77f8d97c7c45892e",
+        "signature" : "0xe34ae9a9cc331fd7fa6d110bbd8874467b326fe460dbe141e182f3897e608c081f98e803d4ca623e38992c5cd87b9d08b01221553a34af4327945ca0d177e2351c",
+        "text" : "zai-org/GLM-5.1-FP8:345e3263b35e64964dca3cd81f3ee1dc73c545373e720ebd566c0107c159631f:a71820b9c52087d0268a029b892a42afb1ba20faa84ba230536030c93b848f24x"
+      },
+      {
+        "note" : "malformed — wrong length",
+        "signature" : "0xdead",
+        "text" : "x"
+      },
+      {
+        "note" : "malformed — not hex",
+        "signature" : "zz",
+        "text" : "x"
+      },
+      {
+        "note" : "malformed — recovery id out of range",
+        "signature" : "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab05",
+        "text" : "x"
+      }
+    ],
+    "ed25519ToX25519" : [
+      {
+        "ed25519PublicKey" : "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
+        "ed25519Seed" : "0000000000000000000000000000000000000000000000000000000000000000",
+        "x25519PrivateKey" : "5046adc1dba838867b2bbbfdd0c3423e58b57970b5267a90f57960924a87f156",
+        "x25519PublicKeyFromEdPublic" : "5bf55c73b82ebe22be80f3430667af570fae2556a6415e6b30d4065300aa947d",
+        "x25519PublicKeyFromPrivate" : "5bf55c73b82ebe22be80f3430667af570fae2556a6415e6b30d4065300aa947d"
+      },
+      {
+        "ed25519PublicKey" : "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+        "ed25519Seed" : "0101010101010101010101010101010101010101010101010101010101010101",
+        "x25519PrivateKey" : "58e86efb75fa4e2c410f46e16de9f6acae1a1703528651b69bc176c088bef36e",
+        "x25519PublicKeyFromEdPublic" : "1b1b58dd50ea14b60da17b790cd02754d970c9bab864ebb3c0f3016fe51d3f57",
+        "x25519PublicKeyFromPrivate" : "1b1b58dd50ea14b60da17b790cd02754d970c9bab864ebb3c0f3016fe51d3f57"
+      },
+      {
+        "ed25519PublicKey" : "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "ed25519Seed" : "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "x25519PrivateKey" : "3894eea49c580aef816935762be049559d6d1440dede12e6a125f1841fff8e6f",
+        "x25519PublicKeyFromEdPublic" : "4701d08488451f545a409fb58ae3e58581ca40ac3f7f114698cd71deac73ca01",
+        "x25519PublicKeyFromPrivate" : "4701d08488451f545a409fb58ae3e58581ca40ac3f7f114698cd71deac73ca01"
+      },
+      {
+        "ed25519PublicKey" : "bafc71bead3ac5e4b63e9c8216ee71a34aaec65722eedbca728b4e9b3ccce396",
+        "ed25519Seed" : "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+        "x25519PrivateKey" : "e0764522ddfb5fe239f4b1ed99eb626cf5265c37d93647e2ae57c8d8c3d72e6c",
+        "x25519PublicKeyFromEdPublic" : "70f4e49243478752384d91bcc1330d740e7353667eb1f5fa02dc1488a2403112",
+        "x25519PublicKeyFromPrivate" : "70f4e49243478752384d91bcc1330d740e7353667eb1f5fa02dc1488a2403112"
+      }
+    ],
+    "hchacha20" : [
+      {
+        "input" : "000000090000004a0000000031415927",
+        "key" : "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "note" : "draft-irtf-cfrg-xchacha-03 §2.2.1 HChaCha20 block function",
+        "output" : "82413b4227b27bfed30e42508a877d73a0f9e4d58a74a853c12ec41326d3ecdc"
+      }
+    ],
+    "keccak256" : [
+      {
+        "digest" : "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+        "messageHex" : "",
+        "messageUTF8" : "",
+        "note" : "empty input — Ethereum's empty account code hash"
+      },
+      {
+        "digest" : "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45",
+        "messageHex" : "616263",
+        "messageUTF8" : "abc",
+        "note" : "short input, single absorb block"
+      },
+      {
+        "digest" : "4d741b6f1eb29cb2a9b9911c82f56fa8d73b04959d3d9d222895df6c0b28aa15",
+        "messageHex" : "54686520717569636b2062726f776e20666f78206a756d7073206f76657220746865206c617a7920646f67",
+        "messageUTF8" : "The quick brown fox jumps over the lazy dog",
+        "note" : "single block"
+      },
+      {
+        "digest" : "5b7e0e47a96f32a88b4f14ca177982790807c40e1a105742ba0fc1babe1ef826",
+        "messageHex" : "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+        "messageUTF8" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "note" : "300 bytes — forces multiple absorb blocks past the 136-byte rate"
+      }
+    ],
+    "xchachaAEAD" : [
+      {
+        "aad" : "50515253c0c1c2c3c4c5c6c7",
+        "ciphertext" : "bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52e",
+        "key" : "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "nonce" : "404142434445464748494a4b4c4d4e4f5051525354555657",
+        "note" : "draft-irtf-cfrg-xchacha-03 §A.3.1 AEAD_XChaCha20_Poly1305",
+        "plaintext" : "4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e",
+        "tag" : "c0875924c1c7987947deafd8780acf49"
+      }
+    ]
+  }
+}

@@ -408,6 +408,7 @@ extension AttestationSummary {
             # build record exists for that digest, anywhere in that repo.
             section("4. image provenance — signed build records for the exact image digests")
             REPO_ALIASES = {"compose-manager-launcher": "compose-manager",
+                            "compose-manager-otelcol": "compose-manager",
                             "vllm-proxy-rs": "inference-proxy"}
 
             # Engine images near.ai builds from the compose repo's workflows are

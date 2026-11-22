@@ -1,0 +1,18 @@
+{
+  "sdk": "nearai/inference-sdk",
+  "sdkCommit": "4bccfd94549f6e5061821f90a5d8901d7299a8c0",
+  "verdicts": {
+    "E2EE reply relabelled signature_kind=gateway": "rejected",
+    "E2EE reply, asserted signer swapped for another key": "rejected",
+    "E2EE reply, model prefix stripped from the signed text": "rejected",
+    "E2EE reply, provider_tee ed25519 by the quote-bound model key": "verified",
+    "E2EE reply, signature tampered": "rejected",
+    "E2EE reply, unknown signature_kind": "rejected",
+    "E2EE reply, unknown signing_algo": "rejected",
+    "plaintext reply, gateway ecdsa by the quote-bound gateway key": "gatewayTrustOnly",
+    "plaintext reply, gateway ecdsa signer is not the attested gateway": "rejected",
+    "plaintext reply, gateway ed25519 (that key is never attested)": "rejected",
+    "plaintext reply, gateway signature with a model prefix": "rejected",
+    "provider_tee ecdsa (no signature_kind field, read as provider_tee) by the bound model-node address": "verified"
+  }
+}

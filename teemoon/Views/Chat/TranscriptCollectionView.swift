@@ -190,7 +190,7 @@ final class PinningCollectionView: UICollectionView {
     /// How long a reserve-sized move takes (`FollowGlide.jumpThreshold`): the
     /// turn start pushing the end down so the prompt rides near the top. Eased
     /// and issued ONCE — the throttled pin moves its target, never restarts it.
-    static let jumpGlideDuration: CFTimeInterval = 0.25
+    static let jumpGlideDuration: CFTimeInterval = 0.40
 
     /// The offset at which the last line of content sits on the bottom edge of
     /// the viewport. Insets included: the composer is a `safeAreaInset`, so the

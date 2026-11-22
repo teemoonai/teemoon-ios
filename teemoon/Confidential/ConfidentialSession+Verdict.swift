@@ -15,13 +15,27 @@ extension ConfidentialSession {
     /// DCAP couldn't fetch or read Intel's collateral for a quote, or (a) couldn't for the compose manager's.
     var couldntCheckHardware: Bool {
         dcapVerification?.hasUnchecked == true || trustScope?.binding == .unchecked
+            || listedTrustScopes?.contains { $0.binding == .unchecked } == true
     }
+
+    /// A listed enclave's action log, boot log or running file contradicts its hardware: evidence, as the read one's (A4).
+    var listedScopeBroken: Bool { listedTrustScopes?.contains(where: \.hardBreak) == true }
+
+    /// A listed enclave sent no compose-manager quote or no boot log: couldn't check, soft, never clean (A4).
+    var listedScopeEvidenceAbsent: Bool { listedTrustScopes?.contains(where: \.listedEvidenceAbsent) == true }
 
     /// A soft state in which the send would still go out sealed (the same peer the send seals to), and it
     /// isn't the provenance-only case: the "still checking near.ai's hardware" confirm, never "send
-    /// unencrypted" (near-send-gate-rule, the maintainer 2026-11-06).
+    /// without encryption" (near-send-gate-rule, the maintainer 2026-11-06).
     var softButSealed: Bool {
         !degradeIsHardFailure && !provenanceBlockedButE2EEIntact && canSeal
+    }
+
+    /// near.ai's enclave list failed, it is the cause the send names, and nothing is in flight: the ask offers re-verify (A8).
+    var enclaveListFailedAsks: Bool {
+        let refetching = attestationFetchInFlight && attestationTask?.isCancelled == false
+        guard attestation?.modelCandidatesListFailed == true, !verdictsPending, !refetching else { return false }
+        return softButSealed && e2eeDegradedReason == ListedEnclaveReason.listFailed
     }
 
     /// The title's "encrypted · hardware not confirmed" (trust-caption-sealed): a soft state that asks, whose
@@ -58,10 +72,17 @@ extension ConfidentialSession {
     }
 
     func hasConfirmed(pending: Bool) -> Bool {
-        confirmationKey(pending: pending).map(confirmedDegrades.contains) ?? false
+        // The tier-downgrade ask is answered only by its own "send without encryption" (SealedModels.accept).
+        guard !sealedModelWentPlain else { return false }
+        return confirmationKey(pending: pending).map(confirmedDegrades.contains) ?? false
     }
 
-    func rememberConfirmation(pending: Bool) {
+    /// `answering`: the ask that was on screen, captured with the tap. Another ask's "send anyway" never disarms.
+    func rememberConfirmation(pending: Bool, answering ask: E2EEAsk.Kind) {
+        if sealedModelWentPlain, let provider = activeProvider {
+            if ask == .tierDowngrade { sealedModels.accept(provider.model) }
+            return
+        }
         if let key = confirmationKey(pending: pending) { confirmedDegrades.insert(key) }
     }
 
@@ -120,7 +141,7 @@ extension ConfidentialSession {
         // NOT reach here, so a GitHub blip never masquerades as tamper.
         if modelComposeIntegrityFailed { return .degraded }
         // The action log, the boot log or a running compose file contradicts the hardware (trust scope).
-        if trustScope?.hardBreak == true { return .degraded }
+        if trustScope?.hardBreak == true || listedScopeBroken { return .degraded }
         // Fail-closed: if an image in the manifest did not trace to a pinned
         // near.ai workflow, the running code is not provably near.ai's. (A
         // pending/nil result does not degrade — provenance is still in flight.)
@@ -139,6 +160,8 @@ extension ConfidentialSession {
         // Fail-closed: a quote that does not echo our request nonce may be a
         // replay of an older attestation.
         if attestation.nonceEchoed == false { return .degraded }
+        // C3: a listed enclave holding the same key failed a check.
+        if attestation.candidatesBroken { return .degraded }
         // Fail-closed: GPU evidence that didn't verify — whether NVIDIA rejected
         // it (hard) or NRAS was simply unreachable (inconclusive) — breaks the
         // GPU half of the trust chain either way. Both degrade; only a genuine
@@ -153,6 +176,8 @@ extension ConfidentialSession {
         if couldntCheckHardware { return .degraded }
         // near.ai's tier list never came: can't check, soft, the send asks (formal/ TierTimeout).
         if tierGaveUp { return .degraded }
+        // C3: the list of enclaves holding the key never came: can't check, soft, the send asks.
+        if attestation.modelCandidatesListFailed || listedScopeEvidenceAbsent { return .degraded }
         // Fail-closed: a present-but-malformed key is a broken E2EE promise,
         // not "no E2EE expected". Both `e2eeDegradedReason` and
         // `e2eeBindingIntact` require `key.count == 32`; without this gate a
@@ -198,8 +223,9 @@ extension ConfidentialSession {
             return nil // still loading
         }
         if recordIsStaleAndUnrefreshable(attestation) { return "couldn't reach the attestation server." }
-        if dcapVerification?.hasHardFailure == true {
-            return "the hardware quote failed intel dcap verification."
+        if let dcap = dcapVerification, dcap.hasHardFailure {
+            let readLegFailed = [dcap.gateway, dcap.model, dcap.gpu].contains { $0?.isHardFailure == true }
+            return readLegFailed ? "the hardware quote failed intel dcap verification." : ListedEnclaveReason.enclaveFailed
         }
         // Mirror every degrade condition in `attestationState` so the alert
         // names the actual cause — an unexplained block gets misattributed to
@@ -222,6 +248,11 @@ extension ConfidentialSession {
                     : TrustScopeText.runningMismatchUnsignedBanner
             }
         }
+        for scope in listedTrustScopes ?? [] {
+            if case .mismatch = scope.binding { return ListedEnclaveReason.enclaveFailed }
+            if case .mismatch = scope.boot { return ListedEnclaveReason.bootLog }
+            if scope.runningMismatch { return ListedEnclaveReason.enclaveFailed }
+        }
         if unpublishedOnlyButE2EEIntact {
             return "an image has no published attestation. the send is still sealed."
         }
@@ -231,12 +262,21 @@ extension ConfidentialSession {
         if attestation.nonceEchoed == false {
             return "the attestation didn't echo this session's nonce (possible replay)."
         }
-        if couldntCheckHardware { return "intel's hardware check couldn't be completed (service unreachable)." }
+        if let reason = attestation.candidatesReason { return reason }
+        if couldntCheckHardware {
+            // Only listed quotes unchecked: name the listed enclaves, never the read one's Intel line.
+            let readLegUnchecked = dcapVerification.map { [$0.gateway, $0.model, $0.gpu].contains { $0?.isUnchecked == true } } == true
+                || trustScope?.binding == .unchecked || listedTrustScopes?.contains { $0.binding == .unchecked } == true
+            return readLegUnchecked ? "intel's hardware check couldn't be completed (service unreachable)."
+                                    : KeyCustodyCopy.listedSentence(.unfinished)
+        }
         // A check that failed inside teemoon proved nothing about the service: say so, not "unreachable".
         if case .inconclusive(NRASVerification.teemoonFault)? = gpuAttestation { return NRASVerification.teemoonFault }
         if case .inconclusive(NRASVerification.teemoonFault)? = tlsAttestation { return NRASVerification.teemoonFault }
         // No GPU evidence was sent: nothing was unreachable, so never "(service unreachable)".
         if case .inconclusive(NRASVerification.evidenceAbsent)? = gpuAttestation { return NRASVerification.evidenceAbsent }
+        if case .listedFailed? = gpuAttestation { return ListedEnclaveReason.enclaveFailed }
+        if case .listedInconclusive? = gpuAttestation { return KeyCustodyCopy.listedSentence(.unfinished) }
         if let gpu = gpuAttestation, gpu.isUnverified {
             return gpu.isHardFailure
                 ? "nvidia gpu attestation failed verification."
@@ -257,9 +297,11 @@ extension ConfidentialSession {
             if !mqv.isVerified { return "the model's hardware attestation failed verification." }
             if attestation.e2eeKeyBoundToModelTEE == false { return "the encryption key isn't bound to verified hardware." }
         } else {
-            return NRASVerification.evidenceAbsent
+            return "the encryption key isn't bound to verified hardware."
         }
         // The mildest reason: last, so it never masks a worse one in the hero.
+        if attestation.modelCandidatesListFailed { return ListedEnclaveReason.listFailed }
+        if listedScopeEvidenceAbsent { return NRASVerification.evidenceAbsent }
         if tierGaveUp { return VerdictDeadline.tierReason }
         return nil
     }
@@ -270,7 +312,7 @@ extension ConfidentialSession {
     /// unverified image inside the enclave boundary, not plaintext on the
     /// wire. The confirmation alert uses this to say the truth ("still
     /// encrypted — code unverified") instead of the misleading "send
-    /// unencrypted" (observed: a node-lottery provenance 404 read as an
+    /// without encryption" (observed: a node-lottery provenance 404 read as an
     /// encryption failure).
     var provenanceBlockedButE2EEIntact: Bool {
         // An unpublished-only image never blocks by itself, so any ask beside it is about something else.
@@ -285,8 +327,9 @@ extension ConfidentialSession {
         guard imageProvenance?.isUnpublishedOnly == true, e2eeBindingIntact, let attestation else { return false }
         // Belt (android parity): any hard break beside the image ends the exemption, listed above or not.
         guard !degradeIsHardFailure else { return false }
-        return !modelComposeIntegrityFailed && trustScope?.hardBreak != true && !couldntCheckHardware
+        return !modelComposeIntegrityFailed && trustScope?.hardBreak != true && !listedScopeBroken && !couldntCheckHardware
             && !recordIsStaleAndUnrefreshable(attestation) && lastRequestUsedE2EE != false && !tierGaveUp
+            && !attestation.modelCandidatesListFailed && !listedScopeEvidenceAbsent
     }
 
     /// Key bound to a verified model TEE; GPU/TLS not in an unverified state.
@@ -298,7 +341,7 @@ extension ConfidentialSession {
         guard let att = attestation,
               dcapVerification?.hasHardFailure != true,
               att.codeIdentityVerified != false,
-              att.nonceEchoed != false,
+              att.nonceEchoed != false, !att.candidatesBroken,
               let key = att.modelEd25519PubKey, key.count == 32,
               att.modelQuoteVerification?.isVerified == true,
               att.e2eeKeyBoundToModelTEE != false else { return false }
@@ -321,9 +364,10 @@ extension ConfidentialSession {
         guard attestationState == .degraded, let att = attestation else { return false }
         if att.codeIdentityVerified == false { return true }
         if modelComposeIntegrityFailed { return true }
-        if trustScope?.hardBreak == true { return true }
+        if trustScope?.hardBreak == true || listedScopeBroken { return true }
         if dcapVerification?.hasHardFailure == true { return true }
         if att.nonceEchoed == false { return true }
+        if att.candidatesBroken { return true }
         // HARD only for a genuine negative verdict (NVIDIA rejection / nonce
         // replay; TLS fingerprint mismatch / binding failure). An unreachable
         // NRAS/TLS check is `.inconclusive` → soft: it still degrades (above),
@@ -334,10 +378,10 @@ extension ConfidentialSession {
             // Plaintext went out unsealed, or the key isn't bound to a verified
             // model TEE — both are hard breaks of the E2EE guarantee.
             if lastRequestUsedE2EE == false { return true }
-            if let mqv = att.modelQuoteVerification {
-                if !mqv.isVerified { return true }
-                if att.e2eeKeyBoundToModelTEE == false { return true }
-            }
+            // A key no readable quote proves is unproven: whoever answered chose it. Never "still checking" (1.1.0 audit LOW).
+            guard let mqv = att.modelQuoteVerification else { return true }
+            if !mqv.isVerified { return true }
+            if att.e2eeKeyBoundToModelTEE == false { return true }
         }
         // Remaining degrades — provenance `.incomplete` with E2EE intact, no
         // Ed25519 key, or model attestation simply unavailable — are advisory.
@@ -351,6 +395,8 @@ extension ConfidentialSession {
     /// Siri/Shortcuts `RequestLLMIntent` — must consult THIS property; a
     /// second derivation is exactly how the intent bypassed the gate.
     var sendPolicy: TrustSendPolicy {
+        // Item 1: the capability guard below is exactly where a demoted model falls out, so this comes first.
+        if sealedModelWentPlain { return .confirm }
         let policy = TrustVerdict.sendPolicy(requiresConfirmation: requiresE2EEConfirmation,
                                              hardFailure: degradeIsHardFailure)
         return policy == .allow && provenanceUncheckedAsks ? .confirm : policy

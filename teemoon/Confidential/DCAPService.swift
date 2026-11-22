@@ -28,21 +28,26 @@ struct RecordDCAPVerification: Equatable, Sendable {
     var gateway: DCAPVerification?
     var model: DCAPVerification?
     var gpu: DCAPVerification?
+    /// Every enclave near.ai listed for the model, in list order: each holds the sealed key, so each quote goes
+    /// through the same DCAP path as `model` and the same gates read it (audit 1.1.1).
+    var listed: [DCAPVerification] = []
+
+    private var all: [DCAPVerification] { [gateway, model, gpu].compactMap { $0 } + listed }
 
     /// True when any present quote hard-fails DCAP — verification failure
     /// (incl. unavailable collateral) or a TCB status outside the allow-list.
     var hasHardFailure: Bool {
-        [gateway, model, gpu].compactMap { $0 }.contains { $0.isHardFailure }
+        all.contains { $0.isHardFailure }
     }
 
     /// Some quote couldn't be checked (Intel's collateral didn't arrive): soft, the send asks.
     var hasUnchecked: Bool {
-        [gateway, model, gpu].compactMap { $0 }.contains { $0.isUnchecked }
+        all.contains { $0.isUnchecked }
     }
 
     /// The least-trusted TCB status among verified quotes (for the sheet row).
     var worstTcbStatus: DCAPTcbStatus? {
-        let statuses = [gateway, model, gpu].compactMap { outcome -> DCAPTcbStatus? in
+        let statuses = all.compactMap { outcome -> DCAPTcbStatus? in
             if case .verified(let tcb, _, _) = outcome { return tcb }
             return nil
         }
@@ -55,14 +60,15 @@ struct RecordDCAPVerification: Equatable, Sendable {
 
     /// All present quotes verified (regardless of TCB status).
     var allPresentVerified: Bool {
-        let present = [gateway, model, gpu].compactMap { $0 }
+        let present = all
         return !present.isEmpty && present.allSatisfy(\.isVerified)
     }
 
     /// The first hard-failure reason, tagged with which quote failed — surfaced
     /// verbatim in the sheet so a DCAP failure is diagnosable without logs.
     var failureReason: String? {
-        for (label, outcome) in [("gateway", gateway), ("model", model), ("gpu", gpu)] {
+        let listedLabels = listed.enumerated().map { ("listed enclave \($0.offset + 1)", Optional($0.element)) }
+        for (label, outcome) in [("gateway", gateway), ("model", model), ("gpu", gpu)] + listedLabels {
             switch outcome {
             case .failed(let why):            return "\(label) quote — \(why)"
             case .verified(.revoked, _, _):   return "\(label) quote — TCB revoked by Intel"
@@ -86,14 +92,35 @@ extension DCAPVerification {
     }
 }
 
+/// Intel's answer per quote for one record: its verdicts and its trust scopes share them, in flight included.
+actor DCAPMemo {
+    private var answers: [String: Task<DCAPVerification, Never>] = [:]
+
+    func outcome(_ quoteHex: String, _ ask: @escaping @Sendable () async -> DCAPVerification) async -> DCAPVerification {
+        if let answer = answers[quoteHex] { return await answer.value }
+        let answer = Task { await ask() }
+        answers[quoteHex] = answer
+        return await answer.value
+    }
+}
+
 struct DCAPService {
     let verifier: DCAPVerifier
+    private var memo: DCAPMemo?
 
     // IntelPCSCollateralProvider caches the shareable per-FMSPC collateral
     // itself, so a record's gateway/model/GPU quotes cost one PCS round trip
     // while each still verifies against its own PCK chain.
     init(collateral: CollateralProvider = IntelPCSCollateralProvider()) {
         self.verifier = DCAPVerifier(collateral: collateral)
+    }
+
+    /// A copy whose dcap-qvl answers are shared by quote for one record's pass. Never share one across records: its
+    /// clock (`nowSecs`) is the record's.
+    func forOneRecord() -> DCAPService {
+        var pass = self
+        pass.memo = DCAPMemo()
+        return pass
     }
 
     /// DCAP-verifies every quote in `record`. `nowSecs` defaults to the
@@ -108,6 +135,15 @@ struct DCAPService {
                                          advertised: record.modelAdvertisedReportData, nowSecs: now)
         result.gpu = await verifyQuote(record.gpuIntelQuote, label: "gpu", crossCheck: record.gpuQuoteVerification,
                                        advertised: record.gpuAdvertisedReportData, nowSecs: now)
+        for (i, enclave) in (record.modelCandidates?.enclaves ?? []).enumerated() {
+            // A listed enclave with no quote is evidence, never skipped (ModelCandidates.check says so too).
+            guard let quote = enclave.quoteHex, !quote.isEmpty else {
+                result.listed.append(.failed("listed enclave carries no quote")); continue
+            }
+            let outcome = await verifyQuote(quote, label: "listed \(i + 1)", crossCheck: try? TDXQuoteVerifier.verify(quoteHex: quote),
+                                            advertised: enclave.advertisedReportData, nowSecs: now)
+            result.listed.append(outcome ?? .failed("listed enclave carries no quote"))
+        }
         return result
     }
 
@@ -126,7 +162,13 @@ struct DCAPService {
             logger.warning("[dcap] \(label, privacy: .public) quote failed teemoon's own check: \(why, privacy: .public)")
             return .failed(why)
         }
-        let outcome = await verifier.verify(quoteHex: quoteHex, nowSecs: nowSecs)
+        let verifier = verifier
+        let outcome: DCAPVerification
+        if let memo {
+            outcome = await memo.outcome(quoteHex) { await verifier.verify(quoteHex: quoteHex, nowSecs: nowSecs) }
+        } else {
+            outcome = await verifier.verify(quoteHex: quoteHex, nowSecs: nowSecs)
+        }
         guard case .verified(let tcb, let mrConfig, let reportData) = outcome else {
             logger.warning("[dcap] \(label, privacy: .public) quote failed: \(String(describing: outcome), privacy: .public)")
             return outcome

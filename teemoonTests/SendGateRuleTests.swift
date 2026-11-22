@@ -4,11 +4,12 @@
 //
 //  near-send-gate-rule (the maintainer 2026-11-06), run from conformance/sendgate.json so android holds the same table:
 //  outages (Intel PCS, NVIDIA, the TLS probe, GitHub, near.ai) ask or pass, never block; every evidence case
-//  blocks; a seal-holding soft state never reaches "send unencrypted"; the audits index never gates.
+//  blocks; a seal-holding soft state never reaches "send without encryption"; the audits index never gates.
 //
 
 import Foundation
 import Testing
+import TDXQuoteVerifier
 @testable import teemoon
 
 @Suite("The send gate blocks only on evidence")
@@ -71,6 +72,8 @@ struct SendGateRuleTests {
                 let error = CollateralHTTPError(status: Int(parts[1])!, host: "api.trustedservices.intel.com",
                                                 path: Self.pcsPath[parts[0]]!)
                 dcap.model = DCAPVerifier.couldntCheck(error) ? .unchecked("collateral: \(error)") : .failed("collateral: \(error)")
+            case ("listedDcap", "failed"): dcap.listed = [Self.upToDate, .failed("signature invalid")]
+            case ("listedDcap", "unchecked"): dcap.listed = [Self.upToDate, .unchecked("collateral: pcs unreachable")]
             case ("dcap", "revoked"): dcap.model = .verified(tcbStatus: .revoked, mrConfigIdHex: "", reportDataHex: "")
             case ("nras", "inconclusive"): session.gpuAttestation = .inconclusive("NRAS unreachable")
             case ("nras", "failed"): session.gpuAttestation = .failed("NVIDIA rejected the evidence")
@@ -109,12 +112,33 @@ struct SendGateRuleTests {
                 var record = AttestationRecord.preview
                 record.modelComposeManifest = "services: {}"
                 session.attestation = record
+            case ("modelQuote", "absent"):
+                session.attestation = Self.keyWithNoQuote()
             case ("nras", "absent"):
                 var record = AttestationRecord.preview
                 record.modelIntelQuote = "aa"
                 record.nvidiaPayload = nil
                 session.attestation = record
                 session.verifyGPU(for: record)
+            // C3: the listed enclaves (ModelCandidatesTests runs the checks themselves on the live list).
+            case ("candidates", let kind):
+                var record = AttestationRecord.preview
+                if kind == "listFailed" { record.modelCandidatesListFailed = true } else {
+                    let bad = ModelCandidates.Mismatch(rawValue: kind) ?? .mrConfig   // "mismatch": any check
+                    record.modelCandidates = ModelCandidatesGateTests.listed([.clean, .mismatch(bad), .clean])
+                }
+                session.attestation = record
+            // A4: a listed enclave's trust scope (ListedTrustScopeTests runs TrustScope.run on the live list).
+            case ("listedScope", let kind):
+                let bad: TrustScope? = switch kind {
+                case "bindingMismatch": TrustScope(binding: .mismatch(.actionsHash), boot: .matches)
+                case "bootMismatch": TrustScope(binding: .bound, boot: .mismatch(.rtmr3))
+                case "bindingUnchecked": TrustScope(binding: .unchecked, boot: .matches)
+                case "bootAbsent": TrustScope(binding: .bound, boot: .absent)
+                default: nil
+                }
+                if bad == nil { Issue.record("unknown listedScope \(kind)") }
+                session.listedTrustScopes = [TrustScope(binding: .bound, boot: .matches)] + (bad.map { [$0] } ?? [])
             case ("audit", "leaks"): break   // nothing in the gate reads the audits index: see below
             default: Issue.record("unknown change \(key)=\(value)")
             }
@@ -130,6 +154,72 @@ struct SendGateRuleTests {
         case .block: "blocked"
         case .confirm: s.provenanceUncheckedAsks ? "provenanceUnchecked" : s.softButSealed ? "stillChecking" : "unavailable"
         }
+    }
+
+    /// The preview record with its model key kept and no model quote: what a report with a key and no readable quote parses to.
+    static func keyWithNoQuote() -> AttestationRecord {
+        var record = AttestationRecord.preview
+        record.modelQuoteVerification = nil
+        record.modelIntelQuote = nil
+        return record
+    }
+
+    /// Audit v1.1.0-6c5f7a2 LOW: a key no quote proves blocks, and is never the "still checking" ask with send anyway.
+    @Test func aModelKeyWithNoQuoteBlocks() {
+        let s = session(["modelQuote": "absent"])
+        #expect(s.attestation?.modelEd25519PubKey?.count == 32)
+        #expect(s.degradeIsHardFailure)
+        #expect(s.sendPolicy == .block)
+        #expect(s.e2eeDegradedReason == "the encryption key isn't bound to verified hardware.")
+    }
+
+    /// Audit 1.1.1: a listed enclave whose quote is signed by a key it carries itself blocks the send, through the gate.
+    @Test func aForgedListedEnclaveBlocks() throws {
+        let f = try ForgedSibling.load()
+        let s = session([:])
+        #expect(s.sendPolicy == .allow)
+        var record = s.attestation!
+        record.modelCandidates = ModelCandidates.enclaves(body: f.listBody, nonce: f.nonce, sealedKey: f.sealedKey)
+        s.attestation = record
+        #expect(s.sendPolicy == .block)
+        #expect(s.degradeIsHardFailure)
+    }
+
+    /// Audit 1.1.1: a listed enclave's DCAP verdict gates like the model leg's: failure blocks, couldn't-check asks.
+    @Test func aListedEnclavesDCAPGatesLikeTheModelLegs() {
+        let failed = session(["listedDcap": "failed"])
+        #expect(failed.sendPolicy == .block)
+        #expect(failed.degradeIsHardFailure)
+        let unchecked = session(["listedDcap": "unchecked"])
+        #expect(unchecked.sendPolicy == session(["dcap": "unchecked"]).sendPolicy)
+        #expect(!unchecked.degradeIsHardFailure)
+    }
+
+    /// Audit 1.1.1 / release handoff (b): the forged quote as the read enclave's own, Intel unreachable. The local
+    /// parse must refuse it, so the send blocks instead of asking "still checking" with send anyway.
+    @Test func aForgedFirstEnclaveBlocksWhileIntelCannotBeReached() throws {
+        let f = try ForgedSibling.load()
+        let s = session(["dcap": "unchecked"])
+        #expect(s.sendPolicy != .block)   // Intel unreachable alone asks
+        let p = AttestationRecord.preview
+        var record = AttestationRecord(
+            composeHash: p.composeHash, mrtd: p.mrtd, osImageHash: p.osImageHash, modelOSImageHash: p.modelOSImageHash,
+            intelQuote: p.intelQuote, composeManifest: p.composeManifest, gpuArch: p.gpuArch,
+            gpuNodeComposeHash: p.gpuNodeComposeHash, gpuNodeComposeManifest: p.gpuNodeComposeManifest,
+            modelFileHash: p.modelFileHash, modelComposePath: p.modelComposePath, modelComposeCommit: p.modelComposeCommit,
+            modelComposeTag: p.modelComposeTag, modelDeployedAt: p.modelDeployedAt,
+            modelPreviouslyDeployedAt: p.modelPreviouslyDeployedAt, signingAddress: p.signingAddress,
+            gpuSigningAddress: p.gpuSigningAddress, modelEd25519PubKey: f.sealedKey,
+            quoteVerification: p.quoteVerification, gpuQuoteVerification: p.gpuQuoteVerification,
+            modelQuoteVerification: try TDXQuoteVerifier.verify(quoteHex: f.quoteHex),
+            fetchedAt: p.fetchedAt, providerID: p.providerID, model: p.model)
+        record.modelIntelQuote = f.quoteHex
+        // The forged quote carries the record's own key and our nonce: only the QE binding can refuse it.
+        #expect(record.e2eeKeyInModelReportData == true)
+        s.attestation = record
+        #expect(record.e2eeKeyBoundToModelTEE == false)
+        #expect(s.sendPolicy == .block)
+        #expect(s.degradeIsHardFailure)
     }
 
     @Test func everyVectorGivesItsPolicyAndAlert() throws {
@@ -149,7 +239,7 @@ struct SendGateRuleTests {
         for vector in v.vectors where vector.policy == "confirm" {
             let s = session(vector.change)
             #expect(s.currentTEEContext()?.e2eePeer != nil, "\(vector.name): precondition, the send would be sealed")
-            #expect(alert(s) != "unavailable", "\(vector.name) reached 'end-to-end encryption unavailable · send unencrypted'")
+            #expect(alert(s) != "unavailable", "\(vector.name) reached 'end-to-end encryption unavailable · send without encryption'")
         }
     }
 
@@ -226,7 +316,7 @@ struct SendGateRuleTests {
                     : ask.title == E2EESendChoice.stillCheckingTitle ? "stillChecking" : ask.title
                 #expect(askName == source.ask, "\(source.name): asked \(askName)")
                 #expect(ask.choices.map(\.label) == ["send anyway", "wait"], "\(source.name)")
-                live.rememberConfirmation(pending: true)
+                live.rememberConfirmation(pending: true, answering: .verification)
                 let key = live.confirmationKey(pending: true) ?? ""
                 #expect(key.hasSuffix("|\(source.confirmReason)"), "\(source.name): confirmed as \(key)")
                 #expect(live.hasConfirmed(pending: true))
@@ -380,7 +470,7 @@ struct SendGateRuleTests {
     @Test func aConfirmIsAskedOncePerRecordAndReason() {
         let s = session(["dcap": "unchecked"])
         #expect(s.sendPolicyAfterConfirmations == .confirm)
-        s.rememberConfirmation(pending: false)
+        s.rememberConfirmation(pending: false, answering: .verification)
         #expect(s.sendPolicyAfterConfirmations == .allow, "the same record and reason don't ask again")
         s.gpuAttestation = .inconclusive("NRAS unreachable")
         s.dcapVerification = { var d = RecordDCAPVerification(); d.model = Self.upToDate; return d }()

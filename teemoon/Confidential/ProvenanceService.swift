@@ -346,12 +346,10 @@ struct ProvenanceService {
     /// Docker Hub as `nearaidev/<name>`, so the trailing path component maps
     /// across. The verifier's SAN identity check is the real gate — this only
     /// picks which repo to query.
-    /// Images whose attestations are published by a different repo than the
-    /// image name suggests (verified empirically against GitHub's attestation
-    /// API). Only affects where we LOOK for the attestation — the certificate's
-    /// SAN identity still determines the trusted source.
-    private static let repoAliases = [
+    /// Only where to LOOK; the SAN identity is the gate. SelfVerifyScript's REPO_ALIASES must match (tested), and each row needs a fixture test.
+    static let repoAliases = [
         "compose-manager-launcher": "compose-manager",
+        "compose-manager-otelcol": "compose-manager",
         "vllm-proxy-rs": "inference-proxy",
     ]
 

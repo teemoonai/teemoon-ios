@@ -1,0 +1,363 @@
+{
+  "fixtureClass" : "reveal",
+  "kitVersion" : "0.5.5",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "cases" : [
+      {
+        "events" : [
+          {
+            "arrive" : "Hello there.",
+            "atMs" : 0,
+            "finish" : false
+          },
+          {
+            "arrive" : "Hello there.\n\n",
+            "atMs" : 200,
+            "finish" : false
+          }
+        ],
+        "name" : "quick-paragraph-whole-with-fade",
+        "note" : "complete 200 ms after its first character: held, then whole, fading for 300 ms",
+        "probes" : [
+          {
+            "atMs" : 100,
+            "shown" : ""
+          },
+          {
+            "atMs" : 200,
+            "fadeFrom" : 0,
+            "shown" : "Hello there.\n\n"
+          },
+          {
+            "atMs" : 499,
+            "fadeFrom" : 0,
+            "shown" : "Hello there.\n\n"
+          },
+          {
+            "atMs" : 500,
+            "shown" : "Hello there.\n\n"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "one two three four five six seven eight nine ten",
+            "atMs" : 0,
+            "finish" : false
+          }
+        ],
+        "name" : "a-time-based-steps",
+        "note" : "48 characters still arriving: one step at 250 (ceil(48/9)=6, into \"two\", to 7); at 360, floor(110/16.67)=6 steps: 13, 18, 23, 27, 33, 39",
+        "probes" : [
+          {
+            "atMs" : 249,
+            "shown" : ""
+          },
+          {
+            "atMs" : 250,
+            "shown" : "one two"
+          },
+          {
+            "atMs" : 360,
+            "shown" : "one two three four five six seven eight"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "alpha beta gamm",
+            "atMs" : 0,
+            "finish" : false
+          }
+        ],
+        "name" : "b-partial-word-waits-300ms-from-the-run-in",
+        "note" : "\"gamm\" has no end yet: the reveal runs into it at 360 and holds at \"beta\" until 660; at 670 it shows to the arrived end",
+        "probes" : [
+          {
+            "atMs" : 250,
+            "shown" : "alpha"
+          },
+          {
+            "atMs" : 360,
+            "shown" : "alpha beta"
+          },
+          {
+            "atMs" : 650,
+            "shown" : "alpha beta"
+          },
+          {
+            "atMs" : 670,
+            "shown" : "alpha beta gamm"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "alpha beta gamma delta",
+            "atMs" : 0,
+            "finish" : false
+          },
+          {
+            "arrive" : "alpha beta gamma delta epsilon.\n\n",
+            "atMs" : 300,
+            "finish" : false
+          }
+        ],
+        "name" : "c-completes-mid-reveal-snaps-without-fade",
+        "note" : "part of it was showing when it completed, so it snaps whole and nothing fades",
+        "probes" : [
+          {
+            "atMs" : 250,
+            "shown" : "alpha"
+          },
+          {
+            "atMs" : 300,
+            "shown" : "alpha beta gamma delta epsilon.\n\n"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "alpha beta gamma delta",
+            "atMs" : 0,
+            "finish" : false
+          },
+          {
+            "arrive" : "alpha beta gamma delta\n\nnext para words",
+            "atMs" : 300,
+            "finish" : false
+          }
+        ],
+        "name" : "d-new-paragraph-snaps-the-previous-and-starts-its-own-hold",
+        "note" : "the second paragraph's first character arrives at 300: the first snaps whole (no fade) and the second is held for holdMs, until 900, when one step shows \"next\"",
+        "probes" : [
+          {
+            "atMs" : 250,
+            "shown" : "alpha"
+          },
+          {
+            "atMs" : 300,
+            "shown" : "alpha beta gamma delta\n\n"
+          },
+          {
+            "atMs" : 899,
+            "shown" : "alpha beta gamma delta\n\n"
+          },
+          {
+            "atMs" : 900,
+            "shown" : "alpha beta gamma delta\n\nnext"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "Short answer here.",
+            "atMs" : 0,
+            "finish" : false
+          },
+          {
+            "arrive" : "Short answer here.\n\n",
+            "atMs" : 400,
+            "finish" : false
+          }
+        ],
+        "name" : "e-a-first-paragraph-completing-after-250ms-flows-in",
+        "note" : "completes at 400, inside 600 but past firstHoldMs: it started flowing at 250 (\"Short\"; at 310, floor(60/16.67)=3 steps reach \"answer\" and stop at the arriving \"here.\"), then snaps whole with no fade",
+        "probes" : [
+          {
+            "atMs" : 249,
+            "shown" : ""
+          },
+          {
+            "atMs" : 250,
+            "shown" : "Short"
+          },
+          {
+            "atMs" : 310,
+            "shown" : "Short answer"
+          },
+          {
+            "atMs" : 400,
+            "shown" : "Short answer here.\n\n"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "First.\n\nSecond paragraph",
+            "atMs" : 0,
+            "finish" : false
+          }
+        ],
+        "name" : "f-a-later-paragraph-still-waits-600ms",
+        "note" : "the first paragraph is complete at 0 and fades in; the second's first character also arrives at 0 but it is held for holdMs, not firstHoldMs: nothing of it at 599, one step (\"Second\") at 600",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "fadeFrom" : 0,
+            "shown" : "First.\n\n"
+          },
+          {
+            "atMs" : 300,
+            "shown" : "First.\n\n"
+          },
+          {
+            "atMs" : 599,
+            "shown" : "First.\n\n"
+          },
+          {
+            "atMs" : 600,
+            "shown" : "First.\n\nSecond"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "```\nline one\n\nline two\n```\n\n",
+            "atMs" : 0,
+            "finish" : false
+          }
+        ],
+        "name" : "a-fence-is-one-paragraph",
+        "note" : "the blank line inside the fence does not split it",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "fadeFrom" : 0,
+            "shown" : "```\nline one\n\nline two\n```\n\n"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "First para.\n\nSecond",
+            "atMs" : 0,
+            "finish" : false
+          },
+          {
+            "atMs" : 100,
+            "finish" : true
+          }
+        ],
+        "name" : "finished-paragraphs-show-at-once-and-finish-shows-all",
+        "note" : "the first paragraph is complete on arrival; the second is held until the stream ends",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "fadeFrom" : 0,
+            "shown" : "First para.\n\n"
+          },
+          {
+            "atMs" : 100,
+            "shown" : "First para.\n\nSecond"
+          }
+        ],
+        "source" : "cloud"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "one two three four five six seven eight nine ten",
+            "atMs" : 0,
+            "finish" : false
+          }
+        ],
+        "name" : "g-on-device-the-first-paragraph-flows-at-once",
+        "note" : "case (a) from the phone: no first hold, so the first step is at 0 (ceil(48/9)=6, into \"two\", to 7) and at 110 floor(110/16.67)=6 steps reach \"eight\", as (a) does at 250 and 360",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "shown" : "one two"
+          },
+          {
+            "atMs" : 110,
+            "shown" : "one two three four five six seven eight"
+          }
+        ],
+        "source" : "onDevice"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "Hello there.",
+            "atMs" : 0,
+            "finish" : false
+          },
+          {
+            "arrive" : "Hello there.\n\n",
+            "atMs" : 200,
+            "finish" : false
+          }
+        ],
+        "name" : "h-on-device-a-quick-first-paragraph-is-not-held-back",
+        "note" : "the quick paragraph from the phone: \"Hello\" shows at 0 (ceil(12/9)=2, to the end of the word); it completes at 200 with part of it showing, so it snaps whole without a fade",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "shown" : "Hello"
+          },
+          {
+            "atMs" : 200,
+            "shown" : "Hello there.\n\n"
+          }
+        ],
+        "source" : "onDevice"
+      },
+      {
+        "events" : [
+          {
+            "arrive" : "First.\n\nSecond paragraph",
+            "atMs" : 0,
+            "finish" : false
+          }
+        ],
+        "name" : "i-on-device-a-later-paragraph-still-waits-600ms",
+        "note" : "case (f) from the phone: only the first paragraph loses its hold; the second is held for holdMs, nothing of it at 599, one step (\"Second\") at 600",
+        "probes" : [
+          {
+            "atMs" : 0,
+            "fadeFrom" : 0,
+            "shown" : "First.\n\n"
+          },
+          {
+            "atMs" : 599,
+            "shown" : "First.\n\n"
+          },
+          {
+            "atMs" : 600,
+            "shown" : "First.\n\nSecond"
+          }
+        ],
+        "source" : "onDevice"
+      }
+    ],
+    "constants" : {
+      "divisor" : 9,
+      "fadeMs" : 300,
+      "firstHoldMs" : 250,
+      "holdMs" : 600,
+      "onDeviceFirstHoldMs" : 0,
+      "partialWaitMs" : 300,
+      "stepMs" : "1000/60"
+    },
+    "harness" : "Start a StreamReveal for the case's source (cloud or onDevice). Replay events and probes in time order, an event before a probe at the same time. An event calls arrive(text, atMs) or finish(); a probe calls frame(atMs) and compares the shown prefix and fadeFrom. frame() is called only at probe times. Texts are ASCII, so offsets are characters on both platforms.",
+    "rule" : "A paragraph is the text between blank lines; a fenced block counts as one, and a paragraph's end includes the blank line that closes it. A paragraph is held for holdMs from its first arrived character; the answer's first paragraph (the one starting at offset 0) for firstHoldMs instead, or onDeviceFirstHoldMs when the case's source is onDevice. If it completes in that time it is shown whole and fades in over fadeMs (fadeFrom = its start). Otherwise the reveal starts: the first frame after the hold takes exactly one step, and later frames take floor(elapsed / stepMs) steps from the last step. A step moves the shown end ceil(deficit / divisor) characters, then forward to the end of the word it lands in (before the following whitespace), when that end has arrived. A trailing word still arriving holds the shown end at the last whitespace until partialWaitMs after the reveal first ran into it, then shows to the arrived end. A paragraph that completes after some of it was shown snaps whole without a fade; a new paragraph's arrival completes the one before it. The end of the stream shows everything."
+  }
+}

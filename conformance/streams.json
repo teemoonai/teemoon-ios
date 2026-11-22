@@ -1,0 +1,105 @@
+{
+  "fixtureClass" : "streams",
+  "kitVersion" : "0.5.5",
+  "sourceOfTruth" : "teemoon-ios",
+  "vectors" : {
+    "cases" : [
+      {
+        "availableTools" : [
+
+        ],
+        "contentMustNotContain" : [
+          "<tool_call>",
+          "<arg_key>",
+          "<arg_value>"
+        ],
+        "events" : [
+          "{\"id\":\"chatcmpl-glm52-canonical\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me look that up. \"}}]}",
+          "{\"id\":\"chatcmpl-glm52-canonical\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<tool_call>web_search\\n<arg_key>query</arg_key>\\n<arg_value>federal funds rate 2026</arg_value>\\n</tool_call>\"},\"finish_reason\":\"stop\"}]}"
+        ],
+        "expectToolCalls" : [
+          "web_search"
+        ],
+        "finalContent" : "Let me look that up.",
+        "hasTools" : true,
+        "name" : "nearai/GLM-5.2/canonical-argkey-argvalue",
+        "recoveredToolNames" : [
+          "web_search"
+        ]
+      },
+      {
+        "availableTools" : [
+          {
+            "name" : "web_search",
+            "params" : [
+              "query",
+              "freshness",
+              "contextThresholdMode",
+              "count"
+            ],
+            "required" : [
+              "query"
+            ]
+          }
+        ],
+        "contentMustNotContain" : [
+          "<tool_call>",
+          "</arg_value>",
+          "frobnicate",
+          "destroy the moon"
+        ],
+        "events" : [
+          "{\"id\":\"chatcmpl-glm52-lowconf\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Sure, let me handle that. \"}}]}",
+          "{\"id\":\"chatcmpl-glm52-lowconf\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<tool_call>frobnicate_thing=\\\"destroy the moon\\\"</arg_value></tool_call>\"},\"finish_reason\":\"stop\"}]}"
+        ],
+        "expectToolCalls" : [
+
+        ],
+        "finalContent" : "Sure, let me handle that.",
+        "hasTools" : true,
+        "name" : "nearai/GLM-5.2/low-confidence-unknown-tool",
+        "recoveredToolNames" : [
+
+        ]
+      },
+      {
+        "availableTools" : [
+          {
+            "name" : "web_search",
+            "params" : [
+              "query",
+              "freshness",
+              "contextThresholdMode",
+              "count"
+            ],
+            "required" : [
+              "query"
+            ]
+          }
+        ],
+        "contentMustNotContain" : [
+          "<tool_call>",
+          "</arg_value>",
+          "web_search_query_simple"
+        ],
+        "events" : [
+          "{\"id\":\"chatcmpl-glm52-malformed\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Good, I have the current rate environment. \"}}]}",
+          "{\"id\":\"chatcmpl-glm52-malformed\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me get one more piece on the specific funding mechanisms.\"}}]}",
+          "{\"id\":\"chatcmpl-glm52-malformed\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<tool_call>web_search_query_simple=\\\"block3 strategy X Money 6 percent yield math economics funding\\\"</arg_value></tool_call>\"}}]}",
+          "{\"id\":\"chatcmpl-glm52-malformed\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<tool_call>web_search_query_simple=\\\"Warren letter X Money 6% APY yield source Cross River 2026\\\"</arg_value></tool_call>\"},\"finish_reason\":\"stop\"}]}"
+        ],
+        "expectToolCalls" : [
+          "web_search",
+          "web_search"
+        ],
+        "finalContent" : "Good, I have the current rate environment. Let me get one more piece on the specific funding mechanisms.",
+        "hasTools" : true,
+        "name" : "nearai/GLM-5.2/malformed-kwarg-collapse",
+        "recoveredToolNames" : [
+          "web_search",
+          "web_search"
+        ]
+      }
+    ]
+  }
+}

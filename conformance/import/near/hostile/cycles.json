@@ -1,0 +1,247 @@
+[
+  {
+    "id": "conv_cycle",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": "A loop with no root"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "c_u1",
+        "response_id": "r_a",
+        "next_response_ids": [],
+        "created_at": 1761001000,
+        "status": "completed",
+        "previous_response_id": "r_b",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Loop question one."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "c_a1",
+        "response_id": "r_a",
+        "next_response_ids": [],
+        "created_at": 1761001001,
+        "status": "completed",
+        "previous_response_id": "r_b",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Loop answer one."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "c_u2",
+        "response_id": "r_b",
+        "next_response_ids": [],
+        "created_at": 1761001002,
+        "status": "completed",
+        "previous_response_id": "r_a",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Loop question two."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "c_a2",
+        "response_id": "r_b",
+        "next_response_ids": [],
+        "created_at": 1761001003,
+        "status": "completed",
+        "previous_response_id": "r_a",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Loop answer two."
+          }
+        ]
+      }
+    ],
+    "first_id": "c_u1",
+    "has_more": false,
+    "last_id": "c_a2",
+    "object": "list"
+  },
+  {
+    "id": "conv_self",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": "A response that is its own parent"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "s_u",
+        "response_id": "r_s",
+        "next_response_ids": [],
+        "created_at": 1761001100,
+        "status": "completed",
+        "previous_response_id": "r_s",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Self question."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "s_a",
+        "response_id": "r_s",
+        "next_response_ids": [],
+        "created_at": 1761001101,
+        "status": "completed",
+        "previous_response_id": "r_s",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Self answer."
+          }
+        ]
+      }
+    ],
+    "first_id": "s_u",
+    "has_more": false,
+    "last_id": "s_a",
+    "object": "list"
+  },
+  {
+    "id": "conv_loop_below",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": "A loop under a real root"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "b_u1",
+        "response_id": "r_1",
+        "next_response_ids": [
+          "r_2"
+        ],
+        "created_at": 1761001200,
+        "status": "completed",
+        "previous_response_id": "r_gone",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Root question."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "b_a1",
+        "response_id": "r_1",
+        "next_response_ids": [
+          "r_2"
+        ],
+        "created_at": 1761001201,
+        "status": "completed",
+        "previous_response_id": "r_gone",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Root answer."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "b_u2",
+        "response_id": "r_2",
+        "next_response_ids": [
+          "r_3"
+        ],
+        "created_at": 1761001202,
+        "status": "completed",
+        "previous_response_id": "r_1",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Second question."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "b_a2",
+        "response_id": "r_2",
+        "next_response_ids": [
+          "r_3"
+        ],
+        "created_at": 1761001203,
+        "status": "completed",
+        "previous_response_id": "r_1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Second answer."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "b_u3",
+        "response_id": "r_3",
+        "next_response_ids": [
+          "r_2",
+          "r_1"
+        ],
+        "created_at": 1761001204,
+        "status": "completed",
+        "previous_response_id": "r_2",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Third question."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "b_a3",
+        "response_id": "r_3",
+        "next_response_ids": [
+          "r_2",
+          "r_1"
+        ],
+        "created_at": 1761001205,
+        "status": "completed",
+        "previous_response_id": "r_2",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Third answer."
+          }
+        ]
+      }
+    ],
+    "first_id": "b_u1",
+    "has_more": false,
+    "last_id": "b_a3",
+    "object": "list"
+  }
+]

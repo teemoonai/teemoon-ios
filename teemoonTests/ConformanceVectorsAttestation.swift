@@ -315,7 +315,7 @@ enum ConformanceAttestationVectors {
     }
 
     static func nrasKind(_ v: NRASVerification) -> String {
-        switch v { case .verified: return "verified"; case .failed: return "failed"; case .inconclusive: return "inconclusive" }
+        switch v { case .verified: return "verified"; case .failed, .listedFailed: return "failed"; case .inconclusive, .listedInconclusive: return "inconclusive" }
     }
 
     static func nras(file: String = #filePath) async throws -> NrasVectors {

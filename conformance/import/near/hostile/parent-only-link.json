@@ -1,0 +1,83 @@
+[
+  {
+    "id": "conv_parent_only",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": "A link to a response known only as a parent"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "po_u1",
+        "response_id": "r1",
+        "next_response_ids": [
+          "r0x"
+        ],
+        "created_at": 1761001300,
+        "status": "completed",
+        "previous_response_id": "r0",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Root question."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "po_a1",
+        "response_id": "r1",
+        "next_response_ids": [
+          "r0x"
+        ],
+        "created_at": 1761001301,
+        "status": "completed",
+        "previous_response_id": "r0",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Root answer."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "po_u2",
+        "response_id": "r2",
+        "next_response_ids": [],
+        "created_at": 1761001302,
+        "status": "completed",
+        "previous_response_id": "r0x",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "A question under a missing parent."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "po_a2",
+        "response_id": "r2",
+        "next_response_ids": [],
+        "created_at": 1761001303,
+        "status": "completed",
+        "previous_response_id": "r0x",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "An answer under a missing parent."
+          }
+        ]
+      }
+    ],
+    "first_id": "po_u1",
+    "has_more": false,
+    "last_id": "po_a2",
+    "object": "list"
+  }
+]

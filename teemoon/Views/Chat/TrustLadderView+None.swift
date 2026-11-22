@@ -189,7 +189,7 @@ extension TrustLadderView {
                         "standard HTTPS protects your messages on the way to \(providerDisplayName) — like any secure site.")
                 noneRow("minus.circle", .secondary,
                         "not end-to-end to a sealed model",
-                        "\(providerDisplayName) can read your messages — nothing seals them so that only the model can open them.")
+                        "\(providerDisplayName) can read your messages — nothing seals them to the model's hardware.")
                 noneRow("minus.circle", .secondary,
                         "nothing to cryptographically verify",
                         "there's no hardware attestation, so teemoon can't prove where this runs or who can see it.")

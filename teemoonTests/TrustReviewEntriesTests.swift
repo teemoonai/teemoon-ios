@@ -60,7 +60,7 @@ struct TrustReviewEntriesTests {
         #expect(s.provenanceState == .unchecked)
         let verdict = TrustVerdict.make(.init(attestationState: .ok, modelName: "GLM", e2eeKeyBound: true,
                                               provenanceState: s.provenanceState))
-        #expect(verdict.heroTitle == "encrypted to GLM", "no \"only it can read this\" over an unchecked code check")
+        #expect(verdict.heroTitle == "encrypted to GLM", "no enclave-key tail over an unchecked code check")
         #expect(verdict.heroSubtitle == ProvenanceUncheckedText.header)
         #expect(verdict.chipCaption == "end-to-end encrypted", "the chip and title keep their words")
         #expect(verdict.everydayClaims.contains { $0.title == ProvenanceUncheckedText.step && $0.status == .alert })

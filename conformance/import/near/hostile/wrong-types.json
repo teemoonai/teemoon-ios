@@ -1,0 +1,396 @@
+[
+  {
+    "id": "conv_wt_items",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": "Wrong-typed items"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "m_u",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000000,
+        "status": "completed",
+        "previous_response_id": "r_outside",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "A plain question."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "m_f",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000002.5,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "float time"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "m_s",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": "1761000002",
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "string time"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "m_b",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": true,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "bool time"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": 7,
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000002,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "number id"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "m_r",
+        "response_id": null,
+        "next_response_ids": [],
+        "created_at": 1761000002,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "null response"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "m_c",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000002,
+        "status": "completed",
+        "role": "user",
+        "content": "a string, not parts"
+      },
+      {
+        "type": "message",
+        "id": "m_o",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000002,
+        "status": "completed",
+        "role": 7,
+        "content": [
+          {
+            "type": "input_text",
+            "text": "x"
+          }
+        ]
+      },
+      "a string where an item belongs",
+      null,
+      {
+        "type": "message",
+        "id": "m_parts",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000003,
+        "status": "completed",
+        "previous_response_id": "r_outside",
+        "role": "assistant",
+        "content": [
+          42,
+          null,
+          "text",
+          {
+            "type": "output_text",
+            "text": 99
+          },
+          {
+            "type": "output_text",
+            "text": "Parts survive.",
+            "annotations": "not a list"
+          },
+          {
+            "type": "output_text",
+            "text": "Sources survive.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": 5,
+                "title": "number url"
+              },
+              {
+                "type": "url_citation",
+                "url": "https://example.net/t",
+                "title": 7
+              },
+              "not an annotation"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_bad",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000003,
+        "status": "completed",
+        "previous_response_id": "r_outside",
+        "action": "not an object"
+      },
+      {
+        "type": "web_search_call",
+        "id": "ws_bad2",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000003,
+        "status": "completed",
+        "previous_response_id": "r_outside",
+        "action": {
+          "type": "search",
+          "sources": "nope"
+        }
+      },
+      {
+        "type": "message",
+        "id": "m_a",
+        "response_id": "r_1",
+        "next_response_ids": [],
+        "created_at": 1761000001,
+        "status": "completed",
+        "previous_response_id": "r_outside",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "A plain answer."
+          }
+        ]
+      }
+    ],
+    "first_id": "m_u",
+    "has_more": false,
+    "last_id": "m_a",
+    "object": "list"
+  },
+  {
+    "id": "conv_wt_prev",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": "Wrong-typed links"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "p_u",
+        "response_id": "r_p",
+        "next_response_ids": "r_q",
+        "created_at": 1761000100,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Links of the wrong type."
+          }
+        ],
+        "previous_response_id": 5
+      },
+      {
+        "type": "message",
+        "id": "p_a",
+        "response_id": "r_p",
+        "next_response_ids": [],
+        "created_at": 1761000101,
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Still imported."
+          }
+        ]
+      }
+    ],
+    "first_id": "p_u",
+    "has_more": false,
+    "last_id": "p_a",
+    "object": "list"
+  },
+  {
+    "id": "conv_wt_meta",
+    "created_at": 1761000000,
+    "metadata": "not an object",
+    "data": [
+      {
+        "type": "message",
+        "id": "t_u",
+        "response_id": "r_t",
+        "next_response_ids": [],
+        "created_at": 1761000200,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Metadata is a string."
+          }
+        ]
+      }
+    ],
+    "first_id": "t_u",
+    "has_more": false,
+    "last_id": "t_u",
+    "object": "list"
+  },
+  {
+    "id": "conv_wt_title",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": 42
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "n_u",
+        "response_id": "r_n",
+        "next_response_ids": [],
+        "created_at": 1761000300,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "The title is a number."
+          }
+        ]
+      }
+    ],
+    "first_id": "n_u",
+    "has_more": false,
+    "last_id": "n_u",
+    "object": "list"
+  },
+  {
+    "id": "conv_wt_legacy",
+    "created_at": 1761000000,
+    "metadata": {
+      "title": "imported_at is a bool",
+      "imported_at": true
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "l_u",
+        "response_id": "r_l1",
+        "next_response_ids": [],
+        "created_at": 1761000400,
+        "status": "completed",
+        "previous_response_id": "r_none",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "First."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "id": "l_a",
+        "response_id": "r_l1",
+        "next_response_ids": [],
+        "created_at": 1761000401,
+        "status": "completed",
+        "previous_response_id": "r_none",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Kept: imported_at true is not a legacy marker."
+          }
+        ]
+      }
+    ],
+    "first_id": "l_u",
+    "has_more": false,
+    "last_id": "l_a",
+    "object": "list"
+  },
+  {
+    "id": "conv_wt_created",
+    "created_at": "yesterday",
+    "metadata": {
+      "title": "created_at is a string"
+    },
+    "data": [
+      {
+        "type": "message",
+        "id": "c_u",
+        "response_id": "r_c",
+        "next_response_ids": [],
+        "created_at": 1761000500,
+        "status": "completed",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Conversation time is a string."
+          }
+        ]
+      }
+    ],
+    "first_id": "c_u",
+    "has_more": false,
+    "last_id": "c_u",
+    "object": "list"
+  },
+  {
+    "id": 7,
+    "data": []
+  },
+  {
+    "id": "conv_wt_data",
+    "data": {
+      "not": "a list"
+    }
+  },
+  "a string where a conversation belongs"
+]

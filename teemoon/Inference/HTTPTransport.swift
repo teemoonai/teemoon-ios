@@ -121,7 +121,8 @@ struct HTTPTransport: GenerationTransport {
         }
         request.httpBody = bodyToSend
 
-        // 4. One plain request.
+        // 4. One plain request. A sealed one arms its model here, before any reply: errors and stops count.
+        if isE2EEActive { teeContext?.noteSealedRequest() }
         let sentAt = Date()
         let (bytes, response) = try await urlSession.bytes(for: request)
         let responseAt = Date()

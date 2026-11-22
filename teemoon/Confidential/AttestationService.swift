@@ -163,6 +163,14 @@ enum AttestationService {
         record.gpuAdvertisedReportData = gpu?.advertisedReportData
         record.modelComposeManifest = modelAtt?.appCompose
         record.gpuNodeHost = gpu == nil ? nil : gpuNodeURL?.host
+        // C3: every enclave near.ai lists for the model holds the key the request is sealed to.
+        // Asked only once a key exists to check against: a leg that gave nothing costs no extra request.
+        if !model.isEmpty, let key = modelAtt?.ed25519PubKey {
+            if let (body, nonce) = await candidateList(baseURL: baseURL, model: model, apiKey: apiKey, http: http) {
+                record.modelCandidates = adoptCandidates(body: body, nonce: nonce, sealedKey: key)
+            }
+            record.modelCandidatesListFailed = record.modelCandidates == nil
+        }
         return record
     }
 

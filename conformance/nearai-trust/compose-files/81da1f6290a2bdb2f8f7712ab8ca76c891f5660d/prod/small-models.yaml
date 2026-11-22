@@ -1,0 +1,3905 @@
+x-logging-conf: &logging-conf
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "10"
+    labels: "com.datadoghq.ad.logs,com.docker.compose.service"
+
+# Non-chat models (FLUX, embedding, reranker, whisper) use /v1/models
+
+x-nvidia: &nvidia
+  runtime: nvidia
+  ipc: host
+  ulimits:
+    memlock: -1
+    nofile:
+      soft: 65535
+      hard: 65535
+
+x-vllm-common: &vllm-common
+  <<: *nvidia
+  init: true
+  volumes:
+    - hugginface_cache:/root/.cache/huggingface
+    - vllm_cache:/root/.cache/vllm
+  restart: unless-stopped
+  stop_grace_period: 5m
+  logging: *logging-conf
+
+x-vllm-proxy-common: &vllm-proxy-common
+  image: nearaidev/vllm-proxy-rs@sha256:0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207
+  user: root
+  privileged: true
+  <<: *nvidia
+  extra_hosts:
+    - "compose-manager:host-gateway"
+  volumes:
+    - /var/run/dstack.sock:/var/run/dstack.sock
+    - certs:/etc/letsencrypt:ro
+  restart: unless-stopped
+  logging: *logging-conf
+
+x-dsv41-proxy-common: &dsv41-proxy-common
+  <<: *vllm-proxy-common
+  image: nearaidev/vllm-proxy-rs@sha256:0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207
+  extra_hosts:
+    - "compose-manager:host-gateway"
+    - "model-vllm-dsv41-dp4:host-gateway"
+    - "model-vllm-dsv41-dp5:host-gateway"
+    - "model-vllm-dsv41-dp6:host-gateway"
+    - "model-vllm-dsv41-dp7:host-gateway"
+
+x-vllm-env:
+  environment: &vllm-env
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    - VLLM_LOGGING_LEVEL=INFO
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    - OPENBLAS_L2_SIZE=2097152
+    - NCCL_DEBUG=INFO
+    - VLLM_CACHE_ROOT=/root/.cache/vllm
+
+x-sglang-env:
+  environment: &sglang-env
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    - VLLM_LOGGING_LEVEL=INFO
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    - OPENBLAS_L2_SIZE=2097152
+    - NCCL_DEBUG=INFO
+    - VLLM_CACHE_ROOT=/root/.cache/vllm
+    - SGLANG_CACHE_DIT_ENABLED=true
+
+x-qwen3-6-common: &qwen3-6-common
+  <<: *nvidia
+  init: true
+  # SGLang v0.5.16 (cu129) includes xgrammar 0.2.1, fixing the qwen3_coder
+  # forced-tool grammar regression reported in sgl-project/sglang#27336. Runtime defaults
+  # changed after v0.5.12, so the existing behavior is kept explicit below.
+  # https://lmsysorg.mintlify.app/cookbook/autoregressive/Qwen/Qwen3.6
+  image: lmsysorg/sglang:v0.5.16-cu129@sha256:984699c298a95b73c469b2191403ddc85fd780506e13c39c4afff3845e27bc6c
+  command: >
+      sglang serve
+      --model-path Qwen/Qwen3.6-35B-A3B-FP8
+      --revision 95a723d08a9490559dae23d0cff1d9466213d989
+      --tp 1
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_coder
+      --speculative-algorithm EAGLE
+      --speculative-num-steps 3
+      --speculative-eagle-topk 1
+      --speculative-num-draft-tokens 4
+      --mamba-radix-cache-strategy extra_buffer
+      --disable-prefill-cuda-graph
+      --mm-feature-transport cpu
+      --mem-fraction-static 0.85
+      --max-running-requests 128
+      --context-length 262144
+      --num-continuous-decode-steps 5
+      --model-loader-extra-config '{"enable_multithread_load": "true", "num_threads": 64}'
+      --enable-mixed-chunk
+      --chunked-prefill-size 16384
+      --port 8000
+      --host 0.0.0.0
+      --enable-cache-report
+      --enable-metrics
+      --trust-remote-code
+      --log-requests-level 0
+      --served-model-name Qwen/Qwen3.6-35B-A3B-FP8
+  volumes:
+    - hugginface_cache:/root/.cache/huggingface
+    - kernel_cache:/root/.cache/deep_gemm
+  environment:
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    - OPENBLAS_L2_SIZE=2097152
+    - NCCL_DEBUG=WARN
+  restart: unless-stopped
+  stop_grace_period: 5m
+  logging: *logging-conf
+
+# Qwen3.8 runs on GPU 2 beside the privacy filter; gpu23 GPU 0 is free; Sage runs on gpu13 GPU 0.
+# Dedicated recipe: prod/qwen36-qwen38.yaml with gpu13's cache volume.
+x-qwen3-8-27b-dedicated: &qwen3-8-27b-dedicated
+  <<: *nvidia
+  init: true
+  cap_add:
+    - SYS_NICE
+  image: lmsysorg/sglang@sha256:febfb971c7352570fc445c466ebd6ffc9d896024958e544a60f2137fd85856b1
+  # No --enable-mixed-chunk: with extra_buffer it caches stale GDN state and prefix hits return empty answers (sglang#39342).
+  command: >
+      sglang serve
+      --trust-remote-code
+      --model-path Qwen/Qwen3.8-27B-FP8
+      --revision 017b9c7af6b5689d5dd426a76e0bc077eb5ca20a
+      --served-model-name Qwen/Qwen3.8-27B
+      --tp 1
+      --mem-fraction-static 0.85
+      --attention-backend flashinfer
+      --mm-attention-backend fa3
+      --chunked-prefill-size 8192
+      --max-prefill-tokens 8192
+      --max-mamba-cache-size 320
+      --max-running-requests 64
+      --max-queued-requests 128
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_coder
+      --port 8000
+      --host 0.0.0.0
+      --enable-cache-report
+      --enable-metrics
+      --log-requests-level 0
+  volumes:
+    - hugginface_cache:/root/.cache/huggingface
+    - qwen38_kernel_cache:/root/.cache/sglang
+  environment:
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    - VLLM_LOGGING_LEVEL=INFO
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    - OPENBLAS_L2_SIZE=2097152
+    - NCCL_DEBUG=WARN
+  restart: unless-stopped
+  stop_grace_period: 5m
+  logging: *logging-conf
+
+x-flux-common: &flux-common
+  <<: *vllm-common
+  image: sglang-diffusion
+  build:
+    context: .
+    dockerfile_inline: |
+      # Pinned pre-v0.5.11 because the cu129-tagged v0.5.12 image actually
+      # ships PyTorch built against CUDA 13.0, which mismatches the cu12.9
+      # torchvision pulled in by `python[diffusion]` and breaks sglang's
+      # `from torchvision.io import decode_jpeg` at import time.
+      FROM lmsysorg/sglang@sha256:8ece90ad52faa8b56149f0117227d9009db34513213e35990da468aeb6fe0b75
+      RUN python3 -m pip install -e "python[diffusion]"
+      RUN python3 -m pip install accelerate einops
+  command: >
+      sglang serve
+      --model-path black-forest-labs/FLUX.2-klein-4B
+      --tensor-parallel-size 1
+      --port 8000
+      --host 0.0.0.0
+      --trust-remote-code
+      --log-requests-level 0
+      --enable-torch-compile
+      --mem-fraction-static 0.15
+      --enable-metrics
+  volumes:
+    - hugginface_cache:/root/.cache/huggingface
+    - vllm_cache:/root/.cache/vllm
+  environment: *sglang-env
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ["3"]
+            capabilities: [gpu]
+
+x-downloader-common: &downloader-common
+  image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim@sha256:4f5d923c9dcea037f57bda425dd209f3ec643da2f0b74227f68d09dab0b3bb36
+  entrypoint: ["sh", "-c"]
+  restart: "no"
+  logging: *logging-conf
+
+x-dsv41-engine-common: &dsv41-engine-common
+  <<: *nvidia
+  init: true
+  # gpu13 only: dsv41-lora-v0.32.0-near-v3-fastgather (image patch 06, #427; publish run 41890284727).
+  # gpu02 stays on 5eaa0d46 until gpu13 has run combo4 for about 24 h.
+  image: docker.io/nearaidev/vllm@sha256:8353a657f8edbc68637e30371ffacb94713d4e844faf3f73a77d820d5dfdfaae
+  shm_size: 64g
+  # One network namespace for all ranks: in per-container bridge namespaces NCCL treats each rank
+  # as its own host and runs every collective over TCP sockets instead of NVLink.
+  network_mode: host
+  volumes:
+    - hugginface_cache:/root/.cache/huggingface
+    - dsv41_kernel_cache:/root/.cache/vllm
+    - humming_cache:/root/.cache/humming
+  # Every rank sees all GPUs (NCCL P2P needs its peers) and picks its own with CUDA_VISIBLE_DEVICES.
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  restart: unless-stopped
+  # Under CC, killing a rank mid-kernel can leave its GPU unusable until the VM is rebuilt.
+  stop_grace_period: 10m
+  logging: *logging-conf
+
+x-dcgm-common: &dcgm-common
+  image: nvcr.io/nvidia/k8s/dcgm-exporter@sha256:ed594cf53fe6942e84b07b0740cdcbb249fa4b39cb21feeebf93881ae51f0b5e
+  runtime: nvidia
+  cap_add:
+    - SYS_ADMIN
+  restart: unless-stopped
+  logging: *logging-conf
+
+x-privacy-filter-common: &privacy-filter-common
+  <<: *nvidia
+  init: true
+  image: privacy-filter-hf
+  build:
+    context: .
+    dockerfile_inline: |
+      # syntax=docker/dockerfile:1.4
+      FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+      # transformers 5.20+ needs PyTorch >=2.6; this 2.5.1 base crash-loops on fresh builds.
+      # 5.16.1 matches gpu13's working image built on 2026-09-02.
+      RUN pip install --no-cache-dir \
+          "transformers==5.16.1" \
+          accelerate \
+          fastapi \
+          "uvicorn[standard]"
+      WORKDIR /app
+      COPY <<'PYEOF' /app/server.py
+      import copy
+      import gc
+      import json
+      import os
+      import sys
+      import threading
+      import time
+      import torch
+      from fastapi import FastAPI, HTTPException
+      from fastapi.responses import JSONResponse
+      from pydantic import BaseModel, Field
+      from starlette.background import BackgroundTask
+      from transformers import AutoTokenizer, pipeline
+
+      MODEL_ID = "openai/privacy-filter"
+      MODEL_REVISION = "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
+
+
+      def _env(name, default, cast):
+          # Tolerate absent/blank/garbage env so a typo can't crash-loop the boot.
+          try:
+              return cast(os.environ[name])
+          except (KeyError, ValueError):
+              return default
+
+
+      def _retry_window(max_length, cap):
+          # The retry must use a strictly smaller window than the primary pass, or it
+          # repeats the identical forward (clamped eager mode is 4096 -> 2048).
+          window = min(cap, max_length // 2)
+          return window if window >= 8 else None
+
+
+      # GPU 0 has served privacy-filter since 33b77d5. Left unbounded,
+      # the HF pipeline's CUDA caching allocator ratchets its reserved memory up
+      # under traffic and never releases it, eventually filling the card.
+      # Defence in depth (all tunable via env, no rebuild):
+      #   * PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True (set in compose) is the
+      #     root-cause fix — reserved segments can shrink again instead of ratcheting.
+      #   * A watchdog returns idle cached blocks to the driver on an interval (never
+      #     per request: empty_cache() is a synchronizing cudaFree that would stall
+      #     the GPU) and hard-restarts the container if this process exceeds its VRAM
+      #     budget. Beside the coloc Qwen3.8 the per-process cap keeps reserved memory
+      #     under that budget, so the OOM bullet below is the restart path.
+      #   * An acute CUDA-OOM retries once with a strictly smaller window, then returns
+      #     503 if memory is still short. After FILTER_OOM_EXIT_AFTER consecutive 503s
+      #     without a successful classify, exit for a clean restart rather than serving
+      #     errors behind a still-healthy /v1/models probe.
+      # The model's sliding_window is 128, so a non-eager attention implementation
+      # makes attention cost linear in sequence length, not quadratic. That permits a
+      # single 131072-token pass at batch 1. Eager attention measured ~13 GB over
+      # baseline at only 16k tokens and cannot safely use the full window, so explicit
+      # eager mode or a rejected non-eager implementation clamps MAX_LENGTH to 4096
+      # and retains STRIDE-token overlapping chunks without truncating the document.
+      BATCH_SIZE = max(1, _env("PRIVACY_BATCH_SIZE", 8, int))
+      MAX_LENGTH = max(8, _env("PRIVACY_MAX_LENGTH", 4096, int))
+      STRIDE = max(0, min(_env("PRIVACY_STRIDE", 256, int), MAX_LENGTH - 1))
+      ATTN_IMPL = _env("PRIVACY_ATTN_IMPL", "sdpa", str)
+      GPU_MEM_LIMIT_GB = max(1.0, _env("GPU_MEM_LIMIT_GB", 36.0, float))
+      WATCHDOG_INTERVAL_S = max(1.0, _env("WATCHDOG_INTERVAL_S", 30.0, float))
+      FILTER_GPU_MEM_FRACTION = min(1.0, max(0.01, _env("FILTER_GPU_MEM_FRACTION", 0.25, float)))
+      OOM_RETRY_MAX_LENGTH = max(8, _env("FILTER_OOM_RETRY_MAX_LENGTH", 16384, int))
+      OOM_EXIT_AFTER = max(1, _env("FILTER_OOM_EXIT_AFTER", 3, int))
+      _oom_lock = threading.Lock()
+      _consecutive_oom_503 = 0
+
+      USE_CUDA = torch.cuda.is_available()
+      if USE_CUDA:
+          # Per-process ceiling includes live tensors and the caching allocator.
+          torch.cuda.set_per_process_memory_fraction(FILTER_GPU_MEM_FRACTION)
+
+      if ATTN_IMPL == "eager":
+          MAX_LENGTH = 4096
+          clf = pipeline(
+              "token-classification",
+              model=MODEL_ID,
+              revision=MODEL_REVISION,
+              aggregation_strategy="simple",
+              device=0 if USE_CUDA else -1,
+              torch_dtype=torch.bfloat16,
+              trust_remote_code=True,
+          )
+      else:
+          try:
+              clf = pipeline(
+                  "token-classification",
+                  model=MODEL_ID,
+                  revision=MODEL_REVISION,
+                  aggregation_strategy="simple",
+                  device=0 if USE_CUDA else -1,
+                  torch_dtype=torch.bfloat16,
+                  trust_remote_code=True,
+                  model_kwargs={"attn_implementation": ATTN_IMPL},
+              )
+              cfg = getattr(getattr(clf, "model", None), "config", None)
+              # The private field may change; try the public form too, and safely
+              # clamp below if neither is available.
+              effective_attn_impl = (
+                  getattr(cfg, "_attn_implementation", None)
+                  or getattr(cfg, "attn_implementation", None)
+              )
+              if effective_attn_impl is None:
+                  MAX_LENGTH = 4096
+                  sys.stderr.write(
+                      "privacy-filter: requested=%s attention implementation could not "
+                      "be confirmed; clamping MAX_LENGTH=%d\n"
+                      % (ATTN_IMPL, MAX_LENGTH)
+                  )
+                  sys.stderr.flush()
+              elif effective_attn_impl != ATTN_IMPL:
+                  MAX_LENGTH = 4096
+                  sys.stderr.write(
+                      "privacy-filter: requested=%s effective=%s attention implementation "
+                      "mismatch; falling back to eager + MAX_LENGTH=%d\n"
+                      % (ATTN_IMPL, effective_attn_impl, MAX_LENGTH)
+                  )
+                  sys.stderr.flush()
+                  clf = pipeline(
+                      "token-classification",
+                      model=MODEL_ID,
+                      revision=MODEL_REVISION,
+                      aggregation_strategy="simple",
+                      device=0 if USE_CUDA else -1,
+                      torch_dtype=torch.bfloat16,
+                      trust_remote_code=True,
+                  )
+          except Exception as exc:
+              error_text = str(exc).lower()
+              is_attention_rejection = "attn_implementation" in error_text or (
+                  "attention" in error_text
+                  and any(
+                      marker in error_text
+                      for marker in ("reject", "not supported", "does not support", "unsupported")
+                  )
+              )
+              if not is_attention_rejection:
+                  sys.stderr.write(
+                      "privacy-filter: non-attention initialization failure (%s); "
+                      "treating as transient and restarting\n" % exc
+                  )
+                  sys.stderr.flush()
+                  raise
+
+              MAX_LENGTH = 4096
+              sys.stderr.write(
+                  "privacy-filter: attn_implementation=%s rejected (%s); "
+                  "falling back to eager + MAX_LENGTH=%d\n"
+                  % (ATTN_IMPL, exc, MAX_LENGTH)
+              )
+              sys.stderr.flush()
+              # Let failures in the eager rebuild propagate for a clean restart.
+              clf = pipeline(
+                  "token-classification",
+                  model=MODEL_ID,
+                  revision=MODEL_REVISION,
+                  aggregation_strategy="simple",
+                  device=0 if USE_CUDA else -1,
+                  torch_dtype=torch.bfloat16,
+                  trust_remote_code=True,
+              )
+      STRIDE = max(0, min(STRIDE, MAX_LENGTH - 1))
+      # Cap the pipeline's per-forward window. The pipeline chunks inputs longer than
+      # this into model_max_length-token windows (see the classify() stride= arg below).
+      clf.tokenizer.model_max_length = MAX_LENGTH
+      # The retry has its own tokenizer window but shares the same model weights.
+      retry_max_length = _retry_window(MAX_LENGTH, OOM_RETRY_MAX_LENGTH)
+      if retry_max_length is not None:
+          retry_tokenizer = copy.deepcopy(clf.tokenizer)
+          retry_tokenizer.model_max_length = retry_max_length
+          clf_retry = pipeline(
+              "token-classification",
+              model=clf.model,
+              tokenizer=retry_tokenizer,
+              aggregation_strategy="simple",
+              device=0 if USE_CUDA else -1,
+          )
+      else:
+          clf_retry = None
+      # Separate tokenizer for usage counts only — left UNBOUNDED so input_tokens stays
+      # accurate for the full text (it never truncates: truncation defaults to False).
+      tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION, trust_remote_code=True)
+
+
+      def _gpu_watchdog():
+          while True:
+              time.sleep(WATCHDOG_INTERVAL_S)
+              torch.cuda.empty_cache()
+              reserved_gb = torch.cuda.memory_reserved(0) / 1024 ** 3
+              max_reserved_gb = torch.cuda.max_memory_reserved(0) / 1024 ** 3
+              allocated_gb = torch.cuda.memory_allocated(0) / 1024 ** 3
+              print(json.dumps({"event": "filter_mem", "reserved_gb": reserved_gb,
+                                "max_reserved_gb": max_reserved_gb, "allocated_gb": allocated_gb}), flush=True)
+              if reserved_gb > GPU_MEM_LIMIT_GB:
+                  sys.stderr.write(
+                      "privacy-filter: reserved %.1f GB > %.1f GB limit; "
+                      "exiting for a clean restart\n" % (reserved_gb, GPU_MEM_LIMIT_GB)
+                  )
+                  sys.stderr.flush()
+                  os._exit(1)
+
+
+      if USE_CUDA:
+          threading.Thread(target=_gpu_watchdog, daemon=True).start()
+
+      app = FastAPI()
+
+
+      class ClassifyRequest(BaseModel):
+          input: str | list[str]
+          threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+      @app.get("/v1/models")
+      def models():
+          return {"object": "list", "data": [{"id": MODEL_ID, "object": "model"}]}
+
+      def _merge_adjacent_spans(spans):
+          if not spans:
+              return spans
+
+          merged = [spans[0]]
+          for span in spans[1:]:
+              prev = merged[-1]
+              if span["category"] == prev["category"] and span["start"] == prev["end"]:
+                  prev["end"] = span["end"]
+                  prev["text"] = prev["text"] + span["text"]
+                  prev["score"] = min(prev["score"], span["score"])
+                  continue
+
+              merged.append(span)
+          return merged
+
+
+      @app.post("/v1/privacy/classify")
+      def classify(req: ClassifyRequest):
+          global _consecutive_oom_503
+          texts = [req.input] if isinstance(req.input, str) else req.input
+          if not texts or any(not isinstance(t, str) for t in texts):
+              raise HTTPException(400, "input must be a non-empty string or list of strings")
+
+          # The pipeline runs the forward under torch.no_grad() internally.
+          # No lock: classify requests stay concurrent (the OOM counter's lock
+          # never covers a forward).
+          # Recover after leaving each except block: while an OOM is being handled, its
+          # traceback still holds the failed forward's frames and their tensors, so
+          # empty_cache() could not return that memory.
+          oom = False
+          try:
+              raw = clf(texts, batch_size=BATCH_SIZE, stride=STRIDE)
+          except torch.cuda.OutOfMemoryError:
+              oom = True
+          if oom:
+              # Don't 500-storm behind a healthy /v1/models probe: retry with
+              # smaller windows without mutating the shared classifier state.
+              print(json.dumps({"event": "filter_oom", "retry_max_length": retry_max_length}), flush=True)
+              gc.collect()
+              torch.cuda.empty_cache()
+              retry_oom = clf_retry is None
+              if clf_retry is not None:
+                  try:
+                      raw = clf_retry(texts, batch_size=BATCH_SIZE, stride=min(STRIDE, retry_max_length - 1))
+                  except torch.cuda.OutOfMemoryError:
+                      retry_oom = True
+              if retry_oom:
+                  if clf_retry is not None:
+                      gc.collect()
+                      torch.cuda.empty_cache()
+                  with _oom_lock:
+                      _consecutive_oom_503 += 1
+                      consecutive_503 = _consecutive_oom_503
+                  if consecutive_503 >= OOM_EXIT_AFTER:
+                      print(json.dumps({"event": "filter_oom_exit", "consecutive_503": consecutive_503}), flush=True)
+                      sys.stderr.write(
+                          "privacy-filter: %d consecutive memory-pressure 503s; "
+                          "exiting for a clean restart\n" % consecutive_503
+                      )
+                      sys.stderr.flush()
+                      return JSONResponse(status_code=503, headers={"Retry-After": "2"},
+                                          content={"error": "gpu_memory_pressure"},
+                                          background=BackgroundTask(os._exit, 1))
+                  return JSONResponse(status_code=503, headers={"Retry-After": "2"},
+                                      content={"error": "gpu_memory_pressure"})
+
+          with _oom_lock:
+              _consecutive_oom_503 = 0
+
+          # Single batched tokenize for usage counts instead of N sequential calls.
+          tok_lens = [len(ids) for ids in tokenizer(texts).input_ids]
+
+          data = []
+          for i, spans in enumerate(raw):
+              kept = [
+                  {
+                      "category": s["entity_group"],
+                      "score": float(s["score"]),
+                      "text": s["word"],
+                      "start": int(s["start"]),
+                      "end": int(s["end"]),
+                  }
+                  for s in spans
+                  if float(s["score"]) >= req.threshold
+              ]
+              data.append(
+                  {
+                      "index": i,
+                      "spans": _merge_adjacent_spans(kept),
+                      "usage": {"input_tokens": tok_lens[i]},
+                  }
+              )
+
+          return {"model": MODEL_ID, "data": data}
+      PYEOF
+      EXPOSE 8000
+      CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+  volumes:
+    - hugginface_cache:/root/.cache/huggingface
+  environment:
+    - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # Root-cause fix for the VRAM leak: let the CUDA caching allocator shrink
+    # reserved segments instead of ratcheting them up and hoarding GPU memory.
+    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    # Shared GPU 2 is a 139.4 GiB H200. The 0.25 cap (~35 GiB) is the real
+    # limit; consecutive-OOM exit restarts the filter below the 36 GiB watchdog.
+    - GPU_MEM_LIMIT_GB=36
+    - FILTER_GPU_MEM_FRACTION=0.25
+    # On OOM retry with the smaller of this cap and half the primary window.
+    - FILTER_OOM_RETRY_MAX_LENGTH=16384
+    # Restart after three memory-pressure 503s without a successful classify.
+    - FILTER_OOM_EXIT_AFTER=3
+    # sliding_window=128 makes attention linear in sequence length with SDPA, so
+    # batch 1 can classify 131072 tokens in one pass. Explicit eager mode, or a
+    # rejected non-eager implementation, clamps MAX_LENGTH to 4096 and chunks with
+    # STRIDE overlap; eager measured ~13 GB over baseline at only 16k tokens.
+    - PRIVACY_BATCH_SIZE=1
+    - PRIVACY_MAX_LENGTH=131072
+    - PRIVACY_STRIDE=256
+    - PRIVACY_ATTN_IMPL=sdpa
+  restart: unless-stopped
+  stop_grace_period: 5m
+  logging: *logging-conf
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ["2"]
+            capabilities: [gpu]
+
+services:
+  model-downloader:
+    <<: *downloader-common
+    container_name: model-downloader
+    # ~475 GiB for the base checkpoint (incl. 186 GiB Engram tables) plus a 4 MB adapter.
+    # Keep >=500 GiB free on the CVM ZFS model-cache volume /dstack/persistent, not host /data;
+    # check system_filesystem_usage_bytes{host="gpu13-compose-manager",mountpoint="/dstack/persistent"}.
+    # Evict old zai-org/GLM-5.3-Flash and graphistry/GLM-5.3-Flash-W4AFP8
+    # checkpoints with hf-cleanup after the switch if cache headroom is needed.
+    command:
+      - |
+        set -e
+        echo "Downloading deepseek-ai/DeepSeek-V4.1-Flash-1017..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download deepseek-ai/DeepSeek-V4.1-Flash-1017 --revision 1bae0e1088993b9b82de08f59de5be5a34e42170
+        echo "Downloading UnderTides/DeepSeek-V4.1-Flash-1017-heretic-lora..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download UnderTides/DeepSeek-V4.1-Flash-1017-heretic-lora --revision 196c06e3c2aad43e9688d16fa993b4333f69358a
+        echo "Download complete."
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-downloader","service":"model-downloader","tags":["model:multi","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # Dormant during normal deploys. Target this service explicitly with the
+  # maintenance profile when one model's shared HF cache must be evicted.
+  # Inlined copy of the root cleanup-hf-model.yaml service: compose-manager's
+  # compose/up fetches only the requested file, so cross-file `extends:` /
+  # `include:` must not be used here (they fail at config load).
+  hf-cleanup:
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    container_name: hf-cleanup
+    profiles: ["maintenance"]
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        : "$${MODEL_NAME:?MODEL_NAME env var is required (e.g. zai-org/GLM-5-FP8)}"
+
+        echo "=== Disk usage ==="
+        df -h /root/.cache 2>/dev/null || df -h /
+
+        echo ""
+        echo "=== Cached model weights ==="
+        HUB=/root/.cache/huggingface/hub
+        if ls "$$HUB"/models--* >/dev/null 2>&1; then
+          du -sh "$$HUB"/models--* | sort -rh
+        else
+          echo "(none)"
+        fi
+        echo ""
+        echo "Total HF cache: $$(du -sh $$HUB 2>/dev/null | cut -f1)"
+
+        echo ""
+        echo "=== Cleanup ==="
+        SAFE=$$(printf '%s' "$$MODEL_NAME" | sed 's|/|--|g')
+        TARGET="$$HUB/models--$$SAFE"
+        echo "MODEL_NAME=$$MODEL_NAME"
+        echo "TARGET=$$TARGET"
+        if [ ! -d "$$TARGET" ]; then
+          echo "Not found — nothing to remove."
+          exit 0
+        fi
+        echo "Removing $$(du -sh "$$TARGET" | cut -f1) ..."
+        rm -rf "$$TARGET"
+        echo "Removed $$TARGET"
+        echo "Disk after: $$(df -h /root/.cache 2>/dev/null | tail -1 || df -h / | tail -1)"
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+    environment:
+      - MODEL_NAME=${MODEL_NAME:-}
+    # Verbatim from cleanup-hf-model.yaml (not the file-wide *logging-conf) so the
+    # rendered service is unchanged from the previous `extends` result.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.datadoghq.ad.logs"
+
+  nginx:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: nginx
+    depends_on:
+      - proxy-qwen36-35b-a3b
+      - proxy-dsv41
+      - proxy-dsv41-abliterated
+      - proxy-flux2-klein-4b
+      - proxy-qwen3vl-30b-a3b
+      - proxy-qwen3-embedding-0.6b
+      - proxy-qwen3-reranker-0.6b
+      - proxy-whisper-large-v3
+      - proxy-privacy-filter
+    command: /bin/sh -c 'cert=/etc/letsencrypt/live/completions.near.ai/fullchain.pem; last=$$(stat -L -c %Y "$$cert" 2>/dev/null); while :; do sleep 60; cur=$$(stat -L -c %Y "$$cert" 2>/dev/null); if [ -n "$$cur" ] && [ "$$cur" != "$$last" ]; then last=$$cur; echo "$$cert changed, reloading nginx"; nginx -s reload; fi; done & while :; do sleep 6h; nginx -s reload; done & nginx -g "daemon off;"'
+    ports:
+      - "80:80"
+      - "8002:8002"
+      - "8003:8003"
+      - "8004:8004"
+      - "8005:8005"
+      - "8006:8006"
+      - "8007:8007"
+      - "8008:8008"
+      - "8009:8009"
+      - "8444:443"
+    volumes:
+      - certs:/etc/letsencrypt:ro
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+        mode: 0644
+    restart: unless-stopped
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nginx","service":"nginx","tags":["model:multi","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  model-proxy-registrar:
+    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+    container_name: model-proxy-registrar
+    entrypoint: ["sh", "/register.sh"]
+    restart: unless-stopped
+    healthcheck:
+      # Unhealthy if the registration loop hasn't ticked in 3m (e.g. wedged
+      # before the loop, or the loop died). Surfaces silent registrar failures
+      # in `docker ps` / Datadog. See cvm-compose-files#57.
+      test: ["CMD-SHELL", "[ $$(( $$(date +%s) - $$(cat /tmp/registrar_alive 2>/dev/null || echo 0) )) -lt 180 ]"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1200s
+    environment:
+      - HOST_IP=${HOST_IP}
+      - MODEL_PROXY_TOKEN=${MODEL_PROXY_TOKEN}
+      - PROXY_TOKEN=${PROXY_TOKEN}
+    configs:
+      - source: registrar_script
+        target: /register.sh
+        mode: 0755
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-proxy-registrar","service":"model-proxy-registrar","tags":["model:multi","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  # --- Qwen3.6-35B-A3B-FP8 x2 (GPUs 1, 2) — SGLang, TP=1, EAGLE-v2 spec, single proxy multi-backend ---
+
+  proxy-qwen36-35b-a3b:
+    <<: *vllm-proxy-common
+    container_name: proxy-qwen36-35b-a3b
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=Qwen/Qwen3.6-35B-A3B-FP8
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BACKEND_URLS=http://model-sg-qwen36-35b-a3b-fp8-tp1-r1:8000
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:Qwen/Qwen3.6-35B-A3B-FP8","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8008"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-qwen36-35b-a3b"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3.6-35B-A3B-FP8"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  model-sg-qwen36-35b-a3b-fp8-tp1-r1:
+    <<: *qwen3-6-common
+    container_name: model-sg-qwen36-35b-a3b-fp8-tp1-r1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sglang","service":"sglang","tags":["model:Qwen/Qwen3.6-35B-A3B-FP8","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8008","instance:1"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "sglang"
+      nearai.otel.service: "sglang"
+      nearai.otel.source: "sglang"
+      nearai.otel.container_name: "model-sg-qwen36-35b-a3b-fp8-tp1-r1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3.6-35B-A3B-FP8"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # ── Qwen3.8-27B on GPU 2 beside the privacy filter; gpu23 GPU 0 is free (Sage on gpu13 GPU 0) ──
+  # See x-qwen3-8-27b-dedicated. Uses its own
+  # nginx (host :8000 HTTP, :8001 TLS) and its own registrar (profile
+  # register-qwen38) so the shared nginx, the shared registrar and their live
+  # connections are never recreated or withdrawn by this rollout.
+
+  model-downloader-qwen38:
+    <<: *downloader-common
+    container_name: model-downloader-qwen38
+    command:
+      - |
+        set -e
+        echo "Downloading Qwen/Qwen3.8-27B-FP8..."
+        uvx --from 'huggingface_hub[hf_xet]' hf download Qwen/Qwen3.8-27B-FP8 --revision 017b9c7af6b5689d5dd426a76e0bc077eb5ca20a
+        echo "Download complete."
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-downloader","service":"model-downloader","tags":["model:Qwen/Qwen3.8-27B-FP8","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  proxy-qwen38-27b:
+    <<: *vllm-proxy-common
+    # inference-proxy 5faff1b (#329): strict request-model match and LoRA selector
+    # refusal. The coloc engine serves the abliterated adapter too, so this proxy
+    # must keep VLLM_PROXY_STRICT_REQUEST_MODEL on.
+    # This image is inference-proxy 53d79441 (#337). It includes #336's opt-in size tiers below.
+    image: nearaidev/vllm-proxy-rs@sha256:0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207
+    container_name: proxy-qwen38-27b
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=Qwen/Qwen3.8-27B
+      - VLLM_PROXY_STRICT_REQUEST_MODEL=true
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BACKEND_URLS=http://model-sg-qwen38-27b-fp8-tp1-coloc:8000
+      - VLLM_PROXY_MAX_REQUEST_SIZE=104857600
+      # Size tiers (inference-proxy #336): <=16k prompt tokens jump ahead, >64k go last. Needs the
+      # engine's --enable-priority-scheduling; without it SGLang ignores the priority field.
+      - VLLM_PROXY_PRIORITY_SIZE_TIERS=16000:10,65536:5,*:0
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:Qwen/Qwen3.8-27B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000","gpu_pair:2","config_variant:qwen38-gpu2-coloc-only"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-qwen38-27b"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3.8-27B"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.gpu_pair: "2"
+      nearai.otel.config_variant: "qwen38-gpu2-coloc-only"
+
+  # Production co-location trial: this GPU 2 engine, beside the production privacy filter (both moved
+  # together from gpu23 GPU 0 in #390; Sage runs on gpu13 GPU 0; r2 was removed earlier), is the only private Qwen3.8
+  # replica on this host; if the abort rule fires, compose/down of this engine takes it off this host entirely.
+  model-sg-qwen38-27b-fp8-tp1-coloc:
+    <<: *qwen3-8-27b-dedicated
+    container_name: model-sg-qwen38-27b-fp8-tp1-coloc
+    # No --enable-mixed-chunk: with extra_buffer it caches stale GDN state and prefix hits return empty answers (sglang#39342).
+    # 2026-11-02 engine tuning: --attention-backend flashinfer -> fa3 and --max-mamba-cache-size 128 -> 96;
+    # config_variant qwen38-gpu2-coloc-fa3-m96 (was qwen38-gpu13-gpu0-coloc-test). Mem 0.50, chunk 4096,
+    # 32 running and --cuda-graph-max-bs 32 are unchanged. Measured on bare metal gpu31 (NOT under CC, NOT beside
+    # the privacy filter), same image, this shape, tee-bench evidence/gpu31-exp55-qwen38-lora-mix r7:
+    #   flashinfer/mamba 128: KV 343,654 tokens, 3.5% cache hit, TTFT(<64k) p50 121 s
+    #   fa3 only:             15% hit, 40 s
+    #   fa3 + mamba 96:       KV 418,822 tokens, 55% hit, 0.50 s
+    # FB peak was 73.2-73.5 GiB in every cell, so FA3 added no memory over flashinfer there; on this shared GPU it
+    # is still unmeasured: watch GPU 2 FB used against the 134 GiB abort rule in
+    # docs/gpu13-gpu0-privacy-filter-qwen38-coloc-test.md. exp55 r8 probes (thinking-on split, tool calls, refusal,
+    # CJK echo, 64-96 concurrent bursts: 0 errors, 0 empty) passed on the gpu32 shape, not on this one.
+    # Effective concurrency: mamba slots cap admission at about 3 slots/request, so mamba 96 admits ~19 running
+    # requests (gpu13 running p99 17, max 25); the rest queue. Exhaustion queues, it does not error.
+    # Canary on gpu13 only after gpu32 holds. Roll back to the previous tag (flashinfer, mamba 128) on: GPU 2 FB used
+    # > 134 GiB, engine restart or OOM, TTFT/ITL regression vs the pre-deploy baseline, queue growth, or
+    # mamba_usage >= 0.95 sustained.
+    # 2026-11-03: --enable-priority-scheduling --disable-priority-preemption, paired with the size tiers on both
+    # Qwen3.8 proxies (inference-proxy #336); config_variant qwen38-gpu2-coloc-fa3-m96-prio. exp55 R10 basis.
+    # A later --mamba-ssm-dtype bfloat16 is a one-line addition here.
+    command: >
+      sglang serve
+      --trust-remote-code
+      --model-path Qwen/Qwen3.8-27B-FP8
+      --revision 017b9c7af6b5689d5dd426a76e0bc077eb5ca20a
+      --served-model-name Qwen/Qwen3.8-27B
+      --tp 1
+      --mem-fraction-static 0.50
+      --attention-backend fa3
+      --mm-attention-backend fa3
+      --chunked-prefill-size 4096
+      --max-prefill-tokens 4096
+      --max-mamba-cache-size 96
+      --enable-priority-scheduling
+      --disable-priority-preemption
+      --max-running-requests 32
+      --max-queued-requests 64
+      --cuda-graph-max-bs 32
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_coder
+      --enable-lora
+      --lora-paths Qwen/Qwen3.8-27B-abliterated=/adapters/abliterated
+      --max-loras-per-batch 2
+      --max-lora-rank 1
+      --port 8000
+      --host 0.0.0.0
+      --enable-cache-report
+      --enable-metrics
+      --log-requests-level 0
+    # No PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True here. SGLang hands
+    # tensors between its processes over CUDA IPC, which under expandable
+    # segments needs pidfd_getfd; the container may not call it, and the engine
+    # crashed on its first request on gpu23 (2026-10-23).
+    environment:
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+      - VLLM_LOGGING_LEVEL=INFO
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OPENBLAS_L2_SIZE=2097152
+      - NCCL_DEBUG=WARN
+      # /health answers without a 1-token generation. That generation queues behind
+      # long prefills and fails the proxy's 3 s probe on a busy engine (as GLM-5.3, #274).
+      - SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION=0
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+      - qwen38_coloc_kernel_cache:/root/.cache/sglang
+      - lora_adapter:/adapters:ro
+    depends_on:
+      model-downloader-qwen38:
+        condition: service_completed_successfully
+      qwen38-lora-adapter-downloader:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sglang","service":"sglang","tags":["model:Qwen/Qwen3.8-27B-FP8","served_model:Qwen/Qwen3.8-27B","model_revision:017b9c7af6b5689d5dd426a76e0bc077eb5ca20a","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000","instance:0","gpu_pair:2","config_variant:qwen38-gpu2-coloc-fa3-m96-prio","quantization:fp8","lora:abliterated-r1","sglang_revision:qwen38.27b.g561c8f3","engine_image:febfb971c735"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "sglang"
+      nearai.otel.service: "sglang"
+      nearai.otel.source: "sglang"
+      nearai.otel.container_name: "model-sg-qwen38-27b-fp8-tp1-coloc"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3.8-27B-FP8"
+      nearai.otel.served_model: "Qwen/Qwen3.8-27B"
+      nearai.otel.model_revision: "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.instance: "0"
+      nearai.otel.gpu_pair: "2"
+      nearai.otel.config_variant: "qwen38-gpu2-coloc-fa3-m96-prio"
+      nearai.otel.quantization: "fp8"
+      nearai.otel.chunk_size: "4096"
+      nearai.otel.max_prefill_tokens: "4096"
+      nearai.otel.mixed_chunk: "0"
+      nearai.otel.mem_fraction_static: "0.50"
+      nearai.otel.max_mamba_cache_size: "96"
+      nearai.otel.max_running_requests: "32"
+      nearai.otel.max_queued_requests: "64"
+      nearai.otel.sglang_revision: "qwen38.27b.g561c8f3"
+      nearai.otel.engine_image: "febfb971c735"
+
+  nginx-qwen38:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: nginx-qwen38
+    depends_on:
+      - proxy-qwen38-27b
+    command: /bin/sh -c 'cert=/etc/letsencrypt/live/completions.near.ai/fullchain.pem; last=$$(stat -L -c %Y "$$cert" 2>/dev/null); while :; do sleep 60; cur=$$(stat -L -c %Y "$$cert" 2>/dev/null); if [ -n "$$cur" ] && [ "$$cur" != "$$last" ]; then last=$$cur; echo "$$cert changed, reloading nginx"; nginx -s reload; fi; done & while :; do sleep 6h; nginx -s reload; done & nginx -g "daemon off;"'
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - certs:/etc/letsencrypt:ro
+    configs:
+      - source: nginx_qwen38_conf
+        target: /etc/nginx/conf.d/default.conf
+        mode: 0644
+    restart: unless-stopped
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nginx","service":"nginx","tags":["model:Qwen/Qwen3.8-27B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000"]}]'
+
+  # Started only when explicitly selected (compose/up services=[qwen38-registrar])
+  # so the replica can be qualified on its host route before it is advertised.
+  # Its TERM handler withdraws only HOST_IP:8000.
+  qwen38-registrar:
+    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+    container_name: qwen38-registrar
+    entrypoint: ["sh", "/register.sh"]
+    restart: unless-stopped
+    profiles: [register-qwen38]
+    healthcheck:
+      test: ["CMD-SHELL", "[ $$(( $$(date +%s) - $$(cat /tmp/registrar_alive 2>/dev/null || echo 0) )) -lt 180 ]"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1200s
+    environment:
+      - HOST_IP=${HOST_IP}
+      - HTTP_PORT=8000
+      - TLS_PORT_QWEN38=8001
+      - MODEL_PROXY_TOKEN=${MODEL_PROXY_TOKEN}
+      - PROXY_TOKEN=${PROXY_TOKEN}
+    configs:
+      - source: qwen38_registrar_script
+        target: /register.sh
+        mode: 0755
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-proxy-registrar","service":"model-proxy-registrar","tags":["model:Qwen/Qwen3.8-27B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+  qwen38-lora-adapter-downloader:
+    <<: *downloader-common
+    container_name: qwen38-lora-adapter-downloader
+    command:
+      - |
+        set -eu
+        python3 - <<'PY'
+        import hashlib
+        import os
+        from pathlib import Path
+        from urllib.request import urlopen
+
+        base = 'https://raw.githubusercontent.com/nearai/cvm-compose-files/main/adapters/qwen38-27b-abliterated-r1'
+        files = {
+            'adapter_model.safetensors': '3dd325373e6ad720196ce6d30a5d7302d245da87ec45362c95ffcc60a36eb934',
+            'adapter_config.json': 'c2f78fe464c7c24d742e20d0fab6477647f848525736d2e5661f5bb4c66d0faf',
+        }
+        target = Path('/adapters/abliterated')
+        target.mkdir(parents=True, exist_ok=True)
+        for name, expected in files.items():
+            with urlopen(f'{base}/{name}', timeout=60) as response:
+                content = response.read()
+            actual = hashlib.sha256(content).hexdigest()
+            if actual != expected:
+                raise SystemExit(f'{name}: SHA-256 mismatch')
+            temporary = target / f'{name}.tmp'
+            temporary.write_bytes(content)
+            os.replace(temporary, target / name)
+        PY
+    volumes:
+      - lora_adapter:/adapters
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-downloader","service":"model-downloader","tags":["model:Qwen/Qwen3.8-27B-abliterated","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","config_variant:qwen38-lora-canary","lora:abliterated-r1"]}]'
+
+  # Public auth, signing and usage reporting for the adapter; allowlisted orgs only (default-deny).
+  # SGLang serves the colon-less adapter id as the base model, so the proxy injects lora_path.
+  proxy-qwen38-27b-abliterated:
+    <<: *vllm-proxy-common
+    # inference-proxy 5faff1b (#329), same as proxy-qwen38-27b: VLLM_PROXY_BACKEND_LORA.
+    # This image is inference-proxy 53d79441 (#337). It includes #336's opt-in size tiers below.
+    image: nearaidev/vllm-proxy-rs@sha256:0be4ee8f40a2bf71a6e2fab1e780ad1a6e738ffb2085553f1ed4b85fcb944207
+    container_name: proxy-qwen38-27b-abliterated
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=Qwen/Qwen3.8-27B-abliterated
+      - VLLM_PROXY_STRICT_REQUEST_MODEL=true
+      - VLLM_PROXY_BACKEND_LORA=Qwen/Qwen3.8-27B-abliterated
+      # Deny customer API keys until the intended organization IDs are supplied.
+      - VLLM_PROXY_ALLOWED_ORG_IDS=${QWEN38_ABLITERATED_ALLOWED_ORG_IDS:-__no_organizations__}
+      - OHTTP_ENABLED=true
+      - TOKEN=${QWEN38_ABLITERATED_PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BACKEND_URLS=http://model-sg-qwen38-27b-fp8-tp1-coloc:8000
+      - VLLM_PROXY_MAX_REQUEST_SIZE=104857600
+      # Size tiers (inference-proxy #336): <=16k prompt tokens jump ahead, >64k go last. Needs the
+      # engine's --enable-priority-scheduling; without it SGLang ignores the priority field.
+      - VLLM_PROXY_PRIORITY_SIZE_TIERS=16000:10,65536:5,*:0
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:Qwen/Qwen3.8-27B-abliterated","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8000","gpu_pair:2","config_variant:qwen38-lora-canary","lora:abliterated-r1"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-qwen38-27b-abliterated"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3.8-27B-abliterated"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.gpu_pair: "2"
+      nearai.otel.config_variant: "qwen38-lora-canary"
+
+  # Served through nginx-qwen38 (gpu13 forwards only host ports 8000-8009 and 8444, all taken):
+  # Host/SNI qwen3-8-27b-abliterated selects the abliterated proxy on :8000/:8001.
+  # The registrar only maps the adapter id to its domain; it never registers or
+  # unregisters an endpoint, so it cannot touch base Qwen3.8's HOST_IP:8000 probe.
+  # No depends_on: an up of this service must never recreate nginx-qwen38.
+  qwen38-abliterated-registrar:
+    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+    container_name: qwen38-abliterated-registrar
+    entrypoint: ["sh", "/register.sh"]
+    restart: unless-stopped
+    profiles: [register-abliterated]
+    healthcheck:
+      test: ["CMD-SHELL", "[ $$(( $$(date +%s) - $$(cat /tmp/registrar_alive 2>/dev/null || echo 0) )) -lt 180 ]"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1200s
+    environment:
+      - HOST_IP=${HOST_IP}
+      - HTTP_PORT=8000
+      - TLS_PORT_QWEN38=8001
+      - MODEL_PROXY_TOKEN=${MODEL_PROXY_TOKEN}
+      - PROXY_TOKEN=${QWEN38_ABLITERATED_PROXY_TOKEN}
+    configs:
+      - source: qwen38_abliterated_registrar_script
+        target: /register.sh
+        mode: 0755
+    logging: *logging-conf
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"model-proxy-registrar","service":"model-proxy-registrar","tags":["model:Qwen/Qwen3.8-27B-abliterated","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","config_variant:qwen38-lora-canary","lora:abliterated-r1"]}]'
+
+  proxy-dsv41:
+    <<: *dsv41-proxy-common
+    container_name: proxy-dsv41
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=deepseek-ai/DeepSeek-V4.1-Flash-1017
+      # Refuse the other model id: this proxy attests, bills and access-controls only deepseek-ai/DeepSeek-V4.1-Flash-1017.
+      - VLLM_PROXY_STRICT_REQUEST_MODEL=1
+      # vLLM runs the lowest priority first: write the negated value (see --scheduling-policy on the ranks).
+      - VLLM_PROXY_PRIORITY_LOWER_FIRST=1
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - VLLM_BACKEND_URLS=http://model-vllm-dsv41-dp4:9104,http://model-vllm-dsv41-dp5:9105,http://model-vllm-dsv41-dp6:9106,http://model-vllm-dsv41-dp7:9107
+      # Keep append-only conversations on the rank that already holds their prefix cache.
+      - VLLM_BACKEND_CONVERSATION_AFFINITY=1
+      # A stopped replica refuses connections until health checks drop it: retry those on another rank.
+      - VLLM_BACKEND_CONNECT_FAILOVER=1
+      - VLLM_PROXY_MAX_REQUEST_SIZE=104857600
+      - VLLM_PROXY_POOL_IDLE_TIMEOUT_SECS=3
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:deepseek-ai/DeepSeek-V4.1-Flash-1017","port:8009","deployment:dsv41-flash-1017-vllm-dep4x2-abliterated","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","ppcie:true","config_variant:vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-dsv41"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+      nearai.otel.deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ppcie: "true"
+      nearai.otel.config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+
+  proxy-dsv41-abliterated:
+    <<: *dsv41-proxy-common
+    container_name: proxy-dsv41-abliterated
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated
+      # Refuse the other model id: this proxy attests, bills and access-controls only deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated.
+      - VLLM_PROXY_STRICT_REQUEST_MODEL=1
+      # vLLM runs the lowest priority first: write the negated value (see --scheduling-policy on the ranks).
+      - VLLM_PROXY_PRIORITY_LOWER_FIRST=1
+      # Deny customer API keys sent directly to this proxy until the intended organization IDs are supplied.
+      # cloud-api's pool token and the registrar probe (config tokens) are not affected.
+      - VLLM_PROXY_ALLOWED_ORG_IDS=${DSV41_ABLITERATED_ALLOWED_ORG_IDS:-__no_organizations__}
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - VLLM_BACKEND_URLS=http://model-vllm-dsv41-dp4:9104,http://model-vllm-dsv41-dp5:9105,http://model-vllm-dsv41-dp6:9106,http://model-vllm-dsv41-dp7:9107
+      # Keep append-only conversations on the rank that already holds their prefix cache.
+      - VLLM_BACKEND_CONVERSATION_AFFINITY=1
+      # A stopped replica refuses connections until health checks drop it: retry those on another rank.
+      - VLLM_BACKEND_CONNECT_FAILOVER=1
+      - VLLM_PROXY_MAX_REQUEST_SIZE=104857600
+      - VLLM_PROXY_POOL_IDLE_TIMEOUT_SECS=3
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated","port:8009","deployment:dsv41-flash-1017-vllm-dep4x2-abliterated","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","ppcie:true","config_variant:vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-dsv41-abliterated"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated"
+      nearai.otel.deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ppcie: "true"
+      nearai.otel.config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+
+  model-vllm-dsv41-dp4:
+    <<: *dsv41-engine-common
+    container_name: model-vllm-dsv41-dp4
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    environment:
+      - CUDA_VISIBLE_DEVICES=4
+      # gpu13 only: GPUs 0-3 serve other models, so CUDA's index must equal the NVML index used by
+      # every device_ids in this file (CUDA's default FASTEST_FIRST order is not guaranteed to).
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - HF_HUB_OFFLINE=1
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NCCL_DEBUG=WARN
+      # W4A8: MXFP4 expert weights with FP8 activations on Hopper FP8 tensor cores (exp 50).
+      - 'VLLM_HUMMING_INPUT_QUANT_CONFIG={"dtype":"float8e4m3","quant_mode":"dynamic_token"}'
+      # Image patch 04: copy per-step inputs to the GPU; under TDX+PPCIe the GPU reads stale host memory.
+      - VLLM_NEAR_DISABLE_UVA=1
+      # Image patch 05: Engram rows gathered on the CPU from the shared /dev/shm copy.
+      - VLLM_NEAR_ENGRAM_CPU_GATHER=1
+      # gpu13 only (combo4, gpu31 lab 2026-11-04): vLLM gives each worker 1 torch thread, which made the
+      # Engram CPU gather and weight loading single-threaded; 8 per rank (weight load 330 s -> 45 s).
+      - OMP_NUM_THREADS=8
+      # gpu13 only: image patch 06, one host sync per step for both Engram layers, pinned buffers, async H2D.
+      # A no-op on images without patch 06.
+      - VLLM_NEAR_ENGRAM_FAST_GATHER=1
+      - VLLM_DP_MASTER_PORT=29700
+      # nvcc on the CPU instead of humming's nvrtc helper (a CUDA context per kernel, which queues under CC).
+      - HUMMING_COMPILER=nvcc
+      - HUMMING_CACHE_DIR=/root/.cache/humming/dp4
+      - HUMMING_MAX_PARALLEL_BUILD_WORKERS=8
+    command: >
+      /root/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V4.1-Flash-1017/snapshots/1bae0e1088993b9b82de08f59de5be5a34e42170
+      --served-model-name deepseek-ai/DeepSeek-V4.1-Flash-1017
+      --trust-remote-code
+      --tensor-parallel-size 1
+      --data-parallel-size 4
+      --data-parallel-rank 0
+      --enable-expert-parallel
+      --data-parallel-address 127.0.0.1
+      --data-parallel-rpc-port 13445
+      --max-model-len 1048576
+      --max-num-batched-tokens 8192
+      --max-num-seqs 64
+      --max-num-queued-reqs 96
+      --scheduling-policy priority
+      --gpu-memory-utilization 0.85
+      --enable-prompt-tokens-details
+      --tokenizer-mode deepseek_v41
+      --reasoning-parser deepseek_v41
+      --tool-call-parser deepseek_v41
+      --enable-auto-tool-choice
+      --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}'
+      --enable-lora --max-loras 1 --max-cpu-loras 1 --max-lora-rank 8 --lora-target-modules wo_b
+      --lora-modules '{"name":"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated","path":"/root/.cache/huggingface/hub/models--UnderTides--DeepSeek-V4.1-Flash-1017-heretic-lora/snapshots/196c06e3c2aad43e9688d16fa993b4333f69358a","base_model_name":"deepseek-ai/DeepSeek-V4.1-Flash-1017"}'
+      --engram-config '{"cpu_offload":true,"dp_shared_memory":true}'
+      --compilation-config '{"cudagraph_mode":"PIECEWISE"}'
+      --host 0.0.0.0
+      --port 9104
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:deepseek-ai/DeepSeek-V4.1-Flash-1017","replica:r2","dp_rank:0","gpu:4","deployment:dsv41-flash-1017-vllm-dep4x2-abliterated","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","ppcie:true","config_variant:vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-dsv41-dp4"
+      nearai.otel.port: "9104"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+      nearai.otel.deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ppcie: "true"
+      nearai.otel.config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"
+
+  model-vllm-dsv41-dp5:
+    <<: *dsv41-engine-common
+    container_name: model-vllm-dsv41-dp5
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+      model-vllm-dsv41-dp4:
+        condition: service_started
+    environment:
+      - CUDA_VISIBLE_DEVICES=5
+      # gpu13 only: GPUs 0-3 serve other models, so CUDA's index must equal the NVML index used by
+      # every device_ids in this file (CUDA's default FASTEST_FIRST order is not guaranteed to).
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - HF_HUB_OFFLINE=1
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NCCL_DEBUG=WARN
+      # W4A8: MXFP4 expert weights with FP8 activations on Hopper FP8 tensor cores (exp 50).
+      - 'VLLM_HUMMING_INPUT_QUANT_CONFIG={"dtype":"float8e4m3","quant_mode":"dynamic_token"}'
+      # Image patch 04: copy per-step inputs to the GPU; under TDX+PPCIe the GPU reads stale host memory.
+      - VLLM_NEAR_DISABLE_UVA=1
+      # Image patch 05: Engram rows gathered on the CPU from the shared /dev/shm copy.
+      - VLLM_NEAR_ENGRAM_CPU_GATHER=1
+      # gpu13 only (combo4, gpu31 lab 2026-11-04): vLLM gives each worker 1 torch thread, which made the
+      # Engram CPU gather and weight loading single-threaded; 8 per rank (weight load 330 s -> 45 s).
+      - OMP_NUM_THREADS=8
+      # gpu13 only: image patch 06, one host sync per step for both Engram layers, pinned buffers, async H2D.
+      # A no-op on images without patch 06.
+      - VLLM_NEAR_ENGRAM_FAST_GATHER=1
+      - VLLM_DP_MASTER_PORT=29700
+      # nvcc on the CPU instead of humming's nvrtc helper (a CUDA context per kernel, which queues under CC).
+      - HUMMING_COMPILER=nvcc
+      - HUMMING_CACHE_DIR=/root/.cache/humming/dp5
+      - HUMMING_MAX_PARALLEL_BUILD_WORKERS=8
+    command: >
+      /root/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V4.1-Flash-1017/snapshots/1bae0e1088993b9b82de08f59de5be5a34e42170
+      --served-model-name deepseek-ai/DeepSeek-V4.1-Flash-1017
+      --trust-remote-code
+      --tensor-parallel-size 1
+      --data-parallel-size 4
+      --data-parallel-rank 1
+      --enable-expert-parallel
+      --data-parallel-address 127.0.0.1
+      --data-parallel-rpc-port 13445
+      --max-model-len 1048576
+      --max-num-batched-tokens 8192
+      --max-num-seqs 64
+      --max-num-queued-reqs 96
+      --scheduling-policy priority
+      --gpu-memory-utilization 0.85
+      --enable-prompt-tokens-details
+      --tokenizer-mode deepseek_v41
+      --reasoning-parser deepseek_v41
+      --tool-call-parser deepseek_v41
+      --enable-auto-tool-choice
+      --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}'
+      --enable-lora --max-loras 1 --max-cpu-loras 1 --max-lora-rank 8 --lora-target-modules wo_b
+      --lora-modules '{"name":"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated","path":"/root/.cache/huggingface/hub/models--UnderTides--DeepSeek-V4.1-Flash-1017-heretic-lora/snapshots/196c06e3c2aad43e9688d16fa993b4333f69358a","base_model_name":"deepseek-ai/DeepSeek-V4.1-Flash-1017"}'
+      --engram-config '{"cpu_offload":true,"dp_shared_memory":true}'
+      --compilation-config '{"cudagraph_mode":"PIECEWISE"}'
+      --host 0.0.0.0
+      --port 9105
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:deepseek-ai/DeepSeek-V4.1-Flash-1017","replica:r2","dp_rank:1","gpu:5","deployment:dsv41-flash-1017-vllm-dep4x2-abliterated","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","ppcie:true","config_variant:vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-dsv41-dp5"
+      nearai.otel.port: "9105"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+      nearai.otel.deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ppcie: "true"
+      nearai.otel.config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"
+
+  model-vllm-dsv41-dp6:
+    <<: *dsv41-engine-common
+    container_name: model-vllm-dsv41-dp6
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+      model-vllm-dsv41-dp4:
+        condition: service_started
+    environment:
+      - CUDA_VISIBLE_DEVICES=6
+      # gpu13 only: GPUs 0-3 serve other models, so CUDA's index must equal the NVML index used by
+      # every device_ids in this file (CUDA's default FASTEST_FIRST order is not guaranteed to).
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - HF_HUB_OFFLINE=1
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NCCL_DEBUG=WARN
+      # W4A8: MXFP4 expert weights with FP8 activations on Hopper FP8 tensor cores (exp 50).
+      - 'VLLM_HUMMING_INPUT_QUANT_CONFIG={"dtype":"float8e4m3","quant_mode":"dynamic_token"}'
+      # Image patch 04: copy per-step inputs to the GPU; under TDX+PPCIe the GPU reads stale host memory.
+      - VLLM_NEAR_DISABLE_UVA=1
+      # Image patch 05: Engram rows gathered on the CPU from the shared /dev/shm copy.
+      - VLLM_NEAR_ENGRAM_CPU_GATHER=1
+      # gpu13 only (combo4, gpu31 lab 2026-11-04): vLLM gives each worker 1 torch thread, which made the
+      # Engram CPU gather and weight loading single-threaded; 8 per rank (weight load 330 s -> 45 s).
+      - OMP_NUM_THREADS=8
+      # gpu13 only: image patch 06, one host sync per step for both Engram layers, pinned buffers, async H2D.
+      # A no-op on images without patch 06.
+      - VLLM_NEAR_ENGRAM_FAST_GATHER=1
+      - VLLM_DP_MASTER_PORT=29700
+      # nvcc on the CPU instead of humming's nvrtc helper (a CUDA context per kernel, which queues under CC).
+      - HUMMING_COMPILER=nvcc
+      - HUMMING_CACHE_DIR=/root/.cache/humming/dp6
+      - HUMMING_MAX_PARALLEL_BUILD_WORKERS=8
+    command: >
+      /root/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V4.1-Flash-1017/snapshots/1bae0e1088993b9b82de08f59de5be5a34e42170
+      --served-model-name deepseek-ai/DeepSeek-V4.1-Flash-1017
+      --trust-remote-code
+      --tensor-parallel-size 1
+      --data-parallel-size 4
+      --data-parallel-rank 2
+      --enable-expert-parallel
+      --data-parallel-address 127.0.0.1
+      --data-parallel-rpc-port 13445
+      --max-model-len 1048576
+      --max-num-batched-tokens 8192
+      --max-num-seqs 64
+      --max-num-queued-reqs 96
+      --scheduling-policy priority
+      --gpu-memory-utilization 0.85
+      --enable-prompt-tokens-details
+      --tokenizer-mode deepseek_v41
+      --reasoning-parser deepseek_v41
+      --tool-call-parser deepseek_v41
+      --enable-auto-tool-choice
+      --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}'
+      --enable-lora --max-loras 1 --max-cpu-loras 1 --max-lora-rank 8 --lora-target-modules wo_b
+      --lora-modules '{"name":"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated","path":"/root/.cache/huggingface/hub/models--UnderTides--DeepSeek-V4.1-Flash-1017-heretic-lora/snapshots/196c06e3c2aad43e9688d16fa993b4333f69358a","base_model_name":"deepseek-ai/DeepSeek-V4.1-Flash-1017"}'
+      --engram-config '{"cpu_offload":true,"dp_shared_memory":true}'
+      --compilation-config '{"cudagraph_mode":"PIECEWISE"}'
+      --host 0.0.0.0
+      --port 9106
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:deepseek-ai/DeepSeek-V4.1-Flash-1017","replica:r2","dp_rank:2","gpu:6","deployment:dsv41-flash-1017-vllm-dep4x2-abliterated","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","ppcie:true","config_variant:vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-dsv41-dp6"
+      nearai.otel.port: "9106"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+      nearai.otel.deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ppcie: "true"
+      nearai.otel.config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"
+
+  model-vllm-dsv41-dp7:
+    <<: *dsv41-engine-common
+    container_name: model-vllm-dsv41-dp7
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+      model-vllm-dsv41-dp4:
+        condition: service_started
+    environment:
+      - CUDA_VISIBLE_DEVICES=7
+      # gpu13 only: GPUs 0-3 serve other models, so CUDA's index must equal the NVML index used by
+      # every device_ids in this file (CUDA's default FASTEST_FIRST order is not guaranteed to).
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - HF_HUB_OFFLINE=1
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NCCL_DEBUG=WARN
+      # W4A8: MXFP4 expert weights with FP8 activations on Hopper FP8 tensor cores (exp 50).
+      - 'VLLM_HUMMING_INPUT_QUANT_CONFIG={"dtype":"float8e4m3","quant_mode":"dynamic_token"}'
+      # Image patch 04: copy per-step inputs to the GPU; under TDX+PPCIe the GPU reads stale host memory.
+      - VLLM_NEAR_DISABLE_UVA=1
+      # Image patch 05: Engram rows gathered on the CPU from the shared /dev/shm copy.
+      - VLLM_NEAR_ENGRAM_CPU_GATHER=1
+      # gpu13 only (combo4, gpu31 lab 2026-11-04): vLLM gives each worker 1 torch thread, which made the
+      # Engram CPU gather and weight loading single-threaded; 8 per rank (weight load 330 s -> 45 s).
+      - OMP_NUM_THREADS=8
+      # gpu13 only: image patch 06, one host sync per step for both Engram layers, pinned buffers, async H2D.
+      # A no-op on images without patch 06.
+      - VLLM_NEAR_ENGRAM_FAST_GATHER=1
+      - VLLM_DP_MASTER_PORT=29700
+      # nvcc on the CPU instead of humming's nvrtc helper (a CUDA context per kernel, which queues under CC).
+      - HUMMING_COMPILER=nvcc
+      - HUMMING_CACHE_DIR=/root/.cache/humming/dp7
+      - HUMMING_MAX_PARALLEL_BUILD_WORKERS=8
+    command: >
+      /root/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V4.1-Flash-1017/snapshots/1bae0e1088993b9b82de08f59de5be5a34e42170
+      --served-model-name deepseek-ai/DeepSeek-V4.1-Flash-1017
+      --trust-remote-code
+      --tensor-parallel-size 1
+      --data-parallel-size 4
+      --data-parallel-rank 3
+      --enable-expert-parallel
+      --data-parallel-address 127.0.0.1
+      --data-parallel-rpc-port 13445
+      --max-model-len 1048576
+      --max-num-batched-tokens 8192
+      --max-num-seqs 64
+      --max-num-queued-reqs 96
+      --scheduling-policy priority
+      --gpu-memory-utilization 0.85
+      --enable-prompt-tokens-details
+      --tokenizer-mode deepseek_v41
+      --reasoning-parser deepseek_v41
+      --tool-call-parser deepseek_v41
+      --enable-auto-tool-choice
+      --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}'
+      --enable-lora --max-loras 1 --max-cpu-loras 1 --max-lora-rank 8 --lora-target-modules wo_b
+      --lora-modules '{"name":"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated","path":"/root/.cache/huggingface/hub/models--UnderTides--DeepSeek-V4.1-Flash-1017-heretic-lora/snapshots/196c06e3c2aad43e9688d16fa993b4333f69358a","base_model_name":"deepseek-ai/DeepSeek-V4.1-Flash-1017"}'
+      --engram-config '{"cpu_offload":true,"dp_shared_memory":true}'
+      --compilation-config '{"cudagraph_mode":"PIECEWISE"}'
+      --host 0.0.0.0
+      --port 9107
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:deepseek-ai/DeepSeek-V4.1-Flash-1017","replica:r2","dp_rank:3","gpu:7","deployment:dsv41-flash-1017-vllm-dep4x2-abliterated","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","ppcie:true","config_variant:vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-dsv41-dp7"
+      nearai.otel.port: "9107"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+      nearai.otel.deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ppcie: "true"
+      nearai.otel.config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark5pb-mr64-engram-host-cpugather-omp8-fastgather"
+
+  # --- FLUX x1 (GPU 3, shared with small models) ---
+
+  proxy-flux2-klein-4b:
+    <<: *vllm-proxy-common
+    container_name: proxy-flux2-klein-4b
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=black-forest-labs/FLUX.2-klein-4B
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BASE_URL=http://model-sg-flux2-klein-4b-tp1:8000
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:black-forest-labs/FLUX.2-klein-4B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8002"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-flux2-klein-4b"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "black-forest-labs/FLUX.2-klein-4B"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  model-sg-flux2-klein-4b-tp1:
+    <<: *flux-common
+    container_name: model-sg-flux2-klein-4b-tp1
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"sglang","service":"sglang","tags":["model:black-forest-labs/FLUX.2-klein-4B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8002","instance:1"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "sglang"
+      nearai.otel.service: "sglang"
+      nearai.otel.source: "sglang"
+      nearai.otel.container_name: "model-sg-flux2-klein-4b-tp1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "black-forest-labs/FLUX.2-klein-4B"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # --- Qwen3-VL FP8 (GPU 3, shared with small models) ---
+
+  proxy-qwen3vl-30b-a3b:
+    <<: *vllm-proxy-common
+    container_name: proxy-qwen3vl-30b-a3b
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=Qwen/Qwen3-VL-30B-A3B-Instruct
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BASE_URL=http://model-vllm-qwen3vl-30b-a3b-fp8-tp1:8000
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:Qwen/Qwen3-VL-30B-A3B-Instruct","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8003"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-qwen3vl-30b-a3b"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3-VL-30B-A3B-Instruct"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  model-vllm-qwen3vl-30b-a3b-fp8-tp1:
+    <<: *vllm-common
+    image: vllm/vllm-openai@sha256:ccd6a6dbf4aba4e94c6f7052d1835d6e742082b6a5095276552e9b7a5a47c2e5
+    container_name: model-vllm-qwen3vl-30b-a3b-fp8-tp1
+    # --async-scheduling remains disabled: on H200 confidential-compute workloads,
+    # output-drain/next-step overlap may be void; this Qwen3-VL operating point has
+    # not been benchmarked independently. Re-enable only after a CC benchmark shows
+    # a benefit at max-num-seqs 16 and mem-frac 0.35.
+    command: >
+        Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+        --revision d9748a51ae66354c4dad665aab2c71f26cf2c8cd
+        --served-model-name Qwen/Qwen3-VL-30B-A3B-Instruct
+        --enable-prefix-caching
+        --tensor-parallel-size 1
+        --gpu-memory-utilization 0.35
+        --max-model-len 16384
+        --max-num-seqs 16
+        --max-num-batched-tokens 8K
+        --enable-prompt-tokens-details
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+      - vllm_cache:/root/.cache/vllm
+    environment: *vllm-env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:Qwen/Qwen3-VL-30B-A3B-Instruct","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8003"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-qwen3vl-30b-a3b-fp8-tp1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3-VL-30B-A3B-Instruct"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # --- Embeddings, Reranker, Whisper (GPU 3) — single instance each ---
+
+  proxy-qwen3-embedding-0.6b:
+    <<: *vllm-proxy-common
+    container_name: proxy-qwen3-embedding-0.6b
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=Qwen/Qwen3-Embedding-0.6B
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BASE_URL=http://model-vllm-qwen3-embedding-0.6b-tp1:8000
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:Qwen/Qwen3-Embedding-0.6B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8004"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-qwen3-embedding-0.6b"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3-Embedding-0.6B"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  model-vllm-qwen3-embedding-0.6b-tp1:
+    <<: *vllm-common
+    image: vllm/vllm-openai@sha256:ccd6a6dbf4aba4e94c6f7052d1835d6e742082b6a5095276552e9b7a5a47c2e5
+    container_name: model-vllm-qwen3-embedding-0.6b-tp1
+    command: >
+        Qwen/Qwen3-Embedding-0.6B
+        --revision 97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3
+        --runner pooling
+        --gpu-memory-utilization 0.06
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+      - vllm_cache:/root/.cache/vllm
+    environment: *vllm-env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:Qwen/Qwen3-Embedding-0.6B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8004"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-qwen3-embedding-0.6b-tp1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3-Embedding-0.6B"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  proxy-qwen3-reranker-0.6b:
+    <<: *vllm-proxy-common
+    container_name: proxy-qwen3-reranker-0.6b
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=Qwen/Qwen3-Reranker-0.6B
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BASE_URL=http://model-vllm-qwen3-reranker-0.6b-tp1:8000
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:Qwen/Qwen3-Reranker-0.6B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8005"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-qwen3-reranker-0.6b"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3-Reranker-0.6B"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  model-vllm-qwen3-reranker-0.6b-tp1:
+    <<: *vllm-common
+    image: vllm/vllm-openai@sha256:ccd6a6dbf4aba4e94c6f7052d1835d6e742082b6a5095276552e9b7a5a47c2e5
+    container_name: model-vllm-qwen3-reranker-0.6b-tp1
+    # The checkpoint is a causal LM. Without the hf-overrides, vLLM serves it as an embedding model
+    # and /v1/rerank returns cosine similarity. The overrides build the yes/no classifier head, and the
+    # chat template (shipped in the image) wraps each pair in the Qwen3 reranker prompt; without it the
+    # score path sends query+document with no separator and ranks poorly.
+    command: >
+        Qwen/Qwen3-Reranker-0.6B
+        --revision e61197ed45024b0ed8a2d74b80b4d909f1255473
+        --runner pooling
+        --gpu-memory-utilization 0.06
+        --hf-overrides '{"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}'
+        --chat-template /vllm-workspace/examples/pooling/score/template/qwen3_reranker.jinja
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+      - vllm_cache:/root/.cache/vllm
+    environment: *vllm-env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:Qwen/Qwen3-Reranker-0.6B","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8005"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-qwen3-reranker-0.6b-tp1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3-Reranker-0.6B"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  proxy-whisper-large-v3:
+    <<: *vllm-proxy-common
+    container_name: proxy-whisper-large-v3
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=openai/whisper-large-v3
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BASE_URL=http://model-vllm-whisper-large-v3-tp1:8000
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:openai/whisper-large-v3","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8006"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-whisper-large-v3"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "openai/whisper-large-v3"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  model-vllm-whisper-large-v3-tp1:
+    <<: *vllm-common
+    image: vllm-with-audio
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM vllm/vllm-openai@sha256:ccd6a6dbf4aba4e94c6f7052d1835d6e742082b6a5095276552e9b7a5a47c2e5
+        RUN pip install openai-whisper torchaudio librosa vllm[audio]
+    container_name: model-vllm-whisper-large-v3-tp1
+    # 0.20 (~28 GiB, ~24 GiB KV): at 0.06 the 4.2 GiB KV cache capped whisper at
+    # 17 concurrent 30 s segments and preempted under sustained load. GPU 3 had
+    # ~53 GiB unallocated, so this takes free memory from no other tenant.
+    # Restart this service alone: a cold start alongside its GPU 3 neighbours
+    # can profile negative KV memory and crash-loop until they finish loading.
+    command: >
+        openai/whisper-large-v3
+        --revision 06f233fe06e710322aca913c1bc4249a0d71fce1
+        --gpu-memory-utilization 0.20
+    volumes:
+      - hugginface_cache:/root/.cache/huggingface
+      - vllm_cache:/root/.cache/vllm
+    environment: *vllm-env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm","service":"vllm","tags":["model:openai/whisper-large-v3","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8006"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "vllm"
+      nearai.otel.service: "vllm"
+      nearai.otel.source: "vllm"
+      nearai.otel.container_name: "model-vllm-whisper-large-v3-tp1"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "openai/whisper-large-v3"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  proxy-privacy-filter:
+    <<: *vllm-proxy-common
+    container_name: proxy-privacy-filter
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLOUD_API_URL=https://cloud-api.near.ai
+      - CLOUD_API_USAGE_TOKEN=${CLOUD_API_USAGE_TOKEN}
+      - COMPOSE_MANAGER_URL=http://compose-manager:8080
+      - LOG_FORMAT=json
+      - MODEL_NAME=openai/privacy-filter
+      - OHTTP_ENABLED=true
+      - TOKEN=${PROXY_TOKEN}
+      - FUSION_ENABLED=${FUSION_ENABLED}
+      - FUSION_INTERNAL_BEARER_TOKEN=${FUSION_INTERNAL_BEARER_TOKEN}
+      - VLLM_BASE_URL=http://model-privacy-filter:8000
+      - TLS_CERT_PATH=/etc/letsencrypt/live/completions.near.ai/fullchain.pem
+      - USE_NV_ATTESTATION_SDK=true
+      - WEB_CONTEXT_SEARCH_URL=${WEB_CONTEXT_SEARCH_URL}
+      - WEB_CONTEXT_SEARCH_API_KEY=${WEB_CONTEXT_SEARCH_API_KEY}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"vllm-proxy","service":"vllm-proxy","tags":["model:openai/privacy-filter","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8007"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "inference-proxy"
+      nearai.otel.service: "vllm-proxy"
+      nearai.otel.source: "vllm-proxy"
+      nearai.otel.container_name: "proxy-privacy-filter"
+      nearai.otel.port: "8000"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "openai/privacy-filter"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  model-privacy-filter:
+    <<: *privacy-filter-common
+    container_name: model-privacy-filter
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"privacy-filter","service":"privacy-filter","tags":["model:openai/privacy-filter","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","port:8007"]}]'
+
+  # Per-model dcgm-exporters: each container only sees its assigned GPUs via
+  # device_ids, so all NVML/DCGM metrics it emits are correctly attributable to
+  # one model. Filter dashboards/monitors on `model:<HF id>`.
+
+  dcgm-privacy-filter:
+    <<: *dcgm-common
+    container_name: dcgm-privacy-filter
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"dcgm-exporter","service":"dcgm-exporter","tags":["model:openai/privacy-filter","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "dcgm"
+      nearai.otel.service: "dcgm-exporter"
+      nearai.otel.source: "dcgm-exporter"
+      nearai.otel.container_name: "dcgm-privacy-filter"
+      nearai.otel.port: "9400"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "openai/privacy-filter"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  dcgm-qwen36-35b-a3b:
+    <<: *dcgm-common
+    container_name: dcgm-qwen36-35b-a3b
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"dcgm-exporter","service":"dcgm-exporter","tags":["model:Qwen/Qwen3.6-35B-A3B-FP8","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "dcgm"
+      nearai.otel.service: "dcgm-exporter"
+      nearai.otel.source: "dcgm-exporter"
+      nearai.otel.container_name: "dcgm-qwen36-35b-a3b"
+      nearai.otel.port: "9400"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "Qwen/Qwen3.6-35B-A3B-FP8"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  dcgm-dsv41:
+    <<: *dcgm-common
+    container_name: dcgm-dsv41
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["4","5","6","7"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"dcgm-exporter","service":"dcgm-exporter","tags":["model:deepseek-ai/DeepSeek-V4.1-Flash-1017","deployment:dsv41-flash-1017-vllm-dep4x2-abliterated","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}","ppcie:true","gpu_pair:4-7","config_variant:vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "dcgm"
+      nearai.otel.service: "dcgm-exporter"
+      nearai.otel.source: "dcgm-exporter"
+      nearai.otel.container_name: "dcgm-dsv41"
+      nearai.otel.port: "9400"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+      nearai.otel.deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+      nearai.otel.ppcie: "true"
+      nearai.otel.gpu_pair: "4-7"
+      nearai.otel.config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+
+  # GPU 3 is shared across FLUX, Qwen3-VL, embedding, reranker, whisper — DCGM
+  # metrics here cannot be attributed to one model, so
+  # tag with the deployment+gpu only and rely on per-model app metrics
+  # (vllm/sglang) for model-specific telemetry.
+  dcgm-shared-gpu3:
+    <<: *dcgm-common
+    container_name: dcgm-shared-gpu3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"dcgm-exporter","service":"dcgm-exporter","tags":["model:shared","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "dcgm"
+      nearai.otel.service: "dcgm-exporter"
+      nearai.otel.source: "dcgm-exporter"
+      nearai.otel.container_name: "dcgm-shared-gpu3"
+      nearai.otel.port: "9400"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "shared"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  # ── Levanto Sage on gpu13 GPU 0 (moved from gpu04 GPU 6, prod/sage.yaml) ──
+  # The privacy filter and Qwen3.8 coloc move to GPU 2 on gpu23 (#390); this is unrelated to Sage's host.
+  # Moving Sage here frees gpu04 GPU 6 for a fourth GLM replica.
+  # The two services are prod/sage.yaml's (#380) unchanged except the GPU, pinned by UUID to gpu13's GPU 0.
+  # Never include sage-dstack/sage in a gpu23 deploy: the image is not there and the GPU is gpu13's, so they fail closed.
+  # Start them on gpu13 by name, with the SAGE_* values in the env:
+  #   POST /compose/up {"tag":"v0.0.N","file":"prod/small-models.yaml","services":["sage-dstack","sage"],"env":{...}}
+  # prod/sage-pull.yaml must have put the image in the VM's image store before: compose-manager has no registry
+  # login, and this file never pulls the private image (pull_policy: never), so a missing image fails closed.
+  #
+  # Sage runs with SAGE_CONFIDENTIAL=required: it refuses to start unless the env, the TDX quote, the GPU CC state
+  # (Protected PCIe on this board) and the weights all check out, ends TLS itself on 8443 with a key made in the CVM
+  # (VM port 8010; the host maps 443 to 8010) and serves /v1/attestation/report.
+  # Sage never gets the CVM's dstack socket: sage-dstack exposes only GET /Info and GET /GetQuote to it. Key
+  # derivation and event calls (GetKey, EmitEvent, ...) are refused, since our own services use them.
+  # Values come from SAGE_-prefixed variables our own env never sets. They are not marked required (${VAR:?}) so
+  # that compose/logs, which takes no env, can still read this project's logs; Sage itself refuses to start
+  # without them.
+  sage-dstack:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: sage-dstack
+    restart: unless-stopped
+    network_mode: none
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - /var/run/sage-dstack:/sock
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /etc/nginx/nginx.conf <<'EOF'
+        user root;
+        worker_processes 1;
+        events { worker_connections 64; }
+        http {
+          access_log /dev/stdout;
+          server {
+            listen unix:/sock/dstack.sock;
+            location = /Info {
+              limit_except GET { deny all; }
+              proxy_pass http://unix:/var/run/dstack.sock;
+            }
+            location = /GetQuote {
+              limit_except GET { deny all; }
+              proxy_pass http://unix:/var/run/dstack.sock;
+            }
+            location / {
+              return 403;
+            }
+          }
+        }
+        EOF
+        rm -rf /sock/dstack.sock
+        exec nginx -g 'daemon off;'
+    healthcheck:
+      test: ["CMD", "test", "-S", "/sock/dstack.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  sage:
+    # Sage 2 (tag 20261104-rc14-2, model levanto-sage-2), reviewed before deploy like 1.4.
+    image: levantolabs/sage2-hopper-pod@sha256:2385b14dfb6bbe6acf9edfae6268d4e23eca1250c8bb2c816f1b09d60eba1cca
+    container_name: sage
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      sage-dstack:
+        condition: service_healthy
+    # Only keys on Sage's confidential allowlist; the image's own profile sets everything else.
+    environment:
+      SAGE_CONFIDENTIAL: required
+      HF_TOKEN: ${SAGE_HF_TOKEN}
+      HUGGING_FACE_HUB_TOKEN: ${SAGE_HF_TOKEN}
+      SERVING_HMAC_SECRET: ${SAGE_SERVING_HMAC_SECRET}
+      SAGE_ACME_AWS_ACCESS_KEY_ID: ${SAGE_ACME_AWS_ACCESS_KEY_ID}
+      SAGE_ACME_AWS_SECRET_ACCESS_KEY: ${SAGE_ACME_AWS_SECRET_ACCESS_KEY}
+      SAGE_ACME_ROUTE53_ZONE_ID: ${SAGE_ACME_ROUTE53_ZONE_ID}
+      # Sage ships its own log to Levanto's CloudWatch (write-only key for one log group).
+      SAGE_LOG_AWS_ACCESS_KEY_ID: ${SAGE_LOG_AWS_ACCESS_KEY_ID}
+      SAGE_LOG_AWS_SECRET_ACCESS_KEY: ${SAGE_LOG_AWS_SECRET_ACCESS_KEY}
+      # Enables Sage's content-free /internal/diagnostics endpoint.
+      SAGE_ADMIN_TOKEN: ${SAGE_ADMIN_TOKEN}
+      # Web search key for Sage's grounding (Levanto's key). Empty or unset turns grounding off.
+      BRAVE_API_KEY: ${SAGE_SEARCH_API_KEY}
+      # Same GPU as device_ids below (exactly one GPU, as the image requires).
+      NVIDIA_VISIBLE_DEVICES: GPU-9ec3a20b-6169-7fdc-a19a-6058228132c1
+    volumes:
+      - sage-data:/workspace
+      - /var/run/sage-dstack/dstack.sock:/var/run/dstack.sock
+    ports:
+      # Host 8010 is QEMU-forwarded to VM 8010. TLS ends inside Sage.
+      - "8010:8443"
+    networks:
+      - sage
+    shm_size: 32gb
+    ipc: private
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256g
+    memswap_limit: 256g
+    pids_limit: 8192
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # gpu13 index 0 (PCI 01:00.0); gpu13's small models moved to gpu23.
+              device_ids: ["GPU-9ec3a20b-6169-7fdc-a19a-6058228132c1"]
+              capabilities: [gpu]
+
+  dcgm-sage:
+    # GPU counters for Sage's GPU (memory, utilization, XIDs), pinned to the same UUID as sage. It reads the GPU
+    # through NVML: no CUDA context, no GPU memory, nothing from Sage's container. It has no SAGE_* values, so it
+    # can be started by name without sage or sage-dstack:
+    #   POST /compose/up {"tag":"v0.0.N","file":"prod/small-models.yaml","services":["dcgm-sage","otelcol-contrib"],
+    #                     "force_recreate":true,"env":{<gpu13's stored env>}}
+    # otelcol-contrib must be in the same call, since only a recreate loads the dcgm-dcgm-sage scrape job.
+    <<: *dcgm-common
+    container_name: dcgm-sage
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-9ec3a20b-6169-7fdc-a19a-6058228132c1"]
+              capabilities: [gpu]
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"dcgm-exporter","service":"dcgm-exporter","tags":["model:levanto/sage","deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+      nearai.otel.scrape: "true"
+      nearai.otel.job: "dcgm"
+      nearai.otel.service: "dcgm-exporter"
+      nearai.otel.source: "dcgm-exporter"
+      nearai.otel.container_name: "dcgm-sage"
+      nearai.otel.port: "9400"
+      nearai.otel.path: "/metrics"
+      nearai.otel.model: "levanto/sage"
+      nearai.otel.deployment: "small-models"
+      nearai.otel.env: "${ENV}"
+      nearai.otel.host: "${CVM_HOST}"
+      nearai.otel.host_machine: "${CVM_HOST}"
+      nearai.otel.cvm_name: "${CVM_NAME}"
+      nearai.otel.ip: "${HOST_IP}"
+
+  otelcol-contrib:
+    image: otel/opentelemetry-collector-contrib@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917
+    container_name: otelcol-contrib
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    user: "0:0"
+    mem_limit: "768m"
+    environment:
+      - MONITORING_INGEST_TOKEN=${MONITORING_INGEST_TOKEN:-}
+      - CVM_NAME=${CVM_NAME:-unknown}
+      - CVM_HOST=${CVM_HOST:-unknown}
+      - DD_HOSTNAME=${DD_HOSTNAME:-unknown}
+      - ENV=${ENV:-unknown}
+      - HOST_IP=${HOST_IP:-unknown}
+    extra_hosts:
+      - "model-vllm-dsv41-dp4:host-gateway"
+      - "model-vllm-dsv41-dp5:host-gateway"
+      - "model-vllm-dsv41-dp6:host-gateway"
+      - "model-vllm-dsv41-dp7:host-gateway"
+    expose:
+      - "4317"
+      - "4318"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - otelcol_app_storage:/var/lib/otelcol-contrib
+    configs:
+      - source: otelcol_app_config
+        target: /etc/otelcol-contrib/config.yaml
+        mode: 0444
+    restart: unless-stopped
+    logging:
+      driver: "local"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"otelcol-contrib","service":"otelcol-contrib","tags":["deployment:small-models","env:${ENV}","host:${CVM_HOST}","ip:${HOST_IP}"]}]'
+
+networks:
+  sage:
+    name: sage_net
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+  default:
+    external: true
+    name: dstack_default
+
+volumes:
+  otelcol_app_storage:
+  hugginface_cache:
+  vllm_cache:
+  kernel_cache:
+  dsv41_kernel_cache:
+  humming_cache:
+  qwen38_kernel_cache:
+  qwen38_coloc_kernel_cache:
+  lora_adapter:
+  sage-data:
+  certs:
+    external: true
+    name: certs
+
+configs:
+  otelcol_app_config:
+    content: |
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+
+        filelog/docker_containers:
+          include: [/var/lib/docker/containers/*/*-json.log]
+          start_at: end
+          storage: file_storage
+          include_file_path: true
+          operators:
+            - type: json_parser
+              parse_from: body
+              parse_to: attributes
+              timestamp:
+                parse_from: attributes.time
+                layout_type: gotime
+                layout: '2006-01-02T15:04:05.999999999Z07:00'
+              on_error: send_quiet
+            - type: move
+              from: attributes.log
+              to: body
+              if: 'attributes.log != nil'
+            - type: move
+              from: attributes.stream
+              to: attributes["log.iostream"]
+              if: 'attributes.stream != nil'
+            - type: remove
+              field: attributes.time
+              if: 'attributes.time != nil'
+            - type: regex_parser
+              parse_from: attributes["log.file.path"]
+              regex: '/var/lib/docker/containers/(?P<container_id>[a-f0-9]{12})[a-f0-9]*/'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'model:(?P<model>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'model_path:(?P<model_path>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'served_model:(?P<served_model>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'precision:(?P<precision>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'deployment:(?P<deployment>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'ip:(?P<ip>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'port:(?P<port>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'env:(?P<env>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'host:(?P<host>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'instance:(?P<instance>[^",\]]+)'
+              on_error: send_quiet
+            - type: regex_parser
+              parse_from: attributes["attrs"]["com.datadoghq.ad.logs"]
+              regex: 'replica:(?P<replica>[^",\]]+)'
+              on_error: send_quiet
+            - type: add
+              field: attributes["service.name"]
+              value: cvm-docker
+
+        prometheus/apps:
+          config:
+            scrape_configs:
+              - job_name: sglang-model-sg-qwen36-35b-a3b-fp8-tp1-r1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-sg-qwen36-35b-a3b-fp8-tp1-r1:8000']
+                    labels:
+                      service: "sglang"
+                      source: "sglang"
+                      container_name: "model-sg-qwen36-35b-a3b-fp8-tp1-r1"
+                      model: "Qwen/Qwen3.6-35B-A3B-FP8"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8008"
+                      instance: "1"
+              - job_name: vllm-model-vllm-dsv41-dp4
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-dsv41-dp4:9104']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-dsv41-dp4"
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      served_model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      model_revision: "1bae0e1088993b9b82de08f59de5be5a34e42170"
+                      replica: "r2"
+                      dp_rank: "0"
+                      gpu: "4"
+                      port: "8009"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      ppcie: "true"
+                      deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+                      config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+              - job_name: vllm-model-vllm-dsv41-dp5
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-dsv41-dp5:9105']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-dsv41-dp5"
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      served_model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      model_revision: "1bae0e1088993b9b82de08f59de5be5a34e42170"
+                      replica: "r2"
+                      dp_rank: "1"
+                      gpu: "5"
+                      port: "8009"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      ppcie: "true"
+                      deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+                      config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+              - job_name: vllm-model-vllm-dsv41-dp6
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-dsv41-dp6:9106']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-dsv41-dp6"
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      served_model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      model_revision: "1bae0e1088993b9b82de08f59de5be5a34e42170"
+                      replica: "r2"
+                      dp_rank: "2"
+                      gpu: "6"
+                      port: "8009"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      ppcie: "true"
+                      deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+                      config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+              - job_name: vllm-model-vllm-dsv41-dp7
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-dsv41-dp7:9107']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-dsv41-dp7"
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      served_model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      model_revision: "1bae0e1088993b9b82de08f59de5be5a34e42170"
+                      replica: "r2"
+                      dp_rank: "3"
+                      gpu: "7"
+                      port: "8009"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      ppcie: "true"
+                      deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+                      config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+              - job_name: sglang-model-sg-flux2-klein-4b-tp1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-sg-flux2-klein-4b-tp1:8000']
+                    labels:
+                      service: "sglang"
+                      source: "sglang"
+                      container_name: "model-sg-flux2-klein-4b-tp1"
+                      model: "black-forest-labs/FLUX.2-klein-4B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8002"
+                      instance: "1"
+              - job_name: vllm-model-vllm-qwen3vl-30b-a3b-fp8-tp1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-qwen3vl-30b-a3b-fp8-tp1:8000']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-qwen3vl-30b-a3b-fp8-tp1"
+                      model: "Qwen/Qwen3-VL-30B-A3B-Instruct"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8003"
+              - job_name: vllm-model-vllm-qwen3-embedding-0.6b-tp1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-qwen3-embedding-0.6b-tp1:8000']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-qwen3-embedding-0.6b-tp1"
+                      model: "Qwen/Qwen3-Embedding-0.6B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8004"
+              - job_name: vllm-model-vllm-qwen3-reranker-0.6b-tp1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-qwen3-reranker-0.6b-tp1:8000']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-qwen3-reranker-0.6b-tp1"
+                      model: "Qwen/Qwen3-Reranker-0.6B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8005"
+              - job_name: vllm-model-vllm-whisper-large-v3-tp1
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-vllm-whisper-large-v3-tp1:8000']
+                    labels:
+                      service: "vllm"
+                      source: "vllm"
+                      container_name: "model-vllm-whisper-large-v3-tp1"
+                      model: "openai/whisper-large-v3"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8006"
+              - job_name: dcgm-dcgm-privacy-filter
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['dcgm-privacy-filter:9400']
+                    labels:
+                      service: "dcgm-exporter"
+                      source: "dcgm-exporter"
+                      container_name: "dcgm-privacy-filter"
+                      model: "openai/privacy-filter"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "9400"
+              - job_name: dcgm-dcgm-qwen36-35b-a3b
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['dcgm-qwen36-35b-a3b:9400']
+                    labels:
+                      service: "dcgm-exporter"
+                      source: "dcgm-exporter"
+                      container_name: "dcgm-qwen36-35b-a3b"
+                      model: "Qwen/Qwen3.6-35B-A3B-FP8"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "9400"
+              - job_name: dcgm-dcgm-dsv41
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['dcgm-dsv41:9400']
+                    labels:
+                      service: "dcgm-exporter"
+                      source: "dcgm-exporter"
+                      container_name: "dcgm-dsv41"
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      port: "9400"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      ppcie: "true"
+                      gpu_pair: "4-7"
+                      deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+                      config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+              - job_name: dcgm-dcgm-shared-gpu3
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['dcgm-shared-gpu3:9400']
+                    labels:
+                      service: "dcgm-exporter"
+                      source: "dcgm-exporter"
+                      container_name: "dcgm-shared-gpu3"
+                      model: "shared"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "9400"
+              - job_name: dcgm-dcgm-sage
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['dcgm-sage:9400']
+                    labels:
+                      service: "dcgm-exporter"
+                      source: "dcgm-exporter"
+                      container_name: "dcgm-sage"
+                      model: "levanto/sage"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "9400"
+              - job_name: inference-proxy-proxy-qwen36-35b-a3b
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-qwen36-35b-a3b:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-qwen36-35b-a3b"
+                      model: "Qwen/Qwen3.6-35B-A3B-FP8"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8008"
+              - job_name: sglang-model-sg-qwen38-27b-fp8-tp1-coloc
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['model-sg-qwen38-27b-fp8-tp1-coloc:8000']
+                    labels:
+                      service: "sglang"
+                      source: "sglang"
+                      container_name: "model-sg-qwen38-27b-fp8-tp1-coloc"
+                      model: "Qwen/Qwen3.8-27B-FP8"
+                      served_model: "Qwen/Qwen3.8-27B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+                      instance: "0"
+                      gpu_pair: "2"
+                      model_revision: "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"
+                      config_variant: "qwen38-gpu2-coloc-fa3-m96-prio"
+                      quantization: "fp8"
+                      chunk_size: "4096"
+                      max_prefill_tokens: "4096"
+                      mixed_chunk: "0"
+                      mem_fraction_static: "0.50"
+                      max_mamba_cache_size: "96"
+                      max_running_requests: "32"
+                      max_queued_requests: "64"
+                      sglang_revision: "qwen38.27b.g561c8f3"
+                      engine_image: "febfb971c735"
+              - job_name: inference-proxy-proxy-qwen38-27b
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-qwen38-27b:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-qwen38-27b"
+                      model: "Qwen/Qwen3.8-27B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+                      gpu_pair: "2"
+                      config_variant: "qwen38-gpu2-coloc-only"
+              - job_name: inference-proxy-proxy-qwen38-27b-abliterated
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-qwen38-27b-abliterated:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-qwen38-27b-abliterated"
+                      model: "Qwen/Qwen3.8-27B-abliterated"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8000"
+                      gpu_pair: "2"
+                      config_variant: "qwen38-lora-canary"
+              - job_name: inference-proxy-proxy-dsv41
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-dsv41:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-dsv41"
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+                      port: "8009"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      ppcie: "true"
+                      deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+                      config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+              - job_name: inference-proxy-proxy-dsv41-abliterated
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-dsv41-abliterated:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-dsv41-abliterated"
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated"
+                      port: "8009"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      ppcie: "true"
+                      deployment: "dsv41-flash-1017-vllm-dep4x2-abliterated"
+                      config_variant: "vllm0320-lora3p-cc2-w4a8-dep4x2-c8192-dspark3-mr64-engram-host-cpugather"
+              - job_name: inference-proxy-proxy-flux2-klein-4b
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-flux2-klein-4b:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-flux2-klein-4b"
+                      model: "black-forest-labs/FLUX.2-klein-4B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8002"
+              - job_name: inference-proxy-proxy-qwen3vl-30b-a3b
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-qwen3vl-30b-a3b:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-qwen3vl-30b-a3b"
+                      model: "Qwen/Qwen3-VL-30B-A3B-Instruct"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8003"
+              - job_name: inference-proxy-proxy-qwen3-embedding-0.6b
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-qwen3-embedding-0.6b:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-qwen3-embedding-0.6b"
+                      model: "Qwen/Qwen3-Embedding-0.6B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8004"
+              - job_name: inference-proxy-proxy-qwen3-reranker-0.6b
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-qwen3-reranker-0.6b:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-qwen3-reranker-0.6b"
+                      model: "Qwen/Qwen3-Reranker-0.6B"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8005"
+              - job_name: inference-proxy-proxy-whisper-large-v3
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-whisper-large-v3:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-whisper-large-v3"
+                      model: "openai/whisper-large-v3"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8006"
+              - job_name: inference-proxy-proxy-privacy-filter
+                scrape_interval: 15s
+                metrics_path: /metrics
+                static_configs:
+                  - targets: ['proxy-privacy-filter:8000']
+                    labels:
+                      service: "vllm-proxy"
+                      source: "vllm-proxy"
+                      container_name: "proxy-privacy-filter"
+                      model: "openai/privacy-filter"
+                      deployment: "small-models"
+                      env: "${ENV}"
+                      host: "${CVM_HOST}"
+                      host_machine: "${CVM_HOST}"
+                      cvm_name: "${CVM_NAME}"
+                      ip: "${HOST_IP}"
+                      port: "8007"
+
+        prometheus/self:
+          config:
+            scrape_configs:
+              - job_name: otelcol-app
+                scrape_interval: 30s
+                static_configs:
+                  - targets: ['localhost:8888']
+
+      processors:
+        memory_limiter:
+          check_interval: 1s
+          limit_mib: 512
+          spike_limit_mib: 128
+
+        resource:
+          attributes:
+            - key: host.name
+              value: $${env:DD_HOSTNAME}
+              action: upsert
+            - key: cvm.name
+              value: $${env:CVM_NAME}
+              action: upsert
+            - key: host.machine
+              value: $${env:CVM_HOST}
+              action: insert
+            - key: deployment.environment
+              value: $${env:ENV}
+              action: upsert
+            - key: service.namespace
+              value: near-ai
+              action: insert
+
+        transform/docker_metadata:
+          error_mode: ignore
+          log_statements:
+            - context: log
+              statements:
+                - set(attributes["service.name"], attributes["attrs"]["com.docker.compose.service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil
+                - set(attributes["service.name"], ParseJSON(attributes["attrs"]["com.datadoghq.ad.logs"])[0]["service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil
+                - set(attributes["log.source"], ParseJSON(attributes["attrs"]["com.datadoghq.ad.logs"])[0]["source"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil
+                - set(attributes["service"], attributes["service.name"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil and attributes["service.name"] != nil
+                - set(attributes["source"], attributes["log.source"]) where attributes["attrs"] != nil and attributes["attrs"]["com.datadoghq.ad.logs"] != nil and attributes["log.source"] != nil
+                - set(attributes["container.name"], attributes["attrs"]["com.docker.compose.service"]) where attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil
+
+        filter/app_logs:
+          error_mode: ignore
+          logs:
+            log_record:
+              - 'attributes["model"] == nil and attributes["deployment"] == nil'
+              - 'attributes["service.name"] == "compose-manager"'
+              - 'attributes["service.name"] == "compose-manager-launcher"'
+              - 'attributes["service.name"] == "otelcol-management"'
+              - 'attributes["service.name"] == "otelcol-contrib"'
+              - 'attributes["service.name"] == "datadog-agent"'
+
+        groupbyattrs/docker_service:
+          keys:
+            - service.name
+            - service
+            - container.name
+            - log.source
+            - source
+            - log.iostream
+            - model
+            - model_path
+            - served_model
+            - precision
+            - deployment
+            - env
+            - host
+            - ip
+            - port
+            - instance
+            - replica
+
+        batch:
+          send_batch_size: 1024
+          send_batch_max_size: 2048
+          timeout: 5s
+
+      exporters:
+        otlphttp/gateway:
+          endpoint: https://telemetry.infra.near.ai
+          headers:
+            Authorization: "Bearer $${env:MONITORING_INGEST_TOKEN}"
+          sending_queue:
+            num_consumers: 1
+            queue_size: 128
+            storage: file_storage
+
+      extensions:
+        file_storage:
+          directory: /var/lib/otelcol-contrib/storage
+          create_directory: true
+
+      service:
+        extensions: [file_storage]
+        pipelines:
+          logs/app:
+            receivers: [filelog/docker_containers]
+            processors: [memory_limiter, resource, transform/docker_metadata, filter/app_logs, groupbyattrs/docker_service, batch]
+            exporters: [otlphttp/gateway]
+          metrics/app:
+            receivers: [prometheus/apps]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          metrics/otlp:
+            receivers: [otlp]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          metrics/self:
+            receivers: [prometheus/self]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/gateway]
+        telemetry:
+          metrics:
+            address: localhost:8888
+          logs:
+            level: info
+
+  registrar_script:
+    content: |
+      #!/bin/sh
+      PROXY_URL="https://completions.near.ai"
+      TOKEN="$${MODEL_PROXY_TOKEN}"
+      INFERENCE_TOKEN="$${PROXY_TOKEN}"
+
+      if [ -z "$$TOKEN" ] || [ -z "$$INFERENCE_TOKEN" ]; then
+        echo "ERROR: MODEL_PROXY_TOKEN and PROXY_TOKEN are required for model-proxy registration"
+        exit 1
+      fi
+
+      TLS_PORT=8444
+
+      # Track registration state per port
+      for port in 8002 8003 8004 8005 8006 8007 8008 8009; do
+        eval "REG_$$port=false"
+        eval "FAIL_COUNT_$$port=0"
+      done
+
+      register_endpoint() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\",\"routing_port\":$$TLS_PORT}" || true
+      }
+
+      unregister_endpoint() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/unregister/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\"}" || true
+      }
+
+      register_model() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/model" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$1\",\"domain\":\"$$2\"}" || true
+      }
+
+      cleanup() {
+        echo "SIGTERM received, unregistering all endpoints"
+        for port in 8002 8003 8004 8005 8006 8007 8008 8009; do
+          unregister_endpoint "$${HOST_IP}:$$port"
+        done
+        exit 0
+      }
+      trap cleanup TERM INT
+
+      # Health check via the host-published port (HOST_IP:<port>), NOT the
+      # compose service DNS name. A service-name probe fails with curl (6)
+      # "Could not resolve host" if the registrar loses compose-network DNS
+      # (e.g. after a backend container is recreated independently), wedging
+      # every port's health check so all 8 models silently drop to 0 backends.
+      # HOST_IP:<port> is the endpoint model-proxy actually routes to and never
+      # depends on inter-container DNS. See cvm-compose-files#57. ($1 = host:port)
+      check_chat() {
+        curl -sf --max-time 45 -X POST "http://$$1/v1/chat/completions" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$2\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}" \
+          > /dev/null 2>&1
+      }
+
+      # A bounded vLLM queue can return 503 or close a connection under load.
+      # Keep the DS4.1 endpoint registered in either case, as gpu02 does.
+      check_chat_saturated() {
+        endpoint=$$1
+        model=$$2
+        host_header=$${3:-}
+        set --
+        if [ -n "$$host_header" ]; then
+          set -- -H "Host: $$host_header"
+        fi
+        status=$$(curl -sS --connect-timeout 10 --max-time 45 -o /dev/null -w "%{http_code}" \
+          -X POST "http://$$endpoint/v1/chat/completions" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          -H "Content-Type: application/json" "$$@" \
+          -d "{\"model\":\"$$model\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}")
+        curl_status=$$?
+        if [ "$$curl_status" -ne 0 ]; then
+          case "$$curl_status" in
+            52|56)
+              echo "DS4.1 chat probe for $$model via $$endpoint hit connection-level backpressure (curl $$curl_status); treating as alive but saturated"
+              return 0
+              ;;
+            *)
+              echo "DS4.1 chat probe for $$model via $$endpoint failed (curl exit $$curl_status)"
+              return 1
+              ;;
+          esac
+        fi
+        case "$$status" in
+          2*) return 0 ;;
+          503)
+            echo "DS4.1 chat probe for $$model via $$endpoint returned HTTP 503; treating as alive but saturated"
+            return 0
+            ;;
+          *)
+            echo "DS4.1 chat probe for $$model via $$endpoint failed (HTTP $$status)"
+            return 1
+            ;;
+        esac
+      }
+
+      check_tls_route() {
+        domain=$$1
+        tls_status=$$(curl -skS --connect-timeout 10 --max-time 20 -o /dev/null -w "%{http_code}" \
+          --resolve "$$domain:$$TLS_PORT:$${HOST_IP}" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          "https://$$domain:$$TLS_PORT/v1/models")
+        case "$$tls_status" in
+          2*) return 0 ;;
+          *)
+            echo "TLS routing-port check failed for $$domain (https :$$TLS_PORT -> HTTP $$tls_status)"
+            return 1
+            ;;
+        esac
+      }
+
+      # For non-chat backends (embeddings, reranker, flux, whisper, privacy-filter)
+      check_models() {
+        curl -sf --max-time 10 \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          "http://$$1/v1/models" > /dev/null 2>&1
+      }
+
+      check_port() {
+        case $$1 in
+          8002) check_models "$${HOST_IP}:8002" ;;
+          8003) check_chat "$${HOST_IP}:8003" "Qwen/Qwen3-VL-30B-A3B-Instruct" ;;
+          8004) check_models "$${HOST_IP}:8004" ;;
+          8005) check_models "$${HOST_IP}:8005" ;;
+          8006) check_models "$${HOST_IP}:8006" ;;
+          8007) check_models "$${HOST_IP}:8007" ;;
+          8008) check_chat "$${HOST_IP}:8008" "Qwen/Qwen3.6-35B-A3B-FP8" ;;
+          8009) check_chat_saturated "$${HOST_IP}:8009" "deepseek-ai/DeepSeek-V4.1-Flash-1017" \
+                  && check_chat_saturated "$${HOST_IP}:8009" "deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated" "deepseek-v4-1-flash-abliterated.completions.near.ai" \
+                  && check_tls_route "deepseek-v4-1-flash.completions.near.ai" \
+                  && check_tls_route "deepseek-v4-1-flash-abliterated.completions.near.ai" ;;
+        esac
+      }
+
+      # Probe the host-published nginx port via HOST_IP instead of the
+      # "nginx" compose DNS name. A stale/abandoned docker service-name
+      # resolution (e.g. after nginx is recreated) otherwise wedges this
+      # readiness gate forever and silently drops every model to 0 backends.
+      # Bounded + loud so a persistent probe failure falls through to the
+      # registration loop (which health-checks each backend directly) instead
+      # of hanging here forever. See cvm-compose-files#57.
+      READY_URL="http://$${HOST_IP}:8002/v1/models"
+      echo "Waiting for first model to be ready (probing $$READY_URL)..."
+      ready_attempts=0
+      until curl --connect-timeout 5 --max-time 10 -sf \
+        -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+        "$$READY_URL" > /dev/null 2>&1; do
+        ready_attempts=$$((ready_attempts + 1))
+        if [ "$$ready_attempts" -ge 30 ]; then
+          echo "WARN: first model not reachable at $$READY_URL after $$ready_attempts attempts (~20m); entering registration loop anyway (each backend is health-checked directly before registering)"
+          break
+        fi
+        echo "First model not ready yet (attempt $$ready_attempts/30), retrying in 30s..."
+        sleep 30
+      done
+      echo "First model ready, starting registration loop"
+
+      while true; do
+        for port in 8002 8003 8004 8005 8006 8007 8008 8009; do
+          # Liveness marker for the container healthcheck (see service def);
+          # refreshed each port so a slow-but-progressing serial loop (these
+          # probes can take minutes in aggregate) is not falsely marked
+          # unhealthy. See cvm-compose-files#57.
+          date +%s > /tmp/registrar_alive
+          eval "was_reg=\$$REG_$$port"
+          eval "fails=\$$FAIL_COUNT_$$port"
+          if check_port $$port; then
+            eval "FAIL_COUNT_$$port=0"
+            register_endpoint "$${HOST_IP}:$$port" "$$TLS_PORT"
+            if [ "$$was_reg" = false ]; then
+              echo "Registered $${HOST_IP}:$$port"
+            fi
+            eval "REG_$$port=true"
+          else
+            fails=$$((fails + 1))
+            eval "FAIL_COUNT_$$port=$$fails"
+            echo "Health check failed for $${HOST_IP}:$$port (fail count: $$fails)"
+            eval "REG_$$port=false"
+          fi
+        done
+
+        # Model-to-domain mappings
+        register_model "black-forest-labs/FLUX.2-klein-4B" "flux2-klein.completions.near.ai"
+        register_model "Qwen/Qwen3-VL-30B-A3B-Instruct" "qwen3-vl-30b.completions.near.ai"
+        register_model "Qwen/Qwen3-Embedding-0.6B" "qwen3-embedding.completions.near.ai"
+        register_model "Qwen/Qwen3-Reranker-0.6B" "qwen3-reranker.completions.near.ai"
+        register_model "openai/whisper-large-v3" "whisper-large-v3.completions.near.ai"
+        register_model "openai/privacy-filter" "privacy-filter.completions.near.ai"
+        register_model "Qwen/Qwen3.6-35B-A3B-FP8" "qwen3-6-35b.completions.near.ai"
+        # model-proxy discovers both ids on HOST_IP:8009 from nginx's gated stub.
+        # Both domains route to :8444, where nginx selects the proxy by SNI.
+        # These mappings are identical to gpu02's to avoid last-writer-wins drift.
+        register_model "deepseek-ai/DeepSeek-V4.1-Flash-1017" "deepseek-v4-1-flash.completions.near.ai"
+        register_model "deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated" "deepseek-v4-1-flash-abliterated.completions.near.ai"
+        # Refresh liveness after the register_model calls, before the long sleep.
+        date +%s > /tmp/registrar_alive
+        sleep 60
+      done
+  nginx_conf:
+    content: |
+      log_format json_combined escape=json
+        '{'  '"time":"$$time_iso8601"'
+        ',"request_id":"$$http_x_request_id"'
+        ',"org_id":"$$http_x_org_id"'
+        ',"workspace_id":"$$http_x_workspace_id"'
+        ',"http_host":"$$host"'
+        ',"method":"$$request_method"'
+        ',"uri":"$$uri"'
+        ',"status":$$status'
+        ',"request_length":$$request_length'
+        ',"bytes_sent":$$bytes_sent'
+        ',"request_time":$$request_time'
+        ',"upstream_addr":"$$upstream_addr"'
+        '}';
+
+      access_log /var/log/nginx/access.log json_combined;
+
+      # Common proxy settings
+      proxy_http_version 1.1;
+      proxy_set_header Host $$host;
+      proxy_set_header X-Real-IP $$remote_addr;
+      proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $$scheme;
+      proxy_set_header Connection '';
+      proxy_buffering off;
+      proxy_cache off;
+      proxy_read_timeout 3600s;
+      client_max_body_size 100m;
+      client_body_buffer_size 1m;
+      server_names_hash_bucket_size 128;
+
+      # :8002 - FLUX (single proxy, 4 backends)
+      server {
+          listen 8002;
+          location / { proxy_pass http://proxy-flux2-klein-4b:8000; }
+      }
+
+      # :8003 - Qwen3-VL
+      server {
+          listen 8003;
+          location / { proxy_pass http://proxy-qwen3vl-30b-a3b:8000; }
+      }
+
+      # :8004 - Embeddings
+      server {
+          listen 8004;
+          location / { proxy_pass http://proxy-qwen3-embedding-0.6b:8000; }
+      }
+
+      # :8005 - Reranker
+      server {
+          listen 8005;
+          location / { proxy_pass http://proxy-qwen3-reranker-0.6b:8000; }
+      }
+
+      # :8006 - Whisper
+      server {
+          listen 8006;
+          location / { proxy_pass http://proxy-whisper-large-v3:8000; }
+      }
+
+      # :8007 - Privacy-filter
+      server {
+          listen 8007;
+          location / { proxy_pass http://proxy-privacy-filter:8000; }
+      }
+
+      # :8008 - Qwen3.6-35B-A3B-FP8
+      server {
+          listen 8008;
+          location / { proxy_pass http://proxy-qwen36-35b-a3b:8000; }
+      }
+
+      # :8009 carries both DS4.1 ids because all host ports 8000-8010 and 8444
+      # are already taken. Discovery is gated on the real base serving path.
+      # A bare return runs in rewrite BEFORE auth_request's access phase; try_files
+      # runs in precontent AFTER access, then the named location can return the stub.
+      server {
+          listen 8009;
+          location = /v1/models {
+              auth_request /_dsv41_health;
+              try_files /__synthetic_models__ @dsv41_models;
+          }
+          location @dsv41_models {
+              default_type application/json;
+              return 200 '{"object":"list","data":[{"id":"deepseek-ai/DeepSeek-V4.1-Flash-1017","object":"model","owned_by":"vllm","max_model_len":1048576},{"id":"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated","object":"model","owned_by":"vllm","max_model_len":1048576}]}';
+          }
+          location = /_dsv41_health {
+              internal;
+              proxy_pass http://proxy-dsv41:8000/v1/models;
+              proxy_pass_request_body off;
+              proxy_set_header Content-Length "";
+              proxy_connect_timeout 2s;
+              proxy_read_timeout 4s;
+          }
+          location / { proxy_pass http://proxy-dsv41:8000; }
+      }
+
+      server {
+          listen 8009;
+          server_name deepseek-v4-1-flash-abliterated.completions.near.ai;
+          location / { proxy_pass http://proxy-dsv41-abliterated:8000; }
+      }
+
+      # ── TLS server blocks (port 443 = host 8444) ──
+
+      ssl_certificate /etc/letsencrypt/live/completions.near.ai/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/completions.near.ai/privkey.pem;
+      ssl_protocols TLSv1.2 TLSv1.3;
+
+      # Each model accepts both its canonical SNI and the rotation-SNI form
+      # `<canonical>-i<N>.completions.near.ai` used by cloud-api's discovery
+      # (model-proxy's parse_indexed_sni), in both the prod `completions.near.ai`
+      # and staging `completions-stg.near.ai` zones. Without the staging
+      # server_names, `*.completions-stg.near.ai` SNIs fall through to the
+      # default server (lexically first model) and return the wrong model's
+      # signing pubkey, breaking E2EE on staging — see nearai/infra#143
+      # (rotation-SNI variant) and nearai/infra#164 (staging-SNI variant),
+      # plus the L4-SNI-rewrite analysis in nearai/model-proxy#30.
+
+      server {
+          listen 443 ssl http2;
+          server_name flux2-klein.completions.near.ai
+                      flux2-klein.completions-stg.near.ai
+                      ~^flux2-klein-i\d+\.completions(-stg)?\.near\.ai$$;
+          # Non-streaming endpoint; keep fleet-wide HTTP/2 connection handling uniform.
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-flux2-klein-4b:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name qwen3-vl-30b.completions.near.ai
+                      qwen3-vl-30b.completions-stg.near.ai
+                      ~^qwen3-vl-30b-i\d+\.completions(-stg)?\.near\.ai$$;
+          # cloud-api multiplexes unrelated H2 requests over one bucket-pinned connection.
+          # Raise the request budget so nginx does not close it at 1000 requests and kill
+          # every in-flight SSE stream. Keep it alive across idle gaps so a reconnect does
+          # not open a new TCP through model-proxy's L4 LB, land on a different backend,
+          # and make the signature lookup return 404.
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-qwen3vl-30b-a3b:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name qwen3-embedding.completions.near.ai
+                      qwen3-embedding.completions-stg.near.ai
+                      ~^qwen3-embedding-i\d+\.completions(-stg)?\.near\.ai$$;
+          # Non-streaming endpoint; keep fleet-wide HTTP/2 connection handling uniform.
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-qwen3-embedding-0.6b:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name qwen3-reranker.completions.near.ai
+                      qwen3-reranker.completions-stg.near.ai
+                      ~^qwen3-reranker-i\d+\.completions(-stg)?\.near\.ai$$;
+          # Non-streaming endpoint; keep fleet-wide HTTP/2 connection handling uniform.
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-qwen3-reranker-0.6b:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name whisper-large-v3.completions.near.ai
+                      whisper-large-v3.completions-stg.near.ai
+                      ~^whisper-large-v3-i\d+\.completions(-stg)?\.near\.ai$$;
+          # Non-streaming endpoint; keep fleet-wide HTTP/2 connection handling uniform.
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-whisper-large-v3:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name privacy-filter.completions.near.ai
+                      privacy-filter.completions-stg.near.ai
+                      ~^privacy-filter-i\d+\.completions(-stg)?\.near\.ai$$;
+          # Non-streaming endpoint; keep fleet-wide HTTP/2 connection handling uniform.
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-privacy-filter:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name qwen3-6-35b.completions.near.ai
+                      qwen3-6-35b.completions-stg.near.ai
+                      ~^qwen3-6-35b-i\d+\.completions(-stg)?\.near\.ai$$;
+          # cloud-api multiplexes unrelated H2 requests over one bucket-pinned connection.
+          # Raise the request budget so nginx does not close it at 1000 requests and kill
+          # every in-flight SSE stream. Keep it alive across idle gaps so a reconnect does
+          # not open a new TCP through model-proxy's L4 LB, land on a different backend,
+          # and make the signature lookup return 404.
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-qwen36-35b-a3b:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          # These base names cannot match the abliterated -iN or -b<hex12> names.
+          # gpu13.hosts.near.ai is no longer used by the OpenRouter lane and falls through.
+          server_name deepseek-v4-1-flash.completions.near.ai
+                      deepseek-v4-1-flash.completions-stg.near.ai
+                      ~^deepseek-v4-1-flash-i\d+\.completions(-stg)?\.near\.ai$$
+                      "~^deepseek-v4-1-flash-b[0-9a-f]{12}\.completions(-stg)?\.near\.ai$$";
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location = /v1/models { default_type application/json; return 200 '{"object":"list","data":[{"id":"deepseek-ai/DeepSeek-V4.1-Flash-1017","object":"model","owned_by":"vllm","max_model_len":1048576}]}'; }
+          location / { proxy_pass http://proxy-dsv41:8000; }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name deepseek-v4-1-flash-abliterated.completions.near.ai
+                      deepseek-v4-1-flash-abliterated.completions-stg.near.ai
+                      ~^deepseek-v4-1-flash-abliterated-i\d+\.completions(-stg)?\.near\.ai$$
+                      "~^deepseek-v4-1-flash-abliterated-b[0-9a-f]{12}\.completions(-stg)?\.near\.ai$$";
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location = /v1/models { default_type application/json; return 200 '{"object":"list","data":[{"id":"deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated","object":"model","owned_by":"vllm","max_model_len":1048576}]}'; }
+          location / { proxy_pass http://proxy-dsv41-abliterated:8000; }
+      }
+
+  # ── TEMPORARY (gpu02 maintenance): dedicated ingress for Qwen3.8 on :8000/:8001 ──
+  nginx_qwen38_conf:
+    content: |
+      log_format json_combined escape=json
+        '{'  '"time":"$$time_iso8601"'
+        ',"request_id":"$$http_x_request_id"'
+        ',"org_id":"$$http_x_org_id"'
+        ',"workspace_id":"$$http_x_workspace_id"'
+        ',"http_host":"$$host"'
+        ',"method":"$$request_method"'
+        ',"uri":"$$uri"'
+        ',"status":$$status'
+        ',"request_length":$$request_length'
+        ',"bytes_sent":$$bytes_sent'
+        ',"request_time":$$request_time'
+        ',"upstream_addr":"$$upstream_addr"'
+        '}';
+
+      access_log /var/log/nginx/access.log json_combined;
+
+      proxy_http_version 1.1;
+      proxy_set_header Host $$host;
+      proxy_set_header X-Real-IP $$remote_addr;
+      proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $$scheme;
+      proxy_set_header Connection '';
+      proxy_buffering off;
+      proxy_cache off;
+      proxy_read_timeout 3600s;
+      client_max_body_size 100m;
+      client_body_buffer_size 1m;
+
+      # :8000 - Qwen3.8-27B (registrar probe + health)
+      server {
+          listen 8000;
+          location / { proxy_pass http://proxy-qwen38-27b:8000; }
+      }
+
+      # :8000 with Host qwen3-8-27b-abliterated - the abliterated registrar's health
+      # checks. The block above stays the default server, so model-proxy's probe
+      # (no Host match) keeps reaching the base proxy, whose engine list also
+      # carries the adapter. The upstream resolves per request, so this nginx
+      # starts and reloads without the abliterated proxy.
+      server {
+          listen 8000;
+          server_name qwen3-8-27b-abliterated.completions.near.ai;
+          location / {
+              resolver 127.0.0.11 valid=5s ipv6=off;
+              set $$proxy_qwen38_abliterated http://proxy-qwen38-27b-abliterated:8000;
+              proxy_pass $$proxy_qwen38_abliterated;
+          }
+      }
+
+      # The abliterated server names outgrow the default 64-byte bucket.
+      server_names_hash_bucket_size 128;
+      ssl_certificate /etc/letsencrypt/live/completions.near.ai/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/completions.near.ai/privkey.pem;
+      ssl_protocols TLSv1.2 TLSv1.3;
+
+      # :8001 - Qwen3.8-27B TLS routing port (registered with routing_port 8001).
+      # Same SNI forms as the shared nginx: canonical, rotation-SNI (-i<N>) and
+      # the staging zone.
+      server {
+          listen 8001 ssl http2;
+          server_name qwen3-8-27b.completions.near.ai
+                      qwen3-8-27b.completions-stg.near.ai
+                      ~^qwen3-8-27b-i\d+\.completions(-stg)?\.near\.ai$$;
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / { proxy_pass http://proxy-qwen38-27b:8000; }
+      }
+
+      # :8001 - Qwen3.8-27B abliterated, selected by SNI on the base routing port:
+      # model-proxy maps the adapter id (listed by the base probe) to HOST_IP:8001.
+      server {
+          listen 8001 ssl http2;
+          server_name qwen3-8-27b-abliterated.completions.near.ai
+                      qwen3-8-27b-abliterated.completions-stg.near.ai
+                      ~^qwen3-8-27b-abliterated-i\d+\.completions(-stg)?\.near\.ai$$;
+          keepalive_timeout 1h;
+          keepalive_requests 1000000;
+          location ^~ /metrics { return 404; }
+          location ^~ /v1/metrics { return 404; }
+          location / {
+              resolver 127.0.0.11 valid=5s ipv6=off;
+              set $$proxy_qwen38_abliterated http://proxy-qwen38-27b-abliterated:8000;
+              proxy_pass $$proxy_qwen38_abliterated;
+          }
+      }
+
+  # ── TEMPORARY (gpu02 maintenance): single-endpoint registrar for Qwen3.8 ──
+  qwen38_registrar_script:
+    content: |
+      #!/bin/sh
+      PROXY_URL="https://completions.near.ai"
+      TOKEN="$${MODEL_PROXY_TOKEN}"
+      INFERENCE_TOKEN="$${PROXY_TOKEN}"
+
+      if [ -z "$$TOKEN" ] || [ -z "$$INFERENCE_TOKEN" ]; then
+        echo "ERROR: MODEL_PROXY_TOKEN and PROXY_TOKEN are required for model-proxy registration"
+        exit 1
+      fi
+
+      HTTP_PORT="$${HTTP_PORT:-8000}"
+      TLS_PORT="$${TLS_PORT_QWEN38:-8001}"
+      ENDPOINT="$${HOST_IP}:$${HTTP_PORT}"
+      MODEL="Qwen/Qwen3.8-27B"
+      DOMAIN="qwen3-8-27b.completions.near.ai"
+      MAX_RETRIES=3
+      REGISTERED=false
+      FAIL_COUNT=0
+
+      register_endpoint() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\",\"routing_port\":$$2}" || true
+      }
+
+      unregister_endpoint() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/unregister/endpoint" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"endpoint\":\"$$1\"}" || true
+      }
+
+      register_model() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/model" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$1\",\"domain\":\"$$2\"}" || true
+      }
+
+      cleanup() {
+        echo "SIGTERM received, unregistering $$ENDPOINT"
+        unregister_endpoint "$$ENDPOINT"
+        exit 0
+      }
+      trap cleanup TERM INT
+
+      check_chat() {
+        status=$$(curl -sS --connect-timeout 10 --max-time 45 -o /dev/null -w "%{http_code}" \
+          -X POST "http://$$1/v1/chat/completions" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$2\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}")
+        curl_status=$$?
+
+        if [ "$$curl_status" -ne 0 ]; then
+          case "$$curl_status" in
+            52|56)
+              echo "Health probe hit connection-level backpressure (curl $$curl_status); treating as alive but saturated"
+              return 0
+              ;;
+            28)
+              # A 1-token probe queues behind long prefills and can pass 45 s on a healthy
+              # engine: on 2026-11-02 ~250K-token prompts withdrew both Qwen3.8 replicas
+              # this way. /v1/models answers from the HTTP layer, so 2xx means busy, not
+              # dead. Same rule as the GLM-5.3 registrars (#277).
+              if curl -sf --connect-timeout 5 --max-time 10 \
+                -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+                "http://$$1/v1/models" > /dev/null 2>&1; then
+                echo "Health probe timed out but /v1/models is live; treating as alive but saturated"
+                return 0
+              fi
+              echo "Health probe timed out and /v1/models is unreachable"
+              return 1
+              ;;
+          esac
+          echo "Health probe curl failed with status $$curl_status"
+          return 1
+        fi
+
+        case "$$status" in
+          2*) return 0 ;;
+          503)
+            echo "Backend returned 503; treating as alive but saturated"
+            return 0
+            ;;
+          *)
+            echo "Backend returned HTTP $$status"
+            return 1
+            ;;
+        esac
+      }
+
+      check_tls_route() {
+        tls_status=$$(curl -skS --connect-timeout 10 --max-time 20 -o /dev/null -w "%{http_code}" \
+          --resolve "$$DOMAIN:$$TLS_PORT:$${HOST_IP}" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          "https://$$DOMAIN:$$TLS_PORT/v1/models")
+        case "$$tls_status" in
+          2*) return 0 ;;
+          *)
+            echo "TLS routing-port check failed (https :$$TLS_PORT -> HTTP $$tls_status)"
+            return 1
+            ;;
+        esac
+      }
+
+      READY_URL="http://$${HOST_IP}:$${HTTP_PORT}/v1/models"
+      echo "Waiting for Qwen3.8 replica to be ready (probing $$READY_URL)..."
+      ready_attempts=0
+      until curl --connect-timeout 5 --max-time 10 -sf \
+        -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+        "$$READY_URL" > /dev/null 2>&1; do
+        ready_attempts=$$((ready_attempts + 1))
+        if [ "$$ready_attempts" -ge 30 ]; then
+          echo "WARN: replica not reachable after $$ready_attempts attempts; entering the guarded registration loop"
+          break
+        fi
+        echo "Replica not ready yet (attempt $$ready_attempts/30), retrying in 30s..."
+        sleep 30
+      done
+
+      while true; do
+        date +%s > /tmp/registrar_alive
+        if check_chat "$$ENDPOINT" "$$MODEL" && check_tls_route; then
+          FAIL_COUNT=0
+          register_endpoint "$$ENDPOINT" "$$TLS_PORT"
+          if [ "$$REGISTERED" = false ]; then
+            echo "Registered $$ENDPOINT (routing port $$TLS_PORT)"
+          fi
+          REGISTERED=true
+        else
+          FAIL_COUNT=$$((FAIL_COUNT + 1))
+          echo "Health check failed for $$ENDPOINT (fail count: $$FAIL_COUNT)"
+          if [ "$$REGISTERED" = true ] && [ "$$FAIL_COUNT" -ge "$$MAX_RETRIES" ]; then
+            unregister_endpoint "$$ENDPOINT"
+            REGISTERED=false
+          fi
+        fi
+
+        register_model "$$MODEL" "$$DOMAIN"
+        date +%s > /tmp/registrar_alive
+        sleep 60
+      done
+
+  qwen38_abliterated_registrar_script:
+    content: |
+      #!/bin/sh
+      # Maps the adapter id to its domain; never registers or unregisters an endpoint.
+      # model-proxy keys probes by ip:port, so /unregister/endpoint for HOST_IP:8000 would
+      # drop base Qwen3.8 (and propagate to peers). Discovery already probes base's
+      # HOST_IP:8000, whose /v1/models (the engine list) carries the adapter id, and routes
+      # its domain to HOST_IP:8001, where nginx-qwen38 selects the abliterated proxy by SNI.
+      PROXY_URL="https://completions.near.ai"
+      TOKEN="$${MODEL_PROXY_TOKEN}"
+      INFERENCE_TOKEN="$${PROXY_TOKEN}"
+
+      if [ -z "$$TOKEN" ] || [ -z "$$INFERENCE_TOKEN" ]; then
+        echo "ERROR: MODEL_PROXY_TOKEN and PROXY_TOKEN are required for model-proxy registration"
+        exit 1
+      fi
+
+      HTTP_PORT="$${HTTP_PORT:-8000}"
+      TLS_PORT="$${TLS_PORT_QWEN38:-8001}"
+      BASE_PROBE="$${HOST_IP}:$${HTTP_PORT}"
+      MODEL="Qwen/Qwen3.8-27B-abliterated"
+      DOMAIN="qwen3-8-27b-abliterated.completions.near.ai"
+      REGISTERED=false
+      FAIL_COUNT=0
+
+      register_model() {
+        curl -sS --max-time 10 -X POST "$$PROXY_URL/register/model" \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$1\",\"domain\":\"$$2\"}" || true
+      }
+
+      # Nothing to withdraw: /unregister/model is not propagated and peer sync restores
+      # the mapping, so stopping proxy-qwen38-27b-abliterated is the off switch.
+      cleanup() {
+        echo "SIGTERM received; leaving model-proxy untouched (no endpoint is owned here)"
+        exit 0
+      }
+      trap cleanup TERM INT
+
+      check_chat() {
+        status=$$(curl -sS --connect-timeout 10 --max-time 45 -o /dev/null -w "%{http_code}" \
+          -X POST "http://$$BASE_PROBE/v1/chat/completions" \
+          -H "Host: $$DOMAIN" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\":\"$$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}")
+        curl_status=$$?
+
+        if [ "$$curl_status" -ne 0 ]; then
+          case "$$curl_status" in
+            52|56)
+              echo "Health probe hit connection-level backpressure (curl $$curl_status); treating as alive but saturated"
+              return 0
+              ;;
+          esac
+          echo "Health probe curl failed with status $$curl_status"
+          return 1
+        fi
+
+        case "$$status" in
+          2*) return 0 ;;
+          503)
+            echo "Backend returned 503; treating as alive but saturated"
+            return 0
+            ;;
+          *)
+            echo "Backend returned HTTP $$status"
+            return 1
+            ;;
+        esac
+      }
+
+      check_tls_route() {
+        tls_status=$$(curl -skS --connect-timeout 10 --max-time 20 -o /dev/null -w "%{http_code}" \
+          --resolve "$$DOMAIN:$$TLS_PORT:$${HOST_IP}" \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          "https://$$DOMAIN:$$TLS_PORT/v1/models")
+        case "$$tls_status" in
+          2*) return 0 ;;
+          *)
+            echo "TLS routing-port check failed (https :$$TLS_PORT -> HTTP $$tls_status)"
+            return 1
+            ;;
+        esac
+      }
+
+      # The list model-proxy discovery reads: base's probe, no Host override.
+      check_probe_lists_adapter() {
+        if curl -sS --connect-timeout 10 --max-time 20 \
+          -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+          "http://$$BASE_PROBE/v1/models" | grep -qF "\"$$MODEL\""; then
+          return 0
+        fi
+        echo "Base probe http://$$BASE_PROBE/v1/models does not list $$MODEL"
+        return 1
+      }
+
+      READY_URL="http://$${BASE_PROBE}/v1/models"
+      echo "Waiting for Qwen3.8 abliterated route to be ready (probing $$READY_URL with Host $$DOMAIN)..."
+      ready_attempts=0
+      until curl --connect-timeout 5 --max-time 10 -sf \
+        -H "Host: $$DOMAIN" \
+        -H "Authorization: Bearer $$INFERENCE_TOKEN" \
+        "$$READY_URL" > /dev/null 2>&1; do
+        ready_attempts=$$((ready_attempts + 1))
+        if [ "$$ready_attempts" -ge 30 ]; then
+          echo "WARN: route not reachable after $$ready_attempts attempts; entering the guarded registration loop"
+          break
+        fi
+        echo "Route not ready yet (attempt $$ready_attempts/30), retrying in 30s..."
+        sleep 30
+      done
+
+      # The mapping is written only while the route answers, so it is never advertised
+      # before the abliterated proxy serves on both ports.
+      while true; do
+        date +%s > /tmp/registrar_alive
+        if check_chat && check_tls_route && check_probe_lists_adapter; then
+          FAIL_COUNT=0
+          register_model "$$MODEL" "$$DOMAIN"
+          if [ "$$REGISTERED" = false ]; then
+            echo "Registered $$MODEL -> $$DOMAIN (served by base probe $$BASE_PROBE, routing port $$TLS_PORT)"
+          fi
+          REGISTERED=true
+        else
+          FAIL_COUNT=$$((FAIL_COUNT + 1))
+          echo "Health check failed for $$DOMAIN via $$BASE_PROBE (fail count: $$FAIL_COUNT)"
+        fi
+        date +%s > /tmp/registrar_alive
+        sleep 60
+      done

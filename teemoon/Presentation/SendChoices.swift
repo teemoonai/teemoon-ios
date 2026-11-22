@@ -20,7 +20,7 @@ enum E2EESendChoice: Equatable {
     var label: String {
         switch self {
         case .retryVerification: "retry verification"
-        case .sendAnyway(let sealed): sealed ? "send anyway (still encrypted)" : "send unencrypted"
+        case .sendAnyway(let sealed): sealed ? "send anyway (still encrypted)" : "send without encryption"
         case .dontSend: "don't send"
         case .sendSealedUnconfirmed: "send anyway"
         case .wait: "wait"
@@ -51,8 +51,12 @@ enum E2EESendChoice: Equatable {
     /// the maintainer approved this body as written (card near-verify-deadline, 2026-11-14); don't lengthen it without him.
     static let tierUncheckedMessage = VerdictDeadline.tierReason
     static let tierUnchecked: [E2EESendChoice] = [.sendSealedUnconfirmed, .dontSend]
+    /// Card trust-copy-sweep-111 v4 (A8), verbatim. Re-verify refetches the list; nothing is in flight, so no "wait".
+    static let listFailedTitle = "couldn't load near.ai's list of enclaves"
+    static let listFailedMessage = "your message would still be sealed to the model's key, but teemoon couldn't check the other enclaves near.ai lists for this model, which hold the same key. retry verification to ask near.ai for the list again."
+    static let listFailed: [E2EESendChoice] = [.retryVerification, .sendSealedUnconfirmed, .dontSend]
 
-    static let unavailableMessage = "teemoon couldn't seal this message so only the model can read it. nothing has been sent."
+    static let unavailableMessage = "teemoon couldn't seal this message to the model's enclave key. nothing has been sent."
     static let provenanceOnlyMessage = "your message would still be sealed to the model's verified hardware key — but one running image on this server couldn't be verified as published code. re-verifying may reach a different server of this model."
 
     /// `cause` is the session's degrade reason; only a hard break names it.
@@ -66,15 +70,20 @@ enum E2EESendChoice: Equatable {
 
 /// The question the send gate shows, chosen in one place so the view only lays it out.
 struct E2EEAsk: Equatable {
+    /// Which question is on screen. Only `.tierDowngrade`'s answer is the downgrade consent (`SealedModels.accept`).
+    enum Kind: Equatable { case verification, tierDowngrade }
+
     let title: String
     let message: String
     let choices: [E2EESendChoice]
+    var kind: Kind = .verification
 
     /// `pendingAsk`: the kind still pending when the settle timeout asked, nil when no pending ask is up.
     /// `deadlinePassed`: the checks gave up (`ConfidentialSession.deadlinePassed`), so nothing is "still checking".
+    /// `enclaveListFailed`: `ConfidentialSession.enclaveListFailedAsks`.
     static func make(hardFailure: Bool, pendingAsk: ConfidentialSession.PendingKind?, provenanceUnchecked: Bool,
                      softButSealed: Bool, provenanceBlocked: Bool, cause: String?,
-                     deadlinePassed: Bool = false) -> E2EEAsk {
+                     deadlinePassed: Bool = false, enclaveListFailed: Bool = false) -> E2EEAsk {
         if !hardFailure, pendingAsk == .provenance {
             return E2EEAsk(title: E2EESendChoice.provenancePendingTitle, message: E2EESendChoice.provenancePendingMessage,
                            choices: E2EESendChoice.stillChecking)
@@ -86,6 +95,10 @@ struct E2EEAsk: Equatable {
         if !hardFailure, pendingAsk == nil, provenanceUnchecked {
             return E2EEAsk(title: E2EESendChoice.provenanceUncheckedTitle, message: E2EESendChoice.provenanceUncheckedMessage,
                            choices: E2EESendChoice.choices(hardFailure: false, provenanceOnly: true))
+        }
+        if !hardFailure, pendingAsk == nil, enclaveListFailed {
+            return E2EEAsk(title: E2EESendChoice.listFailedTitle, message: E2EESendChoice.listFailedMessage,
+                           choices: E2EESendChoice.listFailed)
         }
         if !hardFailure, pendingAsk != nil || softButSealed {
             return E2EEAsk(title: E2EESendChoice.stillCheckingTitle, message: E2EESendChoice.stillCheckingMessage,

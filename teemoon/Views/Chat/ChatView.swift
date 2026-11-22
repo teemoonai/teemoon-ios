@@ -702,11 +702,13 @@ struct ChatView: View {
                 // 1.0.6's alert (the maintainer, 2026-10-31: "Revert all to 1.0.6"). E2EESendChoice owns the order and the
                 // rule that a hard integrity break offers no send.
                 .alert(e2eeAsk.title, isPresented: $showE2EEDegradedAlert) {
-                    ForEach(e2eeAsk.choices, id: \.label) { choice in
+                    // The buttons carry the kind of the ask they were drawn for; the session's ask may move under the tap.
+                    let ask = e2eeAsk
+                    ForEach(ask.choices, id: \.label) { choice in
                         switch choice {
                         case .retryVerification: Button(choice.label) { retryE2EEAndGenerate() }
-                        case .sendAnyway: Button(choice.label, role: choice.isDestructive ? .destructive : nil) { generateBypassing() }
-                        case .sendSealedUnconfirmed: Button(choice.label) { generateBypassing() }
+                        case .sendAnyway: Button(choice.label, role: choice.isDestructive ? .destructive : nil) { generateBypassing(answering: ask.kind) }
+                        case .sendSealedUnconfirmed: Button(choice.label) { generateBypassing(answering: ask.kind) }
                         case .dontSend, .wait: Button(choice.label, role: .cancel) {
                             viewModel.clearPendingRetry()
                             viewModel.returnGatedQuestion(currentThread: currentThread, modelContext: modelContext)
@@ -725,6 +727,10 @@ struct ChatView: View {
                 .onChange(of: showE2EEDegradedAlert) { _, shown in
                     if !shown { viewModel.hardwareConfirmRequested = false }
                 }
+                #if os(iOS) && DEBUG
+                // Design-tour routes only, compiled out of Release; the ask's words still come from the session.
+                .task { if DesignTour.raisesSendAsk { showE2EEDegradedAlert = true } }
+                #endif
                 .toolbar {
                     #if os(macOS)
                     // THE MAC'S ROUTE INTO THE PROOF, WHICH DID NOT EXIST.
@@ -829,15 +835,7 @@ struct ChatView: View {
         }
     }
 
-    private var e2eeAsk: E2EEAsk {
-        E2EEAsk.make(hardFailure: confidentialSession.degradeIsHardFailure,
-                     pendingAsk: viewModel.hardwareConfirmRequested ? viewModel.pendingAskKind : nil,
-                     provenanceUnchecked: confidentialSession.provenanceUncheckedAsks,
-                     softButSealed: confidentialSession.softButSealed,
-                     provenanceBlocked: confidentialSession.provenanceBlockedButE2EEIntact,
-                     cause: confidentialSession.e2eeDegradedReason,
-                     deadlinePassed: confidentialSession.deadlinePassed)
-    }
+    private var e2eeAsk: E2EEAsk { viewModel.e2eeAsk(session: confidentialSession) }
 
     /// "waiting for wi-fi" for a parked phone download, else nil (show progress).
     private var arrivingWaitingLabel: String? {
@@ -1045,8 +1043,8 @@ struct ChatView: View {
     /// The user chose to proceed from the degraded alert (soft degrades only —
     /// the hard-failure alert offers no bypass). Runs the pending retry if the
     /// alert was raised by one, else a fresh send.
-    private func generateBypassing() {
-        viewModel.sendAnyway(currentThread: &currentThread, modelContext: modelContext, settings: settings,
+    private func generateBypassing(answering ask: E2EEAsk.Kind) {
+        viewModel.sendAnyway(answering: ask, currentThread: &currentThread, modelContext: modelContext, settings: settings,
                              providers: providerStore, session: confidentialSession, llm: llm)
         isPromptFocused = false
     }

@@ -71,11 +71,14 @@ public enum TDXQuoteVerifier {
 
         // 1. Verify ECDSA signature over (header || body)
         let signedData = quoteData.prefix(48 + 584) // header + body
-        let sigValid = verifyECDSASignature(
+        let bodySigned = verifyECDSASignature(
             signature: quote.signature.ecdsaSignature,
             publicKey: quote.signature.attestationPublicKey,
             message: signedData
         )
+        // 1b. The attestation key is the Quoting Enclave's: never drop this. Without it a body signed by any key
+        // the quote carries, beside a genuine chain, reads as verified (audit 1.1.1, ForgedSiblingQuoteTests).
+        let sigValid = bodySigned && attestationKeyIsBoundToChain(quote.signature)
 
         // 2. Verify certificate chain
         let (certValid, certError) = verifyCertificateChain(pemCerts: quote.signature.certificateChainPEM)
@@ -95,6 +98,56 @@ public enum TDXQuoteVerifier {
             throw TDXVerificationError.parseError(.dataTooShort(expected: 636, got: 0))
         }
         return try verify(quoteData: data)
+    }
+
+    // MARK: - QE report binding
+
+    /// The QE report is signed by the PCK leaf, and its report_data is sha256(attestation key || QE auth data)
+    /// followed by 32 zero bytes (Intel DCAP quote format, ECDSA quote signature data).
+    static func attestationKeyIsBoundToChain(_ sig: TDXQuote.SignatureData,
+                                             isTDQE: (Data) -> Bool = reportIsIntelsTDQuotingEnclave) -> Bool {
+        guard let report = sig.qeReport, report.count == 384, let reportSig = sig.qeReportSignature,
+              let auth = sig.qeAuthData, let leafPEM = sig.certificateChainPEM.first,
+              let leafKey = publicKeyXY(ofPEM: leafPEM) else { return false }
+        guard verifyECDSASignature(signature: reportSig, publicKey: leafKey, message: report) else { return false }
+        guard isTDQE(report) else { return false }
+        let reportData = report.subdata(in: 320..<384)
+        var bound = Data(sig.attestationPublicKey); bound.append(auth)
+        return reportData.prefix(32) == Data(SHA256.hash(data: bound)) && reportData.suffix(32).allSatisfy { $0 == 0 }
+    }
+
+    /// Intel's TD Quoting Enclave identity, from Intel's signed qe_identity (id TD_QE; conformance/collateral.json
+    /// assembledCollateralFields.qe_identity). Any enclave on a genuine platform can get a PCK-signed report; only
+    /// this one may vouch for the attestation key. ISVSVN and TCB stay DCAP's.
+    static let tdQEMRSigner = Data([
+        0xDC, 0x9E, 0x2A, 0x7C, 0x6F, 0x94, 0x8F, 0x17, 0x47, 0x4E, 0x34, 0xA7, 0xFC, 0x43, 0xED, 0x03,
+        0x0F, 0x7C, 0x15, 0x63, 0xF1, 0xBA, 0xBD, 0xDF, 0x63, 0x40, 0xC8, 0x2E, 0x0E, 0x54, 0xA8, 0xC5,
+    ])
+    static let tdQEProdID: UInt16 = 2
+    static let tdQEMiscSelect = Data([0, 0, 0, 0])
+    static let tdQEMiscSelectMask = Data([0xFF, 0xFF, 0xFF, 0xFF])
+    static let tdQEAttributes = Data([0x11] + [UInt8](repeating: 0, count: 15))
+    static let tdQEAttributesMask = Data([0xFB] + [UInt8](repeating: 0xFF, count: 7) + [UInt8](repeating: 0, count: 8))
+
+    /// SGX report body: MISCSELECT 16..<20, attributes 48..<64, MRSIGNER 128..<160, ISVPRODID 256..<258 (little-endian).
+    static func reportIsIntelsTDQuotingEnclave(_ report: Data) -> Bool {
+        let r = [UInt8](report)
+        guard r.count == 384, Data(r[128..<160]) == tdQEMRSigner,
+              UInt16(r[256]) | UInt16(r[257]) << 8 == tdQEProdID,
+              (0..<4).allSatisfy({ r[16 + $0] & tdQEMiscSelectMask[$0] == tdQEMiscSelect[$0] }) else { return false }
+        return (0..<16).allSatisfy { r[48 + $0] & tdQEAttributesMask[$0] == tdQEAttributes[$0] }
+    }
+
+    /// x || y of a P-256 certificate's public key; nil off Apple platforms or for any other key.
+    private static func publicKeyXY(ofPEM pem: String) -> Data? {
+        #if canImport(Security)
+        guard let cert = secCertificateFromPEM(pem), let key = SecCertificateCopyKey(cert),
+              let raw = SecKeyCopyExternalRepresentation(key, nil) as Data?, raw.count == 65, raw.first == 0x04
+        else { return nil }
+        return raw.dropFirst()
+        #else
+        return nil
+        #endif
     }
 
     // MARK: - ECDSA signature verification

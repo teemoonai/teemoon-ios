@@ -20,7 +20,7 @@ enum WhereProviderPresentation {
 
     static func presetCaption(for preset: Provider) -> String? {
         switch preset.id {
-        case Provider.nearAI.id:       return "open models in enclaves the host can't read"
+        case Provider.nearAI.id:       return "open models in secure enclaves, checked on your phone"
         case Provider.grok.id:         return "xai's models, 2m context, live web and x"
         case Provider.fireworks.id:    return "fast, low-cost open models — large catalog"
         case Provider.openRouter.id:   return "most comprehensive collection of models"

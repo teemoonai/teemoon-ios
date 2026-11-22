@@ -118,6 +118,37 @@ struct AttestationLegIndependenceTests {
         #expect(record.gpuSigningAddress == nil)
 
         #expect(await http.log.count(.gateway) == 1, "a 401 cannot succeed on retry")
+        // Audit 1.1.1 A15: a key with no list of the enclaves holding it is a couldn't-check, never nothing to check.
+        #expect(record.modelCandidates == nil)
+        #expect(record.modelCandidatesListFailed)
+    }
+
+    /// Audit 1.1.1 A7 read: the list is asked only for a non-empty model, so a key with an empty model would leave the
+    /// listed state "checking" forever. It cannot happen: an empty model asks no model leg, so there is no key.
+    @Test func anEmptyModelYieldsNoKeyAndAsksNoList() async throws {
+        let http = RoutedHTTP { leg, _ in leg == .gateway ? (200, Fixture.gatewayReport) : (200, Fixture.ed25519Report) }
+        let record = try await AttestationService.fetch(
+            baseURL: Fixture.nearAI, apiKey: "sk", model: "", providerID: UUID(), http: http)
+        #expect(record.modelEd25519PubKey == nil, "no model, no key: nothing for the listed enclaves to hold")
+        #expect(record.modelCandidates == nil)
+        #expect(!record.modelCandidatesListFailed)
+        #expect(await http.log.count(.model) == 0)
+    }
+
+    /// Audit 1.1.1 A15: the list fetch() adopts is checked against the nonce fetch() asked it with.
+    @Test func theListIsCheckedAgainstTheNonceItWasAskedWith() async throws {
+        let live = try LiveCandidates.load()
+        let http = RoutedHTTP { leg, request in
+            guard request.url?.host == Fixture.nearAI.host else { return (200, Fixture.ed25519Report) }
+            return leg == .model ? (200, live.body) : (200, Fixture.notJSON)
+        }
+        let record = try await AttestationService.fetch(
+            baseURL: Fixture.nearAI, apiKey: "sk", model: Fixture.model, providerID: UUID(), http: http)
+        let listed = try #require(record.modelCandidates)
+        #expect(!record.modelCandidatesListFailed)
+        let nonce = try #require(listed.nonce)
+        #expect(nonce != live.nonce)
+        #expect(await http.log.nonces(.model).contains(nonce))
     }
 
     @Test func undecodableGatewayBodyLeavesGatewayFieldsEmpty() async throws {

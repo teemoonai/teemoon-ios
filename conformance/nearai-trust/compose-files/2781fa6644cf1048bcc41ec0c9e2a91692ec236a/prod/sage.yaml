@@ -1,0 +1,165 @@
+# Levanto Sage on gpu04 GPU 6, as its own compose-manager project inside gpu04's GLM CVM.
+# gpu04 must run prod/GLM-5.3-Flash-SGL-TP2x3-W4AFP8-gpu04.yaml (three GLM replicas on GPUs 0-5) first.
+#
+# Deploy as project "sage" (never "work" or "dstack"):
+#   POST /compose/up {"tag":"v0.0.N","file":"prod/sage.yaml","project":"sage","env":{SAGE_* values}}
+# prod/sage-pull.yaml must have put the image in the VM's image store before: compose-manager has no registry
+# login, and this file never pulls the private image (pull_policy: never), so a missing image fails closed.
+#
+# Sage runs with SAGE_CONFIDENTIAL=off (no dstack socket here) and serves plain HTTP on 8888 inside the project
+# network. TLS for private.sage.levanto.ai ends in sage-tls (VM port 8010; the gpu04 host maps 443 to 8010).
+# sage-cert keeps the certificate current with lego (DNS-01 in Levanto's Route53 zone).
+# Every value comes from a SAGE_-prefixed variable that our own env never sets, and a missing one stops the deploy.
+
+name: sage
+
+services:
+  sage:
+    image: levantolabs/sage-v1.4-hopper-pod@sha256:36a2d4dd60e8311684abe9e5af51a98d68c0ca0f327438dbcf98edbde94efa0d
+    container_name: sage
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      SAGE_CONFIDENTIAL: "off"
+      HF_TOKEN: ${SAGE_HF_TOKEN:?set SAGE_HF_TOKEN}
+      HUGGING_FACE_HUB_TOKEN: ${SAGE_HF_TOKEN:?set SAGE_HF_TOKEN}
+      SERVING_HMAC_SECRET: ${SAGE_SERVING_HMAC_SECRET:?set SAGE_SERVING_HMAC_SECRET}
+      # Off mode sets no billing URL; without it every request is served unauthenticated and unmetered.
+      BILLING_BASE_URL: https://api-dashboard.levanto.ai
+      BILLING_DEBUG: "0"
+      SAGE_GROUNDING: "off"
+      SAGE_FAIL_SLOW_LOG: "0"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      # Same GPU as device_ids below, so an image-level NVIDIA_VISIBLE_DEVICES=all cannot widen it.
+      NVIDIA_VISIBLE_DEVICES: GPU-bafbdde0-cd41-8379-fa93-149864963329
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - sage-data:/workspace
+    networks:
+      - sage
+    shm_size: 32gb
+    ipc: private
+    security_opt:
+      - no-new-privileges:true
+    cpus: 16
+    mem_limit: 256g
+    memswap_limit: 256g
+    pids_limit: 8192
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # Index 6, the GPU freed by GLM r4. GPU 7 stays idle.
+              device_ids: ["GPU-bafbdde0-cd41-8379-fa93-149864963329"]
+              capabilities: [gpu]
+
+  sage-cert:
+    # Same image as sage, for its lego 5.5.2 (/usr/local/bin/lego); no GPU. Issues or renews the certificate
+    # (renews when under 30 days left), then checks again every 12 h, or after 5 min if lego failed.
+    image: levantolabs/sage-v1.4-hopper-pod@sha256:36a2d4dd60e8311684abe9e5af51a98d68c0ca0f327438dbcf98edbde94efa0d
+    container_name: sage-cert
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      AWS_ACCESS_KEY_ID: ${SAGE_ACME_AWS_ACCESS_KEY_ID:?set SAGE_ACME_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${SAGE_ACME_AWS_SECRET_ACCESS_KEY:?set SAGE_ACME_AWS_SECRET_ACCESS_KEY}
+      AWS_HOSTED_ZONE_ID: ${SAGE_ACME_ROUTE53_ZONE_ID:?set SAGE_ACME_ROUTE53_ZONE_ID}
+      AWS_REGION: us-east-1
+    volumes:
+      - sage-certs:/certs
+    networks:
+      - sage
+    security_opt:
+      - no-new-privileges:true
+    cpus: 1
+    mem_limit: 256m
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        while :; do
+          if /usr/local/bin/lego run --accept-tos --email team@levanto.ai \
+              --server https://acme-v02.api.letsencrypt.org/directory --dns route53 \
+              --domains private.sage.levanto.ai --path /certs --renew-days 30 --log.format text; then
+            sleep 43200
+          else
+            echo "sage-cert: lego failed, retrying in 5 min"
+            sleep 300
+          fi
+        done
+    healthcheck:
+      test: ["CMD", "test", "-s", "/certs/certificates/private.sage.levanto.ai.crt"]
+      interval: 10s
+      timeout: 3s
+      retries: 360
+
+  sage-tls:
+    image: nginx@sha256:1d13701a5f9f3fb01aaa88cef2344d65b6b5bf6b7d9fa4cf0dca557a8d7702ba
+    container_name: sage-tls
+    restart: unless-stopped
+    depends_on:
+      sage:
+        condition: service_started
+      sage-cert:
+        condition: service_healthy
+    ports:
+      # Host 8010 is QEMU-forwarded to VM 8010 and is outside BACKEND_ACL.
+      - "8010:8443"
+    volumes:
+      - sage-certs:/certs:ro
+    networks:
+      - sage
+    security_opt:
+      - no-new-privileges:true
+    cpus: 2
+    mem_limit: 512m
+    entrypoint: ["/bin/sh", "-c"]
+    # Writes its config at start, then reloads every 6 h to pick up a renewed certificate.
+    command:
+      - |
+        cat > /etc/nginx/conf.d/default.conf <<'EOF'
+        upstream sage_api {
+          server sage:8888;
+          keepalive 64;
+        }
+        server {
+          listen 8443 ssl;
+          server_name private.sage.levanto.ai;
+          ssl_certificate /certs/certificates/private.sage.levanto.ai.crt;
+          ssl_certificate_key /certs/certificates/private.sage.levanto.ai.key;
+          ssl_protocols TLSv1.2 TLSv1.3;
+          client_max_body_size 64m;
+          location /internal/ {
+            return 404;
+          }
+          location / {
+            proxy_pass http://sage_api;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $$host;
+            proxy_set_header X-Forwarded-For $$remote_addr;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_read_timeout 300s;
+          }
+        }
+        EOF
+        (while sleep 21600; do nginx -s reload; done) &
+        exec nginx -g 'daemon off;'
+
+networks:
+  sage:
+    name: sage_net
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+
+volumes:
+  sage-data:
+  sage-certs:

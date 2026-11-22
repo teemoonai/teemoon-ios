@@ -57,6 +57,11 @@ struct TEEContext: Sendable {
     /// E2EE peer for encrypting requests and decrypting responses.
     /// nil when the model doesn't have an Ed25519 public key.
     let e2eePeer: E2EEPeer?
+    /// near.ai only, set by `ConfidentialSession.currentTEEContext()`: where a sealed request arms its model.
+    var sealedModels: SealedModels? = nil
+
+    /// HTTPTransport calls this as a sealed request goes to the network; never for a plain one (TIER_DOWNGRADE.md rule 1).
+    func noteSealedRequest() { sealedModels?.arm(model) }
 
     /// Derives the context for one attested request. The only place this
     /// derivation lives — production reaches it via

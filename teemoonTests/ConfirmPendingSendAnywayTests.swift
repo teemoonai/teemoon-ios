@@ -121,7 +121,7 @@ import Testing
             return Run(vm: vm, transport: transport, thread: thread, container: container)
         }
         #expect(askedWhilePending == (vm.hardwareConfirmRequested || session.verdictsPending), "the ask changed under the user")
-        vm.sendAnyway(currentThread: &thread, modelContext: container.mainContext, settings: AppSettings(),
+        vm.sendAnyway(answering: .verification, currentThread: &thread, modelContext: container.mainContext, settings: AppSettings(),
                       providers: store, session: session, llm: llm)
         for _ in 0..<200 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
         try #require(vm.generatingThreadID == nil, "the turn is still running; reading its rows now would race it")
@@ -227,7 +227,7 @@ import Testing
         #expect(vm.hardwareConfirmRequested, "precondition: the gate asked")
         #expect(transport.calls.value == 0)
 
-        session.rememberConfirmation(pending: vm.hardwareConfirmRequested)
+        session.rememberConfirmation(pending: vm.hardwareConfirmRequested, answering: .verification)
         vm.generate(currentThread: &thread, modelContext: context, settings: AppSettings(),
                     providers: store, session: session, llm: llm, acceptedDegrade: true)
         for _ in 0..<200 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
@@ -275,7 +275,7 @@ import Testing
                     providers: store, session: session, llm: llm)
         for _ in 0..<200 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
         try #require(vm.hardwareConfirmRequested, "precondition: the still-checking ask")
-        session.rememberConfirmation(pending: true)
+        session.rememberConfirmation(pending: true, answering: .verification)
 
         never.cancel()
         session.tlsTask = nil
@@ -312,7 +312,7 @@ import Testing
                     providers: store, session: session, llm: llm)
         for _ in 0..<200 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
         try #require(vm.hardwareConfirmRequested, "precondition: the still-checking ask")
-        session.rememberConfirmation(pending: true)
+        session.rememberConfirmation(pending: true, answering: .verification)
 
         never.cancel()
         session.tlsTask = nil
@@ -370,7 +370,7 @@ import Testing
         #expect(transport.calls.value == 0)
 
         // Later, "send anyway": ChatView resends the pending retry.
-        session.rememberConfirmation(pending: true)
+        session.rememberConfirmation(pending: true, answering: .verification)
         vm.retry(from: kept.question, currentThread: &thread, modelContext: context, settings: AppSettings(),
                  providers: store, session: session, llm: llm, acceptedDegrade: true, effort: kept.effort)
         for _ in 0..<200 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
@@ -435,7 +435,7 @@ import Testing
                     providers: store, session: session, llm: llm)
         for _ in 0..<200 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
         try #require(vm.hardwareConfirmRequested, "precondition: the gate asked")
-        session.rememberConfirmation(pending: vm.hardwareConfirmRequested)   // ChatView.generateBypassing
+        session.rememberConfirmation(pending: vm.hardwareConfirmRequested, answering: .verification)   // ChatView.generateBypassing
         #expect(session.sendPolicyAfterConfirmations == .allow, "the answer did not cover the record's couldn't-check")
         vm.generate(currentThread: &thread, modelContext: container.mainContext, settings: AppSettings(),
                     providers: store, session: session, llm: llm, acceptedDegrade: true)
@@ -470,7 +470,7 @@ import Testing
                     providers: store, session: session, llm: llm)
         for _ in 0..<200 where vm.generatingThreadID != nil { try await Task.sleep(for: .milliseconds(20)) }
         try #require(vm.hardwareConfirmRequested, "precondition: the still-checking ask for a sealed send")
-        session.rememberConfirmation(pending: true)
+        session.rememberConfirmation(pending: true, answering: .verification)
 
         NearAIModelCatalog.recordTiers([model: .teeThirdParty])
         #expect(!(store.activeProvider?.capabilities.contains(.attestation) ?? true), "precondition: the tier moved")
@@ -557,7 +557,7 @@ import Testing
     }
 
     private func sendAnyway(_ c: inout Composer) async throws {
-        c.vm.sendAnyway(currentThread: &c.thread, modelContext: c.container.mainContext, settings: AppSettings(),
+        c.vm.sendAnyway(answering: .verification, currentThread: &c.thread, modelContext: c.container.mainContext, settings: AppSettings(),
                         providers: c.store, session: c.session, llm: c.llm)
         try await c.settle()
     }

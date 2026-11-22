@@ -1,0 +1,30 @@
+{
+  "fixtureClass": "e2ee-request-keys",
+  "kitVersion": "0.5.11",
+  "sourceOfTruth": "teemoon-ios",
+  "rule": "audit 2026-11-06 (proxy 0be4ee8f, LOW): under E2EE v2 the proxy returns reply fields in plaintext only when the request asks for one of these. An E2EE request body never carries any of them, at any depth, and E2EE requests go only to chat/completions. Added 2026-11-06 (audit, sglang 3eccc307 serving_chat.py:2047): return_prompt_token_ids alone returns the whole conversation's prompt token ids in plaintext at v2; return_meta_info rides along (harmless, cheap). `stop` stays allowed: it echoes only the user's own stop string.",
+  "forbiddenKeys": [
+    "prompt_logprobs",
+    "return_token_ids",
+    "return_prompt_text",
+    "return_hidden_states",
+    "logprobs",
+    "return_prompt_token_ids",
+    "return_meta_info"
+  ],
+  "allowedPathSuffix": "/chat/completions",
+  "extraParamsVectors": {
+    "note": "a place whose extra parameters carry one of these keys: the sealed body must not carry it (near-extra-params-refuse, held for the maintainer). top_logprobs rides with logprobs.",
+    "keys": [
+      "prompt_logprobs",
+      "return_token_ids",
+      "return_prompt_text",
+      "return_hidden_states",
+      "logprobs",
+      "top_logprobs",
+      "return_prompt_token_ids",
+      "return_meta_info"
+    ],
+    "expected": "refused before the wire"
+  }
+}

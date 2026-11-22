@@ -143,6 +143,8 @@ final class ConfidentialSession {
     /// The model node's TLS probe outcome (not the chat's gateway connection).
     /// nil = not yet checked; `.failed` degrades; `.notPerformed` is neutral.
     var tlsAttestation: TLSAttestation?
+    /// near.ai models a request went out sealed to (item 1, TIER_DOWNGRADE.md).
+    let sealedModels: SealedModels
 
     /// Verifier used for TLS attestation (overridable in tests).
     let tlsService: TLSAttestationVerifier
@@ -175,7 +177,11 @@ final class ConfidentialSession {
     var trustScope: TrustScope?
     @ObservationIgnored
     var trustScopeTask: Task<Void, Never>?
-    let runningPairCheck = RunningPairCheck()
+    /// Trust scope for each enclave near.ai listed, in list order; nil while it runs or when there is no list (A4).
+    var listedTrustScopes: [TrustScope]?
+    @ObservationIgnored
+    var listedTrustScopeTask: Task<Void, Never>?
+    let runningPairCheck: RunningPairCheck
     /// Every check ends in a verdict: the near.ai tier wait and the verifiers' deadline.
     let deadline: VerdictDeadline
 
@@ -196,8 +202,12 @@ final class ConfidentialSession {
          dcapService: DCAPService = DCAPService(),
          nrasService: NRASService = NRASService(),
          tlsService: TLSAttestationVerifier = TLSAttestationVerifier(),
-         deadline: VerdictDeadline? = nil) {
+         runningPairCheck: RunningPairCheck = RunningPairCheck(),
+         deadline: VerdictDeadline? = nil,
+         sealedModels: SealedModels = SealedModels()) {
         self.providers = providers
+        self.runningPairCheck = runningPairCheck
+        self.sealedModels = sealedModels
         self.deadline = deadline ?? VerdictDeadline()
         self.provenanceService = provenanceService
         self.dcapService = dcapService
@@ -232,10 +242,12 @@ final class ConfidentialSession {
         guard let provider = providers.activeProvider,
               provider.capabilities.contains(.attestation),
               let attestation else { return nil }
-        return TEEContext(provider: provider,
-                          apiKey: providers.credential(for: provider),
-                          attestation: attestation,
-                          makePeer: makePeer)
+        var context = TEEContext(provider: provider,
+                                 apiKey: providers.credential(for: provider),
+                                 attestation: attestation,
+                                 makePeer: makePeer)
+        if provider.isNearAI { context?.sealedModels = sealedModels }
+        return context
     }
     /// Builds a request's E2EE peer (a fresh X25519 keypair); tests count calls here.
     @ObservationIgnored var makePeer: (Data) throws -> E2EEPeer = { try E2EEPeer(modelEd25519PubKey: $0) }
@@ -344,6 +356,7 @@ final class ConfidentialSession {
             || (nrasTask != nil && gpuAttestation == nil)
             || (tlsTask != nil && tlsAttestation == nil)
             || (trustScopeTask != nil && trustScope == nil)
+            || (listedTrustScopeTask != nil && listedTrustScopes == nil)
             || staleRefetchPending
             || (deadline.tier(for: provider.model) == .unknown && !deadline.tierGaveUp(on: provider.model))
     }

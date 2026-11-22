@@ -2,6 +2,36 @@
 
 Changes to the teemoon iPhone app, one section per public release, newest first. The date is that of the release commit on public `main`. Older sections state only what their GitHub release notes and audit pages say.
 
+## 1.1.1 (65) — 2026-11-21
+
+### Security
+- Every model enclave near.ai lists for a model holds the key a sealed message goes to, and each is now checked before a message is sealed to it: its quote with Intel (DCAP: the quote's chain, collateral and TCB status), its GPU evidence with NVIDIA, its compose manager's action log and its boot log. A listed enclave that fails blocks the send; one that couldn't be checked asks first. The trust screen's "reviewed" row now covers what every listed enclave runs. This fixes the 1.1.0 MEDIUM for the enclaves near.ai lists.
+- The on-device quote check requires the quote's signing key to be vouched for by Intel's TD Quoting Enclave (its report signed by the PCK certificate and committing to the key), so a quote signed by a key it carries itself is refused even when Intel's service can't be reached.
+- Enclaves listed under one key must hold that key and name one key service; one that holds another key or names another key service blocks the send.
+- The request for near.ai's list of enclaves is cancelled with the check that asked for it and capped in size.
+- A near.ai model you have sent sealed messages to asks before its first message goes out without end-to-end encryption, if near.ai's model list moves it off its enclaves (the 1.1.0 LOW). Only that ask's own "send without encryption" answers it; a "send anyway" on another ask leaves the model asking.
+- The files the enclave checks fetch from GitHub are capped per enclave; past the cap a file reads as couldn't be checked, never as checked.
+- A model key with no readable quote behind it blocks the send instead of offering "send anyway" (the 1.1.0 LOW).
+
+### Changed
+- The trust screens no longer say only the model can read the chat, that the key was made in or never leaves one chip, or that no one else can read it: near.ai's key service decides which secure enclaves hold the key, and teemoon says whether it checked every enclave near.ai listed, couldn't load the list, is still checking, couldn't finish, or found one that failed.
+- "send unencrypted" is now "send without encryption".
+- near.ai's descriptions say "open models in secure enclaves, checked on your phone" and that chats are sealed to the model's enclave key for its attested models; the glossary says the operator can't read the enclave's memory from outside and points to the published reviews for what the software inside does; the plain-TLS line says messages go to near.ai's gateway over ordinary TLS, not sealed to the model.
+- After you send, the transcript scrolls your message to the top over 0.4 s instead of 0.25 s.
+- List prices for custom first-party endpoints are refreshed.
+
+### Fixed
+- A model reply with a stray `</tool_call>` before a `<tool_call>` no longer crashes the app.
+- The shared test fixtures (`conformance/`) and `docs/DATA_MODEL.md` are in the public tree, so the unit tests run from a public clone.
+
+### Known issues
+- An enclave near.ai's key service admits but near.ai doesn't list is not checked. Which enclaves get the key is decided by near.ai's key service, which the app can't check today.
+- The list of near.ai models you have sent sealed messages to is kept in the app's preferences, which device backups include; it moves to protected storage in 1.1.2.
+- xAI retired `grok-build-0.1`. A Grok place still set to it fails every send with "Grok endpoint not found … check the server address"; pick another Grok model. A clearer message is planned for 1.1.2.
+- Planned for 1.1.2: the system prompt moves out of the app's preferences into protected storage, and the 1.1.0 audit's remaining LOW and INFO findings.
+
+[`v1.1.1`](https://github.com/teemoonai/teemoon-ios/tree/v1.1.1) · [GitHub release](https://github.com/teemoonai/teemoon-ios/releases/tag/v1.1.1) · [audits](https://github.com/teemoonai/audits/tree/main/client/teemoon-ios)
+
 ## 1.1.0 (62) — 2026-11-17
 
 ### Added
@@ -20,9 +50,9 @@ Changes to the teemoon iPhone app, one section per public release, newest first.
 - A sealed request never asks for a plaintext reply field, near.ai image parts are sealed with the text, and a turn that started attestable never leaves unsealed.
 
 ### Known issues
-- MEDIUM, found after release (audit addendum 2026-11-19, mechanism present at 1.0.6): the app verifies only the first listed near.ai model enclave, but every enclave near.ai's key service admits under the app id holds the same key, so a sealed message can be opened by enclaves the app did not verify.
-- Two LOWs accepted for 1.1.0, fix planned in 1.1.1: near.ai's model list can move a sealed model to plain TLS with no ask, and a model key with no quote behind it gets the "send anyway" ask.
-- `conformance/` and `docs/` are not in the public tree, so tests that load them fail from a public clone and public CI is red.
+- MEDIUM, found after release (audit addendum 2026-11-19, mechanism present at 1.0.6): the app verifies only the first listed near.ai model enclave, but every enclave near.ai's key service admits under the app id holds the same key, so a sealed message can be opened by enclaves the app did not verify. Fixed in 1.1.1 for the enclaves near.ai lists.
+- Two LOWs accepted for 1.1.0: a model key with no quote behind it gets the "send anyway" ask (fixed in 1.1.1), and near.ai's model list can move a sealed model to plain TLS with no ask (fixed in 1.1.1).
+- `conformance/` and `docs/` are not in the public tree, so tests that load them fail from a public clone and public CI is red. Fixed in 1.1.1.
 
 [`v1.1.0`](https://github.com/teemoonai/teemoon-ios/tree/v1.1.0) · [GitHub release](https://github.com/teemoonai/teemoon-ios/releases/tag/v1.1.0) · [audit v1.1.0-6c5f7a2](https://github.com/teemoonai/audits/blob/main/client/teemoon-ios/v1.1.0-6c5f7a2.md) · [full 1.1.0 detail](docs/releases/1.1.0.md)
 

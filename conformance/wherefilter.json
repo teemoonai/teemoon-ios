@@ -1,0 +1,2481 @@
+{
+ "fixtureClass": "wherefilter",
+ "kitVersion": "0.7.0",
+ "sourceOfTruth": "teemoon-ios",
+ "spec": "docs/IMAGES.md §4e (where-sheet filter, 1.1.0; design: image-flow mock Version 18, the maintainer, 2026-11-11)",
+ "rule": "One row under the tabs: the tab's count on the left, the filter in words on the right. The filter combines with the tab and narrows ready now, recently used and get. Unknown image ability fails 'reads images'. 'end-to-end encrypted' is the row's own caption claim (Provider.claimsEndToEndEncryption), so phone and home rows fail it. Every string is a DRAFT the maintainer edits.",
+ "how": "Each scenario lists what the person has. For every 'tab/filter' cell, a platform builds its where-sheet state and compares: count (left label), control (right label), ready (ready-now model ids, in the sheet's order), recents (recently-used ids), get (ids in order, trailing text where the row shows a number or 'add key'; null when the sheet is offline and shows its offline get section instead), line (the one empty line, or null). Get ids: download:<local model>, pull:<machine>, preset:<preset name>, 'connect a computer', 'add a cloud key'. A preset's counts are what that server's saved list holds, per filter, by the model browser's own predicate (ModelBrowserListing.satisfies), so the number on the row is the number the browser shows when the row opens it with the same filters. get ids also include browse:<name> for a keyed custom server (cloud tab, before the presets). The tab footer lines (and the offline footer) are not 'line': 'line' is only the filter's empty line. Phone models' image ability is computed (phoneImages.rule): readsImages = imagesOnDevice and imageNeedMB[model] <= phoneCeilingMB. refused = the phone models listed under 'reads images' alone with the permanent caption, not counted.",
+ "menu": {
+  "heading": "show only",
+  "items": [
+   "reads images",
+   "end-to-end encrypted"
+  ]
+ },
+ "opens": {
+  "chip": {
+   "tab": "all",
+   "filters": [],
+   "size": "half"
+  },
+  "chipWithImagesAttached": {
+   "tab": "all",
+   "filters": [
+    "images"
+   ],
+   "size": "half"
+  },
+  "attachSheetChooseModel": {
+   "tab": "all",
+   "filters": [
+    "images"
+   ],
+   "size": "half"
+  },
+  "sendRefusedAlert": {
+   "tab": "all",
+   "filters": [
+    "images"
+   ],
+   "size": "half"
+  }
+ },
+ "scenarios": [
+  {
+   "name": "mock-v18",
+   "note": "The mock's person: one phone model, two on an ollama machine, four in the cloud. 1.1.0 phone models don't read images.",
+   "imagesOnDevice": false,
+   "models": [
+    {
+     "id": "gemma 4 e2b",
+     "tab": "phone",
+     "localModel": "gemma-4-e2b",
+     "e2ee": false,
+     "readsImages": false,
+     "imagesRefused": false
+    },
+    {
+     "id": "gemma4:latest",
+     "tab": "home",
+     "readsImages": true,
+     "e2ee": false
+    },
+    {
+     "id": "qwen3.5:4b",
+     "tab": "home",
+     "readsImages": false,
+     "e2ee": false
+    },
+    {
+     "id": "glm 5.2",
+     "tab": "cloud",
+     "readsImages": true,
+     "e2ee": true
+    },
+    {
+     "id": "deepseek v4.1 flash",
+     "tab": "cloud",
+     "readsImages": false,
+     "e2ee": false
+    },
+    {
+     "id": "glm 5.3 flash",
+     "tab": "cloud",
+     "readsImages": true,
+     "e2ee": false
+    },
+    {
+     "id": "grok 4.3",
+     "tab": "cloud",
+     "readsImages": true,
+     "e2ee": false
+    }
+   ],
+   "recents": [
+    "deepseek v4.1 flash",
+    "glm 5.2",
+    "gemma 4 e2b"
+   ],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": false
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": false
+    }
+   ],
+   "homes": [
+    {
+     "name": "ollama",
+     "kind": "ollama"
+    }
+   ],
+   "presets": {
+    "near.ai": {
+     "keyed": true,
+     "claimsE2ee": true,
+     "counts": {
+      "none": 42,
+      "images": 18,
+      "e2ee": 31,
+      "images+e2ee": 14
+     }
+    },
+    "grok": {
+     "keyed": true,
+     "claimsE2ee": false,
+     "counts": {
+      "none": 6,
+      "images": 4,
+      "e2ee": 0,
+      "images+e2ee": 0
+     }
+    },
+    "fireworks": {
+     "keyed": true,
+     "claimsE2ee": false,
+     "counts": {
+      "none": 12,
+      "images": 5,
+      "e2ee": 0,
+      "images+e2ee": 0
+     }
+    },
+    "openrouter": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "nvidia": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "brave": {
+     "keyed": false,
+     "claimsE2ee": false,
+     "fixedAnswer": true
+    }
+   },
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "7 models",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b",
+       "gemma4:latest",
+       "qwen3.5:4b",
+       "glm 5.2",
+       "deepseek v4.1 flash",
+       "glm 5.3 flash",
+       "grok 4.3"
+      ],
+      "refused": [],
+      "recents": [
+       "deepseek v4.1 flash",
+       "glm 5.2",
+       "gemma 4 e2b"
+      ],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "42"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "6"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images": {
+      "count": "4 of 7",
+      "control": "reads images",
+      "ready": [
+       "gemma4:latest",
+       "glm 5.2",
+       "glm 5.3 flash",
+       "grok 4.3"
+      ],
+      "refused": [],
+      "recents": [
+       "glm 5.2"
+      ],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "18 of 42"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "4 of 6"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "5 of 12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/e2ee": {
+      "count": "1 of 7",
+      "control": "end-to-end encrypted",
+      "ready": [
+       "glm 5.2"
+      ],
+      "refused": [],
+      "recents": [
+       "glm 5.2"
+      ],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "31 of 42"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images+e2ee": {
+      "count": "1 of 7",
+      "control": "images · e2ee",
+      "ready": [
+       "glm 5.2"
+      ],
+      "refused": [],
+      "recents": [
+       "glm 5.2"
+      ],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "14 of 42"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "phone/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e4b"
+       }
+      ],
+      "line": null
+     },
+     "phone/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "no model on this phone reads images yet."
+     },
+     "phone/e2ee": {
+      "count": "0 of 1",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "phone/images+e2ee": {
+      "count": "0 of 1",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "home/none": {
+      "count": "2 models",
+      "control": "show only",
+      "ready": [
+       "gemma4:latest",
+       "qwen3.5:4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       }
+      ],
+      "line": null
+     },
+     "home/images": {
+      "count": "1 of 2",
+      "control": "reads images",
+      "ready": [
+       "gemma4:latest"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       }
+      ],
+      "line": null
+     },
+     "home/e2ee": {
+      "count": "0 of 2",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "home/images+e2ee": {
+      "count": "0 of 2",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "cloud/none": {
+      "count": "4 models",
+      "control": "show only",
+      "ready": [
+       "glm 5.2",
+       "deepseek v4.1 flash",
+       "glm 5.3 flash",
+       "grok 4.3"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "42"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "6"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images": {
+      "count": "3 of 4",
+      "control": "reads images",
+      "ready": [
+       "glm 5.2",
+       "glm 5.3 flash",
+       "grok 4.3"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "18 of 42"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "4 of 6"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "5 of 12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/e2ee": {
+      "count": "1 of 4",
+      "control": "end-to-end encrypted",
+      "ready": [
+       "glm 5.2"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "31 of 42"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images+e2ee": {
+      "count": "1 of 4",
+      "control": "images · e2ee",
+      "ready": [
+       "glm 5.2"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "14 of 42"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     }
+    }
+   }
+  },
+  {
+   "name": "none-of-yours-read-images",
+   "note": "Nothing the person has reads images; near.ai has no key. The get rows are the way on.",
+   "imagesOnDevice": false,
+   "models": [
+    {
+     "id": "gemma 4 e2b",
+     "tab": "phone",
+     "localModel": "gemma-4-e2b",
+     "e2ee": false,
+     "readsImages": false,
+     "imagesRefused": false
+    },
+    {
+     "id": "qwen3.5:4b",
+     "tab": "home",
+     "readsImages": false,
+     "e2ee": false
+    },
+    {
+     "id": "deepseek v4.1 flash",
+     "tab": "cloud",
+     "readsImages": false,
+     "e2ee": false
+    }
+   ],
+   "recents": [
+    "deepseek v4.1 flash",
+    "gemma 4 e2b"
+   ],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": false
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": false
+    }
+   ],
+   "homes": [
+    {
+     "name": "ollama",
+     "kind": "ollama"
+    }
+   ],
+   "presets": {
+    "near.ai": {
+     "keyed": false,
+     "claimsE2ee": true
+    },
+    "grok": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "fireworks": {
+     "keyed": true,
+     "claimsE2ee": false,
+     "counts": {
+      "none": 12,
+      "images": 5,
+      "e2ee": 0,
+      "images+e2ee": 0
+     }
+    },
+    "openrouter": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "nvidia": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "brave": {
+     "keyed": false,
+     "claimsE2ee": false,
+     "fixedAnswer": true
+    }
+   },
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "3 models",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b",
+       "qwen3.5:4b",
+       "deepseek v4.1 flash"
+      ],
+      "refused": [],
+      "recents": [
+       "deepseek v4.1 flash",
+       "gemma 4 e2b"
+      ],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images": {
+      "count": "0 of 3",
+      "control": "reads images",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "5 of 12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/e2ee": {
+      "count": "0 of 3",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images+e2ee": {
+      "count": "0 of 3",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "phone/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e4b"
+       }
+      ],
+      "line": null
+     },
+     "phone/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "no model on this phone reads images yet."
+     },
+     "phone/e2ee": {
+      "count": "0 of 1",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "phone/images+e2ee": {
+      "count": "0 of 1",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "home/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "qwen3.5:4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       }
+      ],
+      "line": null
+     },
+     "home/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "pull:ollama"
+       },
+       {
+        "id": "connect a computer"
+       }
+      ],
+      "line": "nothing here matches."
+     },
+     "home/e2ee": {
+      "count": "0 of 1",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "home/images+e2ee": {
+      "count": "0 of 1",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "cloud/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "deepseek v4.1 flash"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "5 of 12"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/e2ee": {
+      "count": "0 of 1",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images+e2ee": {
+      "count": "0 of 1",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     }
+    }
+   }
+  },
+  {
+   "name": "unknown-ability-and-no-saved-list",
+   "note": "A model whose list never said whether it reads images is hidden by 'reads images'. A keyed server with no saved list shows no number, and stays unless 'end-to-end encrypted' is on and it doesn't claim it.",
+   "imagesOnDevice": false,
+   "tabs": [
+    "all",
+    "cloud"
+   ],
+   "models": [
+    {
+     "id": "glm 5.3 flash",
+     "tab": "cloud",
+     "readsImages": true,
+     "e2ee": false
+    },
+    {
+     "id": "kimi k2.6",
+     "tab": "cloud",
+     "readsImages": null,
+     "e2ee": false
+    }
+   ],
+   "recents": [],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": false
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": false
+    }
+   ],
+   "homes": [],
+   "presets": {
+    "near.ai": {
+     "keyed": false,
+     "claimsE2ee": true
+    },
+    "grok": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "fireworks": {
+     "keyed": true,
+     "claimsE2ee": false
+    },
+    "openrouter": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "nvidia": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "brave": {
+     "keyed": false,
+     "claimsE2ee": false,
+     "fixedAnswer": true
+    }
+   },
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "2 models",
+      "control": "show only",
+      "ready": [
+       "glm 5.3 flash",
+       "kimi k2.6"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e2b"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images": {
+      "count": "1 of 2",
+      "control": "reads images",
+      "ready": [
+       "glm 5.3 flash"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/e2ee": {
+      "count": "0 of 2",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images+e2ee": {
+      "count": "0 of 2",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/none": {
+      "count": "2 models",
+      "control": "show only",
+      "ready": [
+       "glm 5.3 flash",
+       "kimi k2.6"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images": {
+      "count": "1 of 2",
+      "control": "reads images",
+      "ready": [
+       "glm 5.3 flash"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/e2ee": {
+      "count": "0 of 2",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images+e2ee": {
+      "count": "0 of 2",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     }
+    }
+   }
+  },
+  {
+   "name": "custom-server-and-brave-configured",
+   "note": "A keyed custom server with a saved list: its browse row (cloud tab) takes 'k of n' like a preset. Brave answers is configured, so it has no get row at all (both platforms).",
+   "imagesOnDevice": false,
+   "tabs": [
+    "all",
+    "cloud"
+   ],
+   "models": [
+    {
+     "id": "brave answers",
+     "tab": "cloud",
+     "readsImages": false,
+     "e2ee": false
+    },
+    {
+     "id": "qwen3.6 vl",
+     "tab": "cloud",
+     "readsImages": true,
+     "e2ee": false
+    },
+    {
+     "id": "llama 4.2",
+     "tab": "cloud",
+     "readsImages": false,
+     "e2ee": false
+    }
+   ],
+   "recents": [
+    "qwen3.6 vl"
+   ],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": false
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": false
+    }
+   ],
+   "homes": [],
+   "customs": [
+    {
+     "name": "my server",
+     "claimsE2ee": false,
+     "counts": {
+      "none": 9,
+      "images": 3,
+      "e2ee": 0,
+      "images+e2ee": 0
+     }
+    }
+   ],
+   "presets": {
+    "near.ai": {
+     "keyed": false,
+     "claimsE2ee": true
+    },
+    "grok": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "fireworks": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "openrouter": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "nvidia": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "brave": {
+     "keyed": true,
+     "claimsE2ee": false,
+     "fixedAnswer": true,
+     "configured": true
+    }
+   },
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "3 models",
+      "control": "show only",
+      "ready": [
+       "brave answers",
+       "qwen3.6 vl",
+       "llama 4.2"
+      ],
+      "refused": [],
+      "recents": [
+       "qwen3.6 vl"
+      ],
+      "get": [
+       {
+        "id": "download:gemma-4-e2b"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images": {
+      "count": "1 of 3",
+      "control": "reads images",
+      "ready": [
+       "qwen3.6 vl"
+      ],
+      "refused": [],
+      "recents": [
+       "qwen3.6 vl"
+      ],
+      "get": [
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/e2ee": {
+      "count": "0 of 3",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images+e2ee": {
+      "count": "0 of 3",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/none": {
+      "count": "3 models",
+      "control": "show only",
+      "ready": [
+       "brave answers",
+       "qwen3.6 vl",
+       "llama 4.2"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "browse:my server",
+        "trailing": "9"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images": {
+      "count": "1 of 3",
+      "control": "reads images",
+      "ready": [
+       "qwen3.6 vl"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "browse:my server",
+        "trailing": "3 of 9"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/e2ee": {
+      "count": "0 of 3",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "cloud/images+e2ee": {
+      "count": "0 of 3",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     }
+    }
+   }
+  },
+  {
+   "name": "phone-reads-images",
+   "note": "Images on phone models on, ceiling 6000 MB: E2B and E4B both fit, so E4B's download is offered under 'reads images'.",
+   "imagesOnDevice": true,
+   "tabs": [
+    "all",
+    "phone"
+   ],
+   "models": [
+    {
+     "id": "gemma 4 e2b",
+     "tab": "phone",
+     "localModel": "gemma-4-e2b",
+     "e2ee": false,
+     "readsImages": true,
+     "imagesRefused": false
+    },
+    {
+     "id": "deepseek v4.1 flash",
+     "tab": "cloud",
+     "readsImages": false,
+     "e2ee": false
+    }
+   ],
+   "recents": [
+    "gemma 4 e2b"
+   ],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": true
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": true
+    }
+   ],
+   "homes": [],
+   "presets": {
+    "near.ai": {
+     "keyed": false,
+     "claimsE2ee": true
+    },
+    "grok": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "fireworks": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "openrouter": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "nvidia": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "brave": {
+     "keyed": false,
+     "claimsE2ee": false,
+     "fixedAnswer": true
+    }
+   },
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "2 models",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b",
+       "deepseek v4.1 flash"
+      ],
+      "refused": [],
+      "recents": [
+       "gemma 4 e2b"
+      ],
+      "get": [
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images": {
+      "count": "1 of 2",
+      "control": "reads images",
+      "ready": [
+       "gemma 4 e2b"
+      ],
+      "refused": [],
+      "recents": [
+       "gemma 4 e2b"
+      ],
+      "get": [
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/e2ee": {
+      "count": "0 of 2",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images+e2ee": {
+      "count": "0 of 2",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "phone/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e4b"
+       }
+      ],
+      "line": null
+     },
+     "phone/images": {
+      "count": "1 model",
+      "control": "reads images",
+      "ready": [
+       "gemma 4 e2b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e4b"
+       }
+      ],
+      "line": null
+     },
+     "phone/e2ee": {
+      "count": "0 of 1",
+      "control": "end-to-end encrypted",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     },
+     "phone/images+e2ee": {
+      "count": "0 of 1",
+      "control": "images · e2ee",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": "nothing here matches."
+     }
+    }
+   }
+  },
+  {
+   "name": "e4b-downloaded",
+   "note": "Both phone models downloaded on a phone whose ceiling fits both image turns: both read images (the dynamic rule).",
+   "imagesOnDevice": true,
+   "tabs": [
+    "all",
+    "phone"
+   ],
+   "filters": [
+    "none",
+    "images"
+   ],
+   "models": [
+    {
+     "id": "gemma 4 e2b",
+     "tab": "phone",
+     "localModel": "gemma-4-e2b",
+     "e2ee": false,
+     "readsImages": true,
+     "imagesRefused": false
+    },
+    {
+     "id": "gemma 4 e4b",
+     "tab": "phone",
+     "localModel": "gemma-4-e4b",
+     "e2ee": false,
+     "readsImages": true,
+     "imagesRefused": false
+    }
+   ],
+   "recents": [],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": true
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": true
+    }
+   ],
+   "homes": [],
+   "presets": {
+    "near.ai": {
+     "keyed": false,
+     "claimsE2ee": true
+    },
+    "grok": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "fireworks": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "openrouter": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "nvidia": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "brave": {
+     "keyed": false,
+     "claimsE2ee": false,
+     "fixedAnswer": true
+    }
+   },
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "2 models",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b",
+       "gemma 4 e4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images": {
+      "count": "2 models",
+      "control": "reads images",
+      "ready": [
+       "gemma 4 e2b",
+       "gemma 4 e4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "phone/none": {
+      "count": "2 models",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b",
+       "gemma 4 e4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": null
+     },
+     "phone/images": {
+      "count": "2 models",
+      "control": "reads images",
+      "ready": [
+       "gemma 4 e2b",
+       "gemma 4 e4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [],
+      "line": null
+     }
+    }
+   }
+  },
+  {
+   "name": "small-phone",
+   "note": "A phone whose ceiling fits E2B's image turn but never E4B's: E2B reads images; a downloaded E4B is listed under 'reads images' with the permanent caption, not counted; E4B's download is not offered under that filter.",
+   "imagesOnDevice": true,
+   "phoneCeilingMB": 3500,
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "tabs": [
+    "all",
+    "phone"
+   ],
+   "filters": [
+    "none",
+    "images"
+   ],
+   "models": [
+    {
+     "id": "gemma 4 e4b",
+     "tab": "phone",
+     "localModel": "gemma-4-e4b",
+     "e2ee": false,
+     "readsImages": false,
+     "imagesRefused": true
+    }
+   ],
+   "recents": [],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": true
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": false
+    }
+   ],
+   "homes": [],
+   "presets": {
+    "near.ai": {
+     "keyed": false,
+     "claimsE2ee": true
+    },
+    "grok": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "fireworks": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "openrouter": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "nvidia": {
+     "keyed": false,
+     "claimsE2ee": false
+    },
+    "brave": {
+     "keyed": false,
+     "claimsE2ee": false,
+     "fixedAnswer": true
+    }
+   },
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e2b"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:brave",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "all/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [
+       "gemma 4 e4b"
+      ],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e2b"
+       },
+       {
+        "id": "connect a computer"
+       },
+       {
+        "id": "preset:near.ai",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:grok",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:fireworks",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:openrouter",
+        "trailing": "add key"
+       },
+       {
+        "id": "preset:nvidia",
+        "trailing": "add key"
+       },
+       {
+        "id": "add a cloud key"
+       }
+      ],
+      "line": null
+     },
+     "phone/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e4b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e2b"
+       }
+      ],
+      "line": null
+     },
+     "phone/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [
+       "gemma 4 e4b"
+      ],
+      "recents": [],
+      "get": [
+       {
+        "id": "download:gemma-4-e2b"
+       }
+      ],
+      "line": null
+     }
+    }
+   }
+  },
+  {
+   "name": "offline",
+   "note": "No network: only phone rows answer, on every tab (as today); recents hidden; get is the offline section, untouched by the filter.",
+   "online": false,
+   "imagesOnDevice": false,
+   "tabs": [
+    "all",
+    "phone"
+   ],
+   "filters": [
+    "none",
+    "images"
+   ],
+   "models": [
+    {
+     "id": "gemma 4 e2b",
+     "tab": "phone",
+     "localModel": "gemma-4-e2b",
+     "e2ee": false,
+     "readsImages": false,
+     "imagesRefused": false
+    },
+    {
+     "id": "glm 5.3 flash",
+     "tab": "cloud",
+     "readsImages": true,
+     "e2ee": false
+    }
+   ],
+   "recents": [
+    "glm 5.3 flash"
+   ],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": false
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": false
+    }
+   ],
+   "homes": [],
+   "presets": {},
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": true,
+    "cells": {
+     "all/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": null,
+      "line": null
+     },
+     "all/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": null,
+      "line": "nothing here matches."
+     },
+     "phone/none": {
+      "count": "1 model",
+      "control": "show only",
+      "ready": [
+       "gemma 4 e2b"
+      ],
+      "refused": [],
+      "recents": [],
+      "get": null,
+      "line": null
+     },
+     "phone/images": {
+      "count": "0 of 1",
+      "control": "reads images",
+      "ready": [],
+      "refused": [],
+      "recents": [],
+      "get": null,
+      "line": "no model on this phone reads images yet."
+     }
+    }
+   }
+  },
+  {
+   "name": "first-run",
+   "note": "No setups yet: the first-run sheet, no filter row (and + is never muted with no model).",
+   "imagesOnDevice": false,
+   "models": [],
+   "recents": [],
+   "downloads": [
+    {
+     "id": "gemma-4-e2b",
+     "readsImages": false
+    },
+    {
+     "id": "gemma-4-e4b",
+     "readsImages": false
+    }
+   ],
+   "homes": [],
+   "presets": {},
+   "imageNeedMB": {
+    "gemma-4-e2b": 2980,
+    "gemma-4-e4b": 4900
+   },
+   "phoneCeilingMB": 6000,
+   "expect": {
+    "filterRow": false
+   }
+  }
+ ],
+ "phoneImages": {
+  "rule": "the maintainer, 2026-11-12: dynamic, not a phone list. Each phone model carries one measured figure, the memory an image turn needs (imageNeedMB). This phone's ceiling = the most memory the app could ever have (iOS: os_proc_available_memory() + the app's phys_footprint, read at launch; Android: android's to define from the memory class / totalMem). In the where sheet a phone model reads images when need <= ceiling; otherwise, with images on phone models on in this build, it is listed under 'reads images' with the permanent caption, not counted, and its download is not offered. At the image turn: available now (iOS os_proc_available_memory, Android availMem) >= need: run; short: the 'now' refusal with numbers. If the OS kills the turn anyway, remember it for that model on this phone, refuse next time with the permanent line and offer the smaller model; never auto-retry.",
+  "imageNeedMB": {
+   "gemma-4-e2b": {
+    "ios": 2980,
+    "android": {
+     "npu": 2500,
+     "gpu": 3700,
+     "cpu": 2100
+    }
+   },
+   "gemma-4-e4b": {
+    "ios": 3510,
+    "android": {
+     "gpu": 5000,
+     "cpu": 2100
+    },
+    "note": "iOS measured 2026-11-12 on the iPhone 16 Pro (OnDeviceImageProbeTests): worst point is e4b-text-1, a text turn then a photo, peak phys_footprint 2221 MB, free memory down 2105 MB; no transient at 50 ms sampling. 3510 = 2221 x E2B's guard-to-peak margin (2980/1887). Android: per image path (Android 646e7c7f: NPU bundle on Snapdragon 8 Elite / Tensor G5, else GPU on Tensor / Snapdragon 8-series, else CPU), the worst availMem drop across 1/4/10-picture turns on the 2026-11-12 device pass (teemoon-android docs/bench/2026-11-12-images, 161ec098; the maintainer's D: measured costs, not a guess). The scenarios use 4900 as a placeholder."
+   }
+  },
+  "imageNeedMBNote": "Android figures are per image path: {npu, gpu, cpu}; a path a model has no bundle for is absent. iOS has one path (one figure).",
+  "refusals": {
+   "permanent": {
+    "text": "this phone doesn't have enough memory for images with <model>.",
+    "caption": "this phone doesn't have enough memory for images with <model>.",
+    "buttons": [
+     "use <smaller model>",
+     "ok"
+    ],
+    "note": "'use <smaller model>' only when a smaller phone model fits this phone (switch, or start its download)."
+   },
+   "now": {
+    "text": "<model> needs about <N> GB free for images; this phone has <M> GB free right now. close some apps and try again.",
+    "buttons": [
+     "ok"
+    ],
+    "numbers": "N and M in GB to one decimal on both platforms"
+   },
+   "killed": {
+    "text": "this phone doesn't have enough memory for images with <model>.",
+    "note": "after the OS killed an image turn on this model on this phone; offer the smaller model; never auto-retry"
+   }
+  },
+  "drafts": "every string is a DRAFT for the maintainer",
+  "turnOrder": "At the image turn, in this order: (1) ceiling < need → permanent, always, even when free memory is also short (never 'close some apps' on a phone that can never fit it); (2) available now < need → now; (3) run. A model remembered as killed on this phone → permanent before any of these.",
+  "ceiling": {
+   "ios": "os_proc_available_memory() + the app's phys_footprint, read at launch",
+   "android": "max(totalMem - systemReserveMB, the highest availMem this app has seen on this phone, persisted; it only ever raises the ceiling), systemReserveMB = 3000, the MEASURED MINIMUM of the 2026-11-12 kill-all pass (moto g54 2987, A25 3013, S26U 3380, S25U 3589, Pixel 7 Pro 3872, Pixel 10 5201, Pixel 9 Pro 5422), not the maximum: the maximum makes every 6 GB phone falsely permanent, while over-promising costs only a recoverable 'now' line at send. Android 2026-11-12; Test Lab 2026-10-30: 6a ceiling 2580, 8a 4558, 10 Pro 11798, a ~3600 MB phone 600."
+  },
+  "turnCases": [
+   {
+    "name": "fits now",
+    "needMB": 2980,
+    "ceilingMB": 6000,
+    "availableMB": 4500,
+    "expect": "run"
+   },
+   {
+    "name": "fits the phone, short now",
+    "needMB": 2980,
+    "ceilingMB": 6000,
+    "availableMB": 2000,
+    "expect": "now"
+   },
+   {
+    "name": "never fits, free is plenty for something else",
+    "needMB": 4900,
+    "ceilingMB": 3500,
+    "availableMB": 3400,
+    "expect": "permanent"
+   },
+   {
+    "name": "never fits AND short now: permanent, not close some apps",
+    "needMB": 4900,
+    "ceilingMB": 3500,
+    "availableMB": 1200,
+    "expect": "permanent"
+   },
+   {
+    "name": "exactly the need",
+    "needMB": 2980,
+    "ceilingMB": 2980,
+    "availableMB": 2980,
+    "expect": "run"
+   },
+   {
+    "name": "killed before on this phone",
+    "needMB": 4900,
+    "ceilingMB": 6000,
+    "availableMB": 5500,
+    "killedBefore": true,
+    "expect": "permanent"
+   }
+  ],
+  "gb": {
+   "rule": "GB = MB / 1024, one decimal, rounded half up; the 'now' line's N and M",
+   "cases": [
+    {
+     "mb": 2980,
+     "gb": "2.9"
+    },
+    {
+     "mb": 3510,
+     "gb": "3.4"
+    },
+    {
+     "mb": 2000,
+     "gb": "2.0"
+    },
+    {
+     "mb": 1200,
+     "gb": "1.2"
+    },
+    {
+     "mb": 512,
+     "gb": "0.5"
+    }
+   ]
+  },
+  "history": {
+   "rule": "An on-device request carries the chat's earlier images like a cloud one: newest first after the current message's, up to the model's per-request number (iOS E2B 10, E4B 4); the rest become '[image earlier in this chat]'. Any image in the request (current or earlier) bypasses conversation reuse; nothing is kept after it.",
+   "cases": [
+    {
+     "name": "photo, photo, then a text question",
+     "turns": [
+      {
+       "images": 1
+      },
+      {
+       "images": 1
+      },
+      {
+       "images": 0
+      }
+     ],
+     "maxImages": 10,
+     "expectSentOnLastTurn": 2,
+     "expectLines": 0,
+     "expectReuse": false
+    },
+    {
+     "name": "text only",
+     "turns": [
+      {
+       "images": 0
+      },
+      {
+       "images": 0
+      },
+      {
+       "images": 0
+      }
+     ],
+     "maxImages": 10,
+     "expectSentOnLastTurn": 0,
+     "expectLines": 0,
+     "expectReuse": true
+    },
+    {
+     "name": "five photos to E4B, then two more",
+     "turns": [
+      {
+       "images": 3
+      },
+      {
+       "images": 2
+      },
+      {
+       "images": 2
+      }
+     ],
+     "maxImages": 4,
+     "expectSentOnLastTurn": 4,
+     "expectLines": 3,
+     "expectReuse": false
+    }
+   ]
+  }
+ }
+}

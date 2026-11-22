@@ -179,7 +179,7 @@ enum ProductE2E {
     static func confirmSendIfAsked(_ app: XCUIApplication) {
         let alert = app.alerts.firstMatch
         guard alert.waitForExistence(timeout: 3) else { return }
-        for title in ["send unencrypted", "send anyway (still encrypted)", "send anyway"] {
+        for title in ["send without encryption", "send anyway (still encrypted)", "send anyway"] {
             let button = alert.buttons[title]
             if button.exists { button.tap(); return }
         }

@@ -95,6 +95,8 @@ teemoon/Providers/LocalModelCatalog.swift: #if DEBUG
 teemoon/Providers/LocalModelCatalog.swift: if let override = ProcessInfo.processInfo.environment["UITEST_HUB_BASE_URL"],
 teemoon/Settings/AppSettings.swift: #if DEBUG
 teemoon/Support/MainThreadHangReporter.swift: #if DEBUG
+teemoon/Views/Chat/ChatView.swift: #if os(iOS) && DEBUG
+teemoon/Views/Chat/ChatView.swift: .task { if DesignTour.raisesSendAsk { showE2EEDegradedAlert = true } }
 teemoon/Views/Chat/ConversationView.swift: #if DEBUG
 teemoon/Views/Chat/ConversationView.swift: #if DEBUG
 teemoon/Views/Chat/ConversationView.swift: #if DEBUG
@@ -128,12 +130,16 @@ teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
 teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
 teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG
 teemoon/Views/Chat/TranscriptCollectionView.swift: #if DEBUG && (os(iOS) || os(visionOS))
+teemoon/Views/Chat/TrustLadderView.swift: #if os(iOS) && DEBUG
 teemoon/Views/Chat/TrustLadderView.swift: _rung = State(initialValue: initialRung ?? DesignTour.initialRung ?? .everyday)
+teemoon/Views/Chat/TrustLadderView.swift: #if os(iOS) && DEBUG
 teemoon/Views/Chat/TrustLadderView.swift: let target = DesignTour.scrollTarget ?? initialScroll ?? (DesignTour.scrollToBottom ? "known code" : nil)
+teemoon/Views/Chat/VerificationRunView.swift: #if os(iOS) && DEBUG
 teemoon/Views/Chat/VerificationRunView.swift: guard DesignTour.scrollToBottom else { return }
+teemoon/Views/Chat/VerificationRunView.swift: #if os(iOS) && DEBUG
 teemoon/Views/Chat/VerificationRunView.swift: @State private var isExpanded = DesignTour.expandAll
+teemoon/Views/DesignTour.swift: #if os(iOS) && DEBUG
 teemoon/Views/DesignTour.swift: enum DesignTour: String {
-teemoon/Views/DesignTour.swift: #if DEBUG
 teemoon/Views/DesignTour.swift: static let current: DesignTour? = {
 teemoon/Views/DesignTour.swift: guard let i = args.firstIndex(of: "-DesignTour"),
 teemoon/Views/DesignTour.swift: return DesignTour(rawValue: args[i + 1])
@@ -141,6 +147,4 @@ teemoon/Views/DesignTour.swift: static let expandAll = ProcessInfo.processInfo.a
 teemoon/Views/DesignTour.swift: static let scrollToBottom = ProcessInfo.processInfo.arguments.contains("-DesignTourBottom")
 teemoon/Views/DesignTour.swift: guard let i = args.firstIndex(of: "-DesignTourScrollTo"),
 teemoon/Views/DesignTour.swift: guard let i = args.firstIndex(of: "-DesignTourRung"),
-teemoon/Views/DesignTour.swift: static let current: DesignTour? = nil
-teemoon/Views/DesignTour.swift: #if DEBUG
 teemoon/Views/Settings/DownloadingModelRow.swift: #if DEBUG

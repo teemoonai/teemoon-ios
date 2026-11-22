@@ -130,6 +130,27 @@ struct StripTextToolCallsTests {
         let result = SSEStreamParser.stripTextToolCalls(from: content)
         #expect(result == content)
     }
+
+    /// A stray close before the first open made the removal range run backwards (a trap on every text tool-call
+    /// round, HTTPTransport). The close is searched after the open; a stray close stays as text.
+    @Test func aStrayCloseBeforeTheOpenIsLeftAsText() {
+        let content = "a </tool_call> b <tool_call>{\"name\": \"x\"}</tool_call> c"
+        #expect(SSEStreamParser.stripTextToolCalls(from: content) == "a </tool_call> b  c")
+    }
+
+    @Test func aStrayCloseWithNoOpenIsLeftAsText() {
+        #expect(SSEStreamParser.stripTextToolCalls(from: "</tool_call> tail") == "</tool_call> tail")
+    }
+
+    @Test func anOpenAfterTheLastCloseIsLeftAlone() {
+        let content = "x <tool_call>a</tool_call> y </tool_call> z <tool_call>unclosed"
+        #expect(SSEStreamParser.stripTextToolCalls(from: content) == "x  y </tool_call> z <tool_call>unclosed")
+    }
+
+    @Test func nestedOpensEndAtTheFirstCloseAfterThem() {
+        let content = "<tool_call>a<tool_call>b</tool_call>c</tool_call>d"
+        #expect(SSEStreamParser.stripTextToolCalls(from: content) == "c</tool_call>d")
+    }
 }
 
 // MARK: - SSE forwarding / suppression tests

@@ -349,6 +349,7 @@ struct ProvenanceManifestParsingTests {
     /// repo (verified against GitHub's API).
     @Test func launcherImage_queriesComposeManagerRepo() {
         #expect(ProvenanceService.githubRepo(forImage: "nearaidev/compose-manager-launcher") == "nearai/compose-manager")
+        #expect(ProvenanceService.githubRepo(forImage: "nearaidev/compose-manager-otelcol") == "nearai/compose-manager")
         #expect(ProvenanceService.githubRepo(forImage: "nearaidev/cloud-api") == "nearai/cloud-api")
     }
 }
@@ -861,5 +862,74 @@ private final class ModelLayerStub: URLProtocol {
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         if raw { client?.urlProtocol(self, didLoad: Data(ModelLayerParseOffMainTests.yaml.utf8)) }
         client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+// MARK: - Every alias row resolves to a real attestation
+
+/// GitHub as the app sees it: each aliased repo serves its saved bundle for one digest; every other URL is a clean 404.
+private final class AliasedRepoStub: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var asked: [String] = []
+    nonisolated(unsafe) static var routes: [String: Data] = [:]
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "api.github.com" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        Self.asked.append(path)
+        let body = Self.routes[path]
+        let response = HTTPURLResponse(url: request.url!, statusCode: body == nil ? 404 : 200,
+                                       httpVersion: "HTTP/1.1", headerFields: ["X-RateLimit-Remaining": "40"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body ?? Data("{\"message\":\"Not Found\"}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Audit C5 (1.1.1): `nearaidev/compose-manager-otelcol` read "GitHub 404" because its attestations live on
+/// nearai/compose-manager. Fixtures are GitHub's keyless repo-level answers, fetched 2026-11-22.
+@Suite("ProvenanceService repo aliases", .serialized)
+struct ProvenanceRepoAliasTests {
+    struct Row: Sendable, CustomTestStringConvertible {
+        let name, digest, repo: String
+        var testDescription: String { name }
+    }
+
+    /// One row per `ProvenanceService.repoAliases` entry; digests are ones near.ai's fleet ran.
+    static let rows: [Row] = [
+        Row(name: "compose-manager-otelcol",
+            digest: "ac9b349081fc86413c2e25b44558daa14e8b33669f9e50fc0fec92dc77ce768a", repo: "nearai/compose-manager"),
+        Row(name: "compose-manager-launcher",
+            digest: "69055bd12da3d2f065768a8551e73750f095662212beb4190f3c16859cd7dd9b", repo: "nearai/compose-manager"),
+        Row(name: "vllm-proxy-rs",
+            digest: "b183677a5d32267539b9b21ec45327a4f3be0a013afeb608c68c4d76e9472e36", repo: "nearai/inference-proxy"),
+    ]
+
+    @Test func everyAliasRowHasAFixtureRow() {
+        #expect(Dictionary(uniqueKeysWithValues: Self.rows.map { ($0.name, String($0.repo.dropFirst("nearai/".count))) })
+                == ProvenanceService.repoAliases)
+    }
+
+    @Test(arguments: rows)
+    func theAliasedRepoIsAskedAndItsAttestationVerifies(_ row: Row) async throws {
+        let path = "/repos/\(row.repo)/attestations/sha256:\(row.digest)"
+        AliasedRepoStub.asked = []
+        AliasedRepoStub.routes = [path: try TestFixture.data("github_attestation_\(row.name).json", file: #filePath)]
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AliasedRepoStub.self]
+        let suite = "alias-\(UUID().uuidString)"
+        let service = ProvenanceService(session: URLSession(configuration: config), defaults: UserDefaults(suiteName: suite)!)
+
+        let outcome = await service.verify(.init(image: "docker.io/nearaidev/\(row.name)", digest: row.digest))
+
+        #expect(AliasedRepoStub.asked.first == path, "asked \(AliasedRepoStub.asked)")
+        guard case .verified(let repo, let identity, _, _, let tlog) = outcome else {
+            Issue.record("expected .verified for \(row.name), got \(outcome)")
+            return
+        }
+        #expect(repo == "https://github.com/\(row.repo)")
+        #expect(identity.hasPrefix("https://github.com/\(row.repo)/.github/workflows/"))
+        #expect(tlog)
     }
 }

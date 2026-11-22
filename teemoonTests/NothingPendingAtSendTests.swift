@@ -103,7 +103,7 @@ import Testing
         }
 
         func sendAnyway() {
-            vm.sendAnyway(currentThread: &thread, modelContext: container.mainContext, settings: AppSettings(),
+            vm.sendAnyway(answering: .verification, currentThread: &thread, modelContext: container.mainContext, settings: AppSettings(),
                           providers: store, session: session, llm: llm)
         }
 

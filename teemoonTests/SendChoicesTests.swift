@@ -6,7 +6,7 @@
 //  in an action sheet, not an alert). Same order on both platforms, the way out last; a hard break never offers send.
 //  2026-10-30 (the maintainer, via pm): on iOS 26.5 the E2EE sheet is a popover from the title and iOS hid its role-.cancel
 //  button, leaving an unlabelled tap outside as the only safe exit. It now ends in a plain "don't send" that keeps
-//  the draft, "send unencrypted" is red, and the soft-degrade body is the maintainer's text, exact.
+//  the draft, "send without encryption" is red, and the soft-degrade body is the maintainer's text, exact.
 //
 
 import Testing
@@ -16,7 +16,7 @@ import Testing
 struct SendChoicesTests {
     @Test func theE2EEQuestionKeepsItsOrderAndNeverOffersSendOnAHardBreak() {
         #expect(E2EESendChoice.choices(hardFailure: false, provenanceOnly: false).map(\.label)
-                == ["retry verification", "send unencrypted", "don't send"])
+                == ["retry verification", "send without encryption", "don't send"])
         #expect(E2EESendChoice.choices(hardFailure: false, provenanceOnly: true).map(\.label)
                 == ["retry verification", "send anyway (still encrypted)", "don't send"])
         #expect(E2EESendChoice.choices(hardFailure: true, provenanceOnly: true).map(\.label)
@@ -31,7 +31,7 @@ struct SendChoicesTests {
 
     @Test func theE2EEQuestionSaysNothingWasSent() {
         #expect(E2EESendChoice.message(hardFailure: false, provenanceOnly: false, cause: "couldn't reach the attestation server.")
-                == "teemoon couldn't seal this message so only the model can read it. nothing has been sent.")
+                == "teemoon couldn't seal this message to the model's enclave key. nothing has been sent.")
         #expect(E2EESendChoice.message(hardFailure: true, provenanceOnly: false, cause: "the hardware quote failed intel dcap verification.")
                 .hasPrefix("the hardware quote failed intel dcap verification. sending is blocked"))
         #expect(E2EESendChoice.message(hardFailure: false, provenanceOnly: true, cause: nil)
